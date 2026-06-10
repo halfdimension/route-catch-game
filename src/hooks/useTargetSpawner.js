@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 const SPAWN_INTERVAL_MS = 5000
 const EARTH_RADIUS_METERS = 6371000
@@ -114,6 +114,12 @@ export function useTargetSpawner(playerPosition) {
   const [targets, setTargets] = useState([])
   const playerPositionRef = useRef(playerPosition)
 
+  const removeTarget = useCallback((targetId) => {
+    setTargets((currentTargets) =>
+      currentTargets.filter((target) => target.id !== targetId),
+    )
+  }, [])
+
   useEffect(() => {
     playerPositionRef.current = playerPosition
   }, [playerPosition])
@@ -141,5 +147,6 @@ export function useTargetSpawner(playerPosition) {
 
   return {
     targets,
+    removeTarget,
   }
 }

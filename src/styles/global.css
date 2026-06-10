@@ -162,6 +162,50 @@ button:focus-visible {
   font-size: 13px;
 }
 
+.score-panel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1000;
+  width: min(180px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid rgba(23, 32, 51, 0.15);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
+}
+
+.score-panel p {
+  margin: 0 0 4px;
+  color: #172033;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.score-panel strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #172033;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.score-panel span {
+  display: block;
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.caught-notice {
+  margin-top: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  color: #14532d;
+  background: #dcfce7;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .target-info-panel {
   position: absolute;
   top: 82px;
