@@ -310,3 +310,14 @@ button:focus-visible {
   font-size: 12px;
   text-transform: capitalize;
 }
+
+.road-snapped-label {
+  width: fit-content;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}

@@ -27,3 +27,31 @@ export async function fetchRoute(source, destination) {
 
   return polyline.decode(route.geometry, 6)
 }
+
+export async function fetchNearestRoadPoint(point) {
+  const url = new URL(
+    `/nearest/v1/driving/${point.lon},${point.lat}`,
+    OSRM_BASE_URL,
+  )
+
+  url.searchParams.set('number', '1')
+
+  const response = await fetch(url)
+
+  if (!response.ok) {
+    throw new Error(`OSRM nearest request failed with status ${response.status}`)
+  }
+
+  const data = await response.json()
+  console.debug('OSRM nearest response:', data)
+  const location = data.waypoints?.[0]?.location
+
+  if (!location) {
+    throw new Error('OSRM did not return a nearest road point')
+  }
+
+  return {
+    lat: location[1],
+    lon: location[0],
+  }
+}

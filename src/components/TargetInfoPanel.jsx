@@ -16,6 +16,9 @@ function TargetInfoPanel({ targets }) {
               <span>
                 {target.rarity} · {getRemainingSeconds(target)}s
               </span>
+              {target.snappedToRoad && (
+                <em className="road-snapped-label">road-snapped</em>
+              )}
             </li>
           ))}
         </ul>

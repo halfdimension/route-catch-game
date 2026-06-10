@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { fetchNearestRoadPoint } from '../api/osrmClient'
 
 const SPAWN_INTERVAL_MS = 5000
 const EARTH_RADIUS_METERS = 6371000
@@ -83,7 +84,7 @@ function getPointAtDistance(origin, distanceMeters, bearingRadians) {
   }
 }
 
-function createTarget(playerPosition) {
+async function createTarget(playerPosition) {
   const rarity = getRandomRarity()
   const rules = TARGET_RULES[rarity]
   const distanceMeters = getRandomBetween(
@@ -91,23 +92,45 @@ function createTarget(playerPosition) {
     rules.maxDistanceMeters,
   )
   const bearingRadians = getRandomBetween(0, Math.PI * 2)
-  const position = getPointAtDistance(
+  const rawPosition = getPointAtDistance(
     playerPosition,
     distanceMeters,
     bearingRadians,
   )
-  const now = Date.now()
+  let spawnPosition = rawPosition
+  let snappedToRoad = false
 
-  return {
+  console.debug('Raw target point generated:', {
+    rarity,
+    rawPosition,
+    distanceMeters,
+  })
+
+  try {
+    spawnPosition = await fetchNearestRoadPoint(rawPosition)
+    snappedToRoad = true
+  } catch (error) {
+    console.debug('Nearest road lookup failed; using raw target point:', error)
+  }
+
+  const now = Date.now()
+  const target = {
     id: crypto.randomUUID(),
-    lat: position.lat,
-    lon: position.lon,
+    lat: spawnPosition.lat,
+    lon: spawnPosition.lon,
+    rawLat: rawPosition.lat,
+    rawLon: rawPosition.lon,
+    snappedToRoad,
     name: getRandomName(rarity),
     rarity,
     score: rules.score,
     expiresAt: now + rules.lifetimeMs,
     lifetimeMs: rules.lifetimeMs,
   }
+
+  console.debug('Final target object:', target)
+
+  return target
 }
 
 export function useTargetSpawner(playerPosition) {
@@ -115,6 +138,7 @@ export function useTargetSpawner(playerPosition) {
   const [isSpawningPaused, setIsSpawningPaused] = useState(false)
   const playerPositionRef = useRef(playerPosition)
   const isSpawningPausedRef = useRef(isSpawningPaused)
+  const isMountedRef = useRef(true)
 
   const removeTarget = useCallback((targetId) => {
     setTargets((currentTargets) =>
@@ -139,15 +163,35 @@ export function useTargetSpawner(playerPosition) {
   }, [isSpawningPaused])
 
   useEffect(() => {
+    isMountedRef.current = true
+
     const spawnTimerId = setInterval(() => {
+      console.debug('Target spawn tick:', {
+        isSpawningPaused: isSpawningPausedRef.current,
+      })
+
       if (isSpawningPausedRef.current) {
         return
       }
 
-      setTargets((currentTargets) => [
-        ...currentTargets,
-        createTarget(playerPositionRef.current),
-      ])
+      createTarget(playerPositionRef.current)
+        .then((target) => {
+          if (!isMountedRef.current || isSpawningPausedRef.current) {
+            return
+          }
+
+          setTargets((currentTargets) => {
+            const nextTargets = [...currentTargets, target]
+            console.debug('Target added to state:', {
+              target,
+              activeTargetCount: nextTargets.length,
+            })
+            return nextTargets
+          })
+        })
+        .catch((error) => {
+          console.debug('Target spawn failed before state update:', error)
+        })
     }, SPAWN_INTERVAL_MS)
 
     const expiryTimerId = setInterval(() => {
@@ -158,6 +202,7 @@ export function useTargetSpawner(playerPosition) {
     }, 1000)
 
     return () => {
+      isMountedRef.current = false
       clearInterval(spawnTimerId)
       clearInterval(expiryTimerId)
     }
