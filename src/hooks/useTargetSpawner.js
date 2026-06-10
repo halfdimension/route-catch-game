@@ -100,21 +100,15 @@ async function createTarget(playerPosition) {
   let spawnPosition = rawPosition
   let snappedToRoad = false
 
-  console.debug('Raw target point generated:', {
-    rarity,
-    rawPosition,
-    distanceMeters,
-  })
-
   try {
     spawnPosition = await fetchNearestRoadPoint(rawPosition)
     snappedToRoad = true
   } catch (error) {
-    console.debug('Nearest road lookup failed; using raw target point:', error)
+    console.warn('Nearest road lookup failed; using raw target point:', error)
   }
 
   const now = Date.now()
-  const target = {
+  return {
     id: crypto.randomUUID(),
     lat: spawnPosition.lat,
     lon: spawnPosition.lon,
@@ -127,10 +121,6 @@ async function createTarget(playerPosition) {
     expiresAt: now + rules.lifetimeMs,
     lifetimeMs: rules.lifetimeMs,
   }
-
-  console.debug('Final target object:', target)
-
-  return target
 }
 
 export function useTargetSpawner(playerPosition) {
@@ -166,10 +156,6 @@ export function useTargetSpawner(playerPosition) {
     isMountedRef.current = true
 
     const spawnTimerId = setInterval(() => {
-      console.debug('Target spawn tick:', {
-        isSpawningPaused: isSpawningPausedRef.current,
-      })
-
       if (isSpawningPausedRef.current) {
         return
       }
@@ -182,15 +168,11 @@ export function useTargetSpawner(playerPosition) {
 
           setTargets((currentTargets) => {
             const nextTargets = [...currentTargets, target]
-            console.debug('Target added to state:', {
-              target,
-              activeTargetCount: nextTargets.length,
-            })
             return nextTargets
           })
         })
         .catch((error) => {
-          console.debug('Target spawn failed before state update:', error)
+          console.warn('Target spawn failed before state update:', error)
         })
     }, SPAWN_INTERVAL_MS)
 

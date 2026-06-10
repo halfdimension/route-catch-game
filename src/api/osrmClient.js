@@ -43,7 +43,6 @@ export async function fetchNearestRoadPoint(point) {
   }
 
   const data = await response.json()
-  console.debug('OSRM nearest response:', data)
   const location = data.waypoints?.[0]?.location
 
   if (!location) {
