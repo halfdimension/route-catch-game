@@ -31,8 +31,8 @@ export function usePlayerState() {
     setRouteError('')
   }
 
-  async function confirmPendingMove() {
-    if (!pendingDestination) {
+  async function moveToDestination(destination) {
+    if (!destination) {
       return
     }
 
@@ -41,19 +41,25 @@ export function usePlayerState() {
     cancelAnimation()
 
     try {
-      const nextRouteCoordinates = await fetchRoute(
-        playerPosition,
-        pendingDestination,
-      )
+      const nextRouteCoordinates = await fetchRoute(playerPosition, destination)
 
       setRouteCoordinates(nextRouteCoordinates)
-      clearPendingDestination()
       startAnimation(nextRouteCoordinates)
+      return true
     } catch (error) {
       console.error('Route fetch failed:', error)
       setRouteError('Could not fetch route. Is OSRM running on localhost:5000?')
+      return false
     } finally {
       setIsRouteLoading(false)
+    }
+  }
+
+  async function confirmPendingMove() {
+    const didStartMoving = await moveToDestination(pendingDestination)
+
+    if (didStartMoving) {
+      clearPendingDestination()
     }
   }
 
@@ -68,5 +74,6 @@ export function usePlayerState() {
     setPendingDestination: handlePendingDestinationChange,
     clearPendingDestination,
     confirmPendingMove,
+    moveToDestination,
   }
 }

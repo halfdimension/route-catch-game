@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import GameMap from './components/GameMap'
 import MovementStatusPanel from './components/MovementStatusPanel'
 import MoveConfirmPanel from './components/MoveConfirmPanel'
+import TargetConfirmPanel from './components/TargetConfirmPanel'
 import TargetInfoPanel from './components/TargetInfoPanel'
 import { usePlayerState } from './hooks/usePlayerState'
 import { useTargetSpawner } from './hooks/useTargetSpawner'
@@ -17,11 +19,37 @@ function App() {
     setPendingDestination,
     clearPendingDestination,
     confirmPendingMove,
+    moveToDestination,
   } = usePlayerState()
   const { targets } = useTargetSpawner(playerPosition)
+  const [pendingTarget, setPendingTarget] = useState(null)
+  const activePendingTarget = pendingTarget
+    ? targets.find((target) => target.id === pendingTarget.id)
+    : null
+
+  function handleMapClick(destination) {
+    setPendingTarget(null)
+    setPendingDestination(destination)
+  }
 
   function handleTargetClick(target) {
-    console.log('Target clicked:', target)
+    clearPendingDestination()
+    setPendingTarget(target)
+  }
+
+  async function confirmPendingTargetMove() {
+    if (!activePendingTarget) {
+      return
+    }
+
+    const didStartMoving = await moveToDestination({
+      lat: activePendingTarget.lat,
+      lon: activePendingTarget.lon,
+    })
+
+    if (didStartMoving) {
+      setPendingTarget(null)
+    }
   }
 
   return (
@@ -31,7 +59,7 @@ function App() {
         pendingDestination={pendingDestination}
         routeCoordinates={routeCoordinates}
         targets={targets}
-        onMapClick={setPendingDestination}
+        onMapClick={handleMapClick}
         onTargetClick={handleTargetClick}
       />
 
@@ -48,6 +76,15 @@ function App() {
           destination={pendingDestination}
           onConfirm={confirmPendingMove}
           onCancel={clearPendingDestination}
+          isLoading={isRouteLoading}
+        />
+      )}
+
+      {activePendingTarget && (
+        <TargetConfirmPanel
+          target={activePendingTarget}
+          onConfirm={confirmPendingTargetMove}
+          onCancel={() => setPendingTarget(null)}
           isLoading={isRouteLoading}
         />
       )}
