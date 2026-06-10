@@ -28,6 +28,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 button:hover {
   background: #f3f6f8;
 }
@@ -92,4 +97,24 @@ button:focus-visible {
 
 .primary-button:hover {
   background: #1d4ed8;
+}
+
+.route-status {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 14px;
+  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
+  transform: translateX(-50%);
+}
+
+.route-error {
+  border: 1px solid rgba(185, 28, 28, 0.28);
+  color: #7f1d1d;
+  background: rgba(254, 242, 242, 0.96);
 }

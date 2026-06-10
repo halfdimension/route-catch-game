@@ -4,6 +4,7 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import PlayerMarker from './PlayerMarker'
+import RouteLine from './RouteLine'
 
 const DELHI_CENTER = [28.6139, 77.209]
 const DEFAULT_ZOOM = 12
@@ -27,7 +28,12 @@ function MapClickHandler({ onMapClick }) {
   return null
 }
 
-function GameMap({ playerPosition, pendingDestination, onMapClick }) {
+function GameMap({
+  playerPosition,
+  pendingDestination,
+  routeCoordinates,
+  onMapClick,
+}) {
   return (
     <MapContainer
       center={DELHI_CENTER}
@@ -41,6 +47,7 @@ function GameMap({ playerPosition, pendingDestination, onMapClick }) {
       />
 
       <MapClickHandler onMapClick={onMapClick} />
+      <RouteLine coordinates={routeCoordinates} />
       <PlayerMarker position={playerPosition} />
 
       {pendingDestination && (
