@@ -112,7 +112,9 @@ function createTarget(playerPosition) {
 
 export function useTargetSpawner(playerPosition) {
   const [targets, setTargets] = useState([])
+  const [isSpawningPaused, setIsSpawningPaused] = useState(false)
   const playerPositionRef = useRef(playerPosition)
+  const isSpawningPausedRef = useRef(isSpawningPaused)
 
   const removeTarget = useCallback((targetId) => {
     setTargets((currentTargets) =>
@@ -120,12 +122,28 @@ export function useTargetSpawner(playerPosition) {
     )
   }, [])
 
+  const clearTargets = useCallback(() => {
+    setTargets([])
+  }, [])
+
+  const toggleSpawning = useCallback(() => {
+    setIsSpawningPaused((currentValue) => !currentValue)
+  }, [])
+
   useEffect(() => {
     playerPositionRef.current = playerPosition
   }, [playerPosition])
 
   useEffect(() => {
+    isSpawningPausedRef.current = isSpawningPaused
+  }, [isSpawningPaused])
+
+  useEffect(() => {
     const spawnTimerId = setInterval(() => {
+      if (isSpawningPausedRef.current) {
+        return
+      }
+
       setTargets((currentTargets) => [
         ...currentTargets,
         createTarget(playerPositionRef.current),
@@ -147,6 +165,9 @@ export function useTargetSpawner(playerPosition) {
 
   return {
     targets,
+    isSpawningPaused,
     removeTarget,
+    clearTargets,
+    toggleSpawning,
   }
 }

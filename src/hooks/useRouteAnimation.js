@@ -59,10 +59,15 @@ export function useRouteAnimation({
   const frameIdRef = useRef(null)
   const animationRef = useRef(null)
   const onPositionChangeRef = useRef(onPositionChange)
+  const speedMetersPerSecondRef = useRef(speedMetersPerSecond)
 
   useEffect(() => {
     onPositionChangeRef.current = onPositionChange
   }, [onPositionChange])
+
+  useEffect(() => {
+    speedMetersPerSecondRef.current = speedMetersPerSecond
+  }, [speedMetersPerSecond])
 
   const cancelAnimation = useCallback(() => {
     if (frameIdRef.current) {
@@ -102,7 +107,8 @@ export function useRouteAnimation({
       }
 
       animationRef.current = {
-        startedAt: performance.now(),
+        lastTimestamp: performance.now(),
+        distanceTraveled: 0,
         segments,
         totalDistance,
         finalPosition,
@@ -117,8 +123,12 @@ export function useRouteAnimation({
           return
         }
 
-        const elapsedSeconds = (now - animation.startedAt) / 1000
-        let remainingDistance = elapsedSeconds * speedMetersPerSecond
+        const elapsedSeconds = (now - animation.lastTimestamp) / 1000
+        animation.lastTimestamp = now
+        animation.distanceTraveled +=
+          elapsedSeconds * speedMetersPerSecondRef.current
+
+        let remainingDistance = animation.distanceTraveled
 
         if (remainingDistance >= animation.totalDistance) {
           onPositionChangeRef.current(animation.finalPosition)
@@ -147,7 +157,7 @@ export function useRouteAnimation({
 
       frameIdRef.current = requestAnimationFrame(step)
     },
-    [cancelAnimation, speedMetersPerSecond],
+    [cancelAnimation],
   )
 
   useEffect(() => cancelAnimation, [cancelAnimation])

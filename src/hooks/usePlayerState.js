@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { fetchRoute } from '../api/osrmClient'
 import { useRouteAnimation } from './useRouteAnimation'
 
+const DEFAULT_SIMULATION_SPEED = 80
 const INITIAL_PLAYER_POSITION = {
   lat: 28.550584664849566,
   lon: 77.26885829983426,
@@ -9,16 +10,15 @@ const INITIAL_PLAYER_POSITION = {
 
 export function usePlayerState() {
   const [playerPosition, setPlayerPosition] = useState(INITIAL_PLAYER_POSITION)
+  const [simulationSpeed, setSimulationSpeed] = useState(
+    DEFAULT_SIMULATION_SPEED,
+  )
   const [pendingDestination, setPendingDestination] = useState(null)
   const [routeCoordinates, setRouteCoordinates] = useState([])
   const [isRouteLoading, setIsRouteLoading] = useState(false)
   const [routeError, setRouteError] = useState('')
-  const {
-    isMoving,
-    simulationSpeed,
-    startAnimation,
-    cancelAnimation,
-  } = useRouteAnimation({
+  const { isMoving, startAnimation, cancelAnimation } = useRouteAnimation({
+    speedMetersPerSecond: simulationSpeed,
     onPositionChange: setPlayerPosition,
   })
 
@@ -63,6 +63,15 @@ export function usePlayerState() {
     }
   }
 
+  function resetPlayerState() {
+    cancelAnimation()
+    setPlayerPosition(INITIAL_PLAYER_POSITION)
+    setPendingDestination(null)
+    setRouteCoordinates([])
+    setIsRouteLoading(false)
+    setRouteError('')
+  }
+
   return {
     playerPosition,
     pendingDestination,
@@ -71,9 +80,11 @@ export function usePlayerState() {
     isMoving,
     simulationSpeed,
     routeError,
+    setSimulationSpeed,
     setPendingDestination: handlePendingDestinationChange,
     clearPendingDestination,
     confirmPendingMove,
     moveToDestination,
+    resetPlayerState,
   }
 }

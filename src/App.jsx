@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import GameControlsPanel from './components/GameControlsPanel'
 import GameMap from './components/GameMap'
 import MovementStatusPanel from './components/MovementStatusPanel'
 import MoveConfirmPanel from './components/MoveConfirmPanel'
@@ -18,12 +19,20 @@ function App() {
     isRouteLoading,
     isMoving,
     simulationSpeed,
+    setSimulationSpeed,
     setPendingDestination,
     clearPendingDestination,
     confirmPendingMove,
     moveToDestination,
+    resetPlayerState,
   } = usePlayerState()
-  const { targets, removeTarget } = useTargetSpawner(playerPosition)
+  const {
+    targets,
+    isSpawningPaused,
+    removeTarget,
+    clearTargets,
+    toggleSpawning,
+  } = useTargetSpawner(playerPosition)
   const [pendingTarget, setPendingTarget] = useState(null)
   const [caughtTargets, setCaughtTargets] = useState([])
   const [score, setScore] = useState(0)
@@ -67,6 +76,24 @@ function App() {
 
     return () => clearTimeout(timerId)
   }, [caughtNotice])
+
+  function resetScore() {
+    setCaughtTargets([])
+    setScore(0)
+    setCaughtNotice('')
+  }
+
+  function resetPlayer() {
+    setPendingTarget(null)
+    resetPlayerState()
+  }
+
+  function resetGame() {
+    setPendingTarget(null)
+    resetPlayerState()
+    clearTargets()
+    resetScore()
+  }
 
   function handleMapClick(destination) {
     setPendingTarget(null)
@@ -115,6 +142,16 @@ function App() {
         caughtCount={caughtTargets.length}
         lastCaughtName={lastCaughtTarget?.name}
         caughtNotice={caughtNotice}
+      />
+      <GameControlsPanel
+        isSpawningPaused={isSpawningPaused}
+        simulationSpeed={simulationSpeed}
+        onToggleSpawning={toggleSpawning}
+        onClearTargets={clearTargets}
+        onResetScore={resetScore}
+        onResetPlayer={resetPlayer}
+        onResetGame={resetGame}
+        onSimulationSpeedChange={setSimulationSpeed}
       />
       <TargetInfoPanel targets={targets} />
 
