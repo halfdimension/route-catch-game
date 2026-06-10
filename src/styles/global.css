@@ -118,3 +118,28 @@ button:focus-visible {
   color: #7f1d1d;
   background: rgba(254, 242, 242, 0.96);
 }
+
+.movement-status-panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1000;
+  min-width: 112px;
+  padding: 10px 12px;
+  border: 1px solid rgba(23, 32, 51, 0.15);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
+}
+
+.movement-status-panel p {
+  margin: 0 0 2px;
+  color: #172033;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.movement-status-panel span {
+  color: #4b5563;
+  font-size: 13px;
+}
