@@ -164,11 +164,16 @@ async function createTarget(playerPosition, simulationSpeedMetersPerSecond) {
   }
 }
 
-export function useTargetSpawner(playerPosition, simulationSpeedMetersPerSecond) {
+export function useTargetSpawner(
+  playerPosition,
+  simulationSpeedMetersPerSecond,
+  canSpawnTargets,
+) {
   const [targets, setTargets] = useState([])
   const [isSpawningPaused, setIsSpawningPaused] = useState(false)
   const playerPositionRef = useRef(playerPosition)
   const simulationSpeedRef = useRef(simulationSpeedMetersPerSecond)
+  const canSpawnTargetsRef = useRef(canSpawnTargets)
   const isSpawningPausedRef = useRef(isSpawningPaused)
   const isMountedRef = useRef(true)
 
@@ -195,6 +200,10 @@ export function useTargetSpawner(playerPosition, simulationSpeedMetersPerSecond)
   }, [simulationSpeedMetersPerSecond])
 
   useEffect(() => {
+    canSpawnTargetsRef.current = canSpawnTargets
+  }, [canSpawnTargets])
+
+  useEffect(() => {
     isSpawningPausedRef.current = isSpawningPaused
   }, [isSpawningPaused])
 
@@ -202,13 +211,17 @@ export function useTargetSpawner(playerPosition, simulationSpeedMetersPerSecond)
     isMountedRef.current = true
 
     const spawnTimerId = setInterval(() => {
-      if (isSpawningPausedRef.current) {
+      if (!canSpawnTargetsRef.current || isSpawningPausedRef.current) {
         return
       }
 
       createTarget(playerPositionRef.current, simulationSpeedRef.current)
         .then((target) => {
-          if (!isMountedRef.current || isSpawningPausedRef.current) {
+          if (
+            !isMountedRef.current ||
+            !canSpawnTargetsRef.current ||
+            isSpawningPausedRef.current
+          ) {
             return
           }
 

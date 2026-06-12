@@ -206,6 +206,46 @@ button:focus-visible {
   font-weight: 700;
 }
 
+.game-session-panel {
+  position: absolute;
+  top: 16px;
+  left: 212px;
+  z-index: 1000;
+  width: min(180px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid rgba(23, 32, 51, 0.15);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
+}
+
+.game-session-panel p {
+  margin: 0 0 4px;
+  color: #172033;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.game-session-panel span {
+  display: block;
+  color: #4b5563;
+  font-size: 13px;
+  text-transform: capitalize;
+}
+
+.game-session-panel strong {
+  display: block;
+  margin: 4px 0 8px;
+  color: #172033;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.game-session-panel button {
+  width: 100%;
+  padding: 7px 10px;
+}
+
 .game-controls-panel {
   position: absolute;
   top: 176px;

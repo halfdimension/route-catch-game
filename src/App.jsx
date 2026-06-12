@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import CaughtInventoryPanel from './components/CaughtInventoryPanel'
 import GameControlsPanel from './components/GameControlsPanel'
+import GameSessionPanel from './components/GameSessionPanel'
 import GameMap from './components/GameMap'
 import MovementStatusPanel from './components/MovementStatusPanel'
 import MoveConfirmPanel from './components/MoveConfirmPanel'
@@ -8,6 +9,7 @@ import ScorePanel from './components/ScorePanel'
 import TargetConfirmPanel from './components/TargetConfirmPanel'
 import TargetInfoPanel from './components/TargetInfoPanel'
 import { useCatchDetection } from './hooks/useCatchDetection'
+import { useGameSession } from './hooks/useGameSession'
 import { usePlayerState } from './hooks/usePlayerState'
 import { useTargetSpawner } from './hooks/useTargetSpawner'
 
@@ -26,18 +28,28 @@ function App() {
     confirmPendingMove,
     moveToDestination,
     resetPlayerState,
+    stopPlayerMovement,
   } = usePlayerState()
+  const {
+    gameState,
+    remainingSeconds,
+    startGame,
+    endGame,
+    restartGame: restartGameSession,
+    resetGameSession,
+  } = useGameSession()
   const {
     targets,
     isSpawningPaused,
     removeTarget,
     clearTargets,
     toggleSpawning,
-  } = useTargetSpawner(playerPosition, simulationSpeed)
+  } = useTargetSpawner(playerPosition, simulationSpeed, gameState === 'running')
   const [pendingTarget, setPendingTarget] = useState(null)
   const [caughtTargets, setCaughtTargets] = useState([])
   const [score, setScore] = useState(0)
   const [caughtNotice, setCaughtNotice] = useState('')
+  const previousGameStateRef = useRef(gameState)
   const activePendingTarget = pendingTarget
     ? targets.find((target) => target.id === pendingTarget.id)
     : null
@@ -78,6 +90,19 @@ function App() {
     return () => clearTimeout(timerId)
   }, [caughtNotice])
 
+  useEffect(() => {
+    const previousGameState = previousGameStateRef.current
+    previousGameStateRef.current = gameState
+
+    if (gameState !== 'ended' || previousGameState === 'ended') {
+      return
+    }
+
+    setPendingTarget(null)
+    clearTargets()
+    stopPlayerMovement()
+  }, [clearTargets, gameState, stopPlayerMovement])
+
   function resetScore() {
     setCaughtTargets([])
     setScore(0)
@@ -94,6 +119,15 @@ function App() {
     resetPlayerState()
     clearTargets()
     resetScore()
+    resetGameSession()
+  }
+
+  function restartGame() {
+    setPendingTarget(null)
+    resetPlayerState()
+    clearTargets()
+    resetScore()
+    restartGameSession()
   }
 
   function handleMapClick(destination) {
@@ -143,6 +177,13 @@ function App() {
         caughtCount={caughtTargets.length}
         lastCaughtName={lastCaughtTarget?.name}
         caughtNotice={caughtNotice}
+      />
+      <GameSessionPanel
+        gameState={gameState}
+        remainingSeconds={remainingSeconds}
+        onStartGame={startGame}
+        onEndGame={endGame}
+        onRestartGame={restartGame}
       />
       <GameControlsPanel
         isSpawningPaused={isSpawningPaused}
