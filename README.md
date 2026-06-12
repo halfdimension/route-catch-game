@@ -26,6 +26,50 @@ For a concise technical overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.m
 - OSRM
 - ESLint
 
+## Local Development Runbook
+
+### Recommended Quick Start
+
+Start OSRM, Spring Boot, and Vite together from the project root:
+
+```bash
+./scripts/run-all.sh
+```
+
+The script waits for OSRM and the backend to become reachable before starting the frontend. Press Ctrl+C to stop the managed OSRM and backend processes.
+
+### Manual Debug Mode
+
+Run each service in a separate terminal when you want to inspect OSRM, backend, and frontend logs independently.
+
+Terminal 1:
+
+```bash
+./scripts/run-osrm.sh
+```
+
+Terminal 2:
+
+```bash
+./scripts/run-backend.sh
+```
+
+Terminal 3:
+
+```bash
+./scripts/run-frontend.sh
+```
+
+The frontend script creates `frontend/.env` from `.env.example` when needed and installs dependencies only when `frontend/node_modules` is absent.
+
+Optionally verify OSRM and both backend routing endpoints:
+
+```bash
+./scripts/check-system.sh
+```
+
+Open `http://localhost:5173` after all three services are running.
+
 ## Run the Frontend
 
 ```bash
@@ -117,6 +161,12 @@ backend/
       service/    OSRM integration
 docs/
   ARCHITECTURE.md
+scripts/
+  check-system.sh
+  run-all.sh
+  run-backend.sh
+  run-frontend.sh
+  run-osrm.sh
 ```
 
 ## Roadmap

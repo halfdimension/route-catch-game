@@ -14,6 +14,18 @@ React UI -> osrmClient.js -> Spring Boot API -> OSRM server
 - Spring Boot validates requests, calls OSRM, and returns frontend-friendly coordinate objects.
 - Route animation, target spawning, game sessions, progression, scoring, and catches remain frontend-controlled.
 
+## Local Processes
+
+Local development runs three independent processes:
+
+```text
+Vite frontend     http://localhost:5173
+Spring Boot API   http://localhost:8080
+OSRM server       http://localhost:5000
+```
+
+The Vite browser client sends API requests to Spring Boot. Spring Boot validates and translates those requests before calling OSRM. Root-level scripts can start each process independently for debugging or orchestrate all three processes with `scripts/run-all.sh`.
+
 ## Main Modules
 
 - `frontend/src/components`: Map elements, markers, HUD panels, controls, inventory, feedback, and round summary.
