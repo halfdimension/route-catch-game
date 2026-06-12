@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { DEFAULT_SIMULATION_SPEED } from '../config/gameConfig'
 
-const DEFAULT_SPEED_METERS_PER_SECOND = 80
 const EARTH_RADIUS_METERS = 6371000
 
 function toRadians(degrees) {
@@ -52,7 +52,7 @@ function buildSegments(routeCoordinates) {
 }
 
 export function useRouteAnimation({
-  speedMetersPerSecond = DEFAULT_SPEED_METERS_PER_SECOND,
+  speedMetersPerSecond = DEFAULT_SIMULATION_SPEED,
   onPositionChange,
 }) {
   const [isMoving, setIsMoving] = useState(false)

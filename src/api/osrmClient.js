@@ -1,6 +1,5 @@
 import polyline from '@mapbox/polyline'
-
-const OSRM_BASE_URL = 'http://localhost:5000'
+import { OSRM_BASE_URL } from '../config/routingConfig'
 
 export async function fetchRoute(source, destination) {
   const url = new URL(

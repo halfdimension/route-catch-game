@@ -1,12 +1,11 @@
 import { useCallback, useRef, useState } from 'react'
 import { fetchRoute } from '../api/osrmClient'
+import {
+  DEFAULT_SIMULATION_SPEED,
+  INITIAL_PLAYER_POSITION,
+} from '../config/gameConfig'
+import { OSRM_BASE_URL } from '../config/routingConfig'
 import { useRouteAnimation } from './useRouteAnimation'
-
-const DEFAULT_SIMULATION_SPEED = 80
-const INITIAL_PLAYER_POSITION = {
-  lat: 28.550584664849566,
-  lon: 77.26885829983426,
-}
 
 export function usePlayerState() {
   const [playerPosition, setPlayerPosition] = useState(INITIAL_PLAYER_POSITION)
@@ -64,7 +63,7 @@ export function usePlayerState() {
       }
 
       console.error('Route fetch failed:', error)
-      setRouteError('Could not fetch route. Is OSRM running on localhost:5000?')
+      setRouteError(`Could not fetch route. Is OSRM running at ${OSRM_BASE_URL}?`)
       return false
     } finally {
       if (routeRequestId === routeRequestIdRef.current) {

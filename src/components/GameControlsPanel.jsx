@@ -1,3 +1,5 @@
+import { MAX_SIMULATION_SPEED } from '../config/gameConfig'
+
 function GameControlsPanel({
   isSpawningPaused,
   simulationSpeed,
@@ -8,11 +10,11 @@ function GameControlsPanel({
   onResetGame,
   onSimulationSpeedChange,
 }) {
-  const maxSimulationSpeed = 700
-
   function handleSpeedChange(event) {
     const nextSpeed = Number(event.target.value)
-    onSimulationSpeedChange(Math.min(maxSimulationSpeed, Math.max(10, nextSpeed)))
+    onSimulationSpeedChange(
+      Math.min(MAX_SIMULATION_SPEED, Math.max(10, nextSpeed)),
+    )
   }
 
   return (
@@ -25,7 +27,7 @@ function GameControlsPanel({
           <input
             type="range"
             min="10"
-            max={maxSimulationSpeed}
+            max={MAX_SIMULATION_SPEED}
             step="10"
             value={simulationSpeed}
             onChange={handleSpeedChange}
@@ -33,7 +35,7 @@ function GameControlsPanel({
           <input
             type="number"
             min="10"
-            max={maxSimulationSpeed}
+            max={MAX_SIMULATION_SPEED}
             step="10"
             value={simulationSpeed}
             onChange={handleSpeedChange}

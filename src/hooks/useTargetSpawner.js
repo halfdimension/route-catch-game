@@ -1,27 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchNearestRoadPoint, fetchRoute } from '../api/osrmClient'
+import {
+  TARGET_RARITY_RULES,
+  TARGET_SPAWN_INTERVAL_MS,
+} from '../config/gameConfig'
 import { getCreaturesByRarity } from '../data/creatureCatalog'
 
-const SPAWN_INTERVAL_MS = 5000
 const EARTH_RADIUS_METERS = 6371000
-
-const TARGET_RULES = {
-  common: {
-    lifetimeMs: 12000,
-    minDistanceMeters: 100,
-    maxDistanceMeters: 250,
-  },
-  rare: {
-    lifetimeMs: 8000,
-    minDistanceMeters: 250,
-    maxDistanceMeters: 500,
-  },
-  legendary: {
-    lifetimeMs: 5000,
-    minDistanceMeters: 500,
-    maxDistanceMeters: 800,
-  },
-}
 
 function getRandomRarity() {
   const roll = Math.random()
@@ -91,7 +76,7 @@ function getDifficulty(estimatedGameTravelSeconds, lifetimeSeconds) {
 
 async function createTarget(playerPosition, simulationSpeedMetersPerSecond) {
   const rarity = getRandomRarity()
-  const rules = TARGET_RULES[rarity]
+  const rules = TARGET_RARITY_RULES[rarity]
   const creature = getRandomCreature(rarity)
   const distanceMeters = getRandomBetween(
     rules.minDistanceMeters,
@@ -226,7 +211,7 @@ export function useTargetSpawner(
         .catch((error) => {
           console.warn('Target spawn failed before state update:', error)
         })
-    }, SPAWN_INTERVAL_MS)
+    }, TARGET_SPAWN_INTERVAL_MS)
 
     const expiryTimerId = setInterval(() => {
       const now = Date.now()

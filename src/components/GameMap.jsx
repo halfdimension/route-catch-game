@@ -3,12 +3,10 @@ import { MapContainer, TileLayer, useMapEvents } from 'react-leaflet'
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
+import { INITIAL_MAP_CENTER, INITIAL_MAP_ZOOM } from '../config/mapConfig'
 import PlayerMarker from './PlayerMarker'
 import RouteLine from './RouteLine'
 import TargetLayer from './TargetLayer'
-
-const DELHI_CENTER = [28.6139, 77.209]
-const DEFAULT_ZOOM = 12
 
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: markerIcon2x,
@@ -39,8 +37,8 @@ function GameMap({
 }) {
   return (
     <MapContainer
-      center={DELHI_CENTER}
-      zoom={DEFAULT_ZOOM}
+      center={INITIAL_MAP_CENTER}
+      zoom={INITIAL_MAP_ZOOM}
       className="game-map"
       zoomControl
     >

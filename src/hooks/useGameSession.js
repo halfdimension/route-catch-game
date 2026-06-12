@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-
-const DEFAULT_ROUND_SECONDS = 60
+import { DEFAULT_ROUND_SECONDS } from '../config/gameConfig'
 
 export function useGameSession(roundDurationSeconds = DEFAULT_ROUND_SECONDS) {
   const [gameState, setGameState] = useState('ready')

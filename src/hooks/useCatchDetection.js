@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
+import { CATCH_RADIUS_METERS } from '../config/gameConfig'
 
-const CATCH_RADIUS_METERS = 25
 const EARTH_RADIUS_METERS = 6371000
 
 function toRadians(degrees) {
