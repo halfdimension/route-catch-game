@@ -5,12 +5,16 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.ResourceAccessException;
 
 import com.routecatch.api.dto.CoordinateDto;
 import com.routecatch.api.dto.NearestRequest;
 import com.routecatch.api.dto.NearestResponse;
 import com.routecatch.api.dto.RouteRequest;
 import com.routecatch.api.dto.RouteResponse;
+import com.routecatch.api.exception.RoutingEngineException;
 
 @Service
 public class OsrmRoutingService {
@@ -31,28 +35,44 @@ public class OsrmRoutingService {
 			request.destinationLat()
 		);
 
-		OsrmRouteResponse osrmResponse = restClient.get()
-			.uri(uriBuilder -> uriBuilder
-				.path("/route/v1/driving/{coordinates}")
-				.queryParam("overview", "full")
-				.queryParam("geometries", "geojson")
-				.queryParam("steps", "false")
-				.build(routeCoordinates))
-			.retrieve()
-			.body(OsrmRouteResponse.class);
+		OsrmRouteResponse osrmResponse;
+
+		try {
+			osrmResponse = restClient.get()
+				.uri(uriBuilder -> uriBuilder
+					.path("/route/v1/driving/{coordinates}")
+					.queryParam("overview", "full")
+					.queryParam("geometries", "geojson")
+					.queryParam("steps", "false")
+					.build(routeCoordinates))
+				.retrieve()
+				.body(OsrmRouteResponse.class);
+		} catch (ResourceAccessException exception) {
+			throw routingEngineUnavailable();
+		} catch (RestClientResponseException exception) {
+			throw routingEngineError();
+		} catch (RestClientException exception) {
+			throw routingEngineError();
+		}
 
 		if (osrmResponse == null || !"Ok".equals(osrmResponse.code())) {
-			throw new RuntimeException("OSRM did not return a successful route response");
+			throw routingEngineError();
 		}
 
 		if (osrmResponse.routes() == null || osrmResponse.routes().isEmpty()) {
-			throw new RuntimeException("OSRM did not return any routes");
+			throw new RoutingEngineException(
+				"ROUTE_NOT_FOUND",
+				"Routing engine did not return a route"
+			);
 		}
 
 		OsrmRoute route = osrmResponse.routes().getFirst();
 
 		if (route.geometry() == null || route.geometry().coordinates() == null) {
-			throw new RuntimeException("OSRM route geometry is missing");
+			throw new RoutingEngineException(
+				"ROUTING_ENGINE_INVALID_RESPONSE",
+				"Routing engine returned an invalid route"
+			);
 		}
 
 		List<CoordinateDto> coordinates = route.geometry().coordinates().stream()
@@ -71,32 +91,62 @@ public class OsrmRoutingService {
 	public NearestResponse fetchNearest(NearestRequest request) {
 		String point = "%s,%s".formatted(request.lon(), request.lat());
 
-		OsrmNearestResponse osrmResponse = restClient.get()
-			.uri(uriBuilder -> uriBuilder
-				.path("/nearest/v1/driving/{point}")
-				.queryParam("number", 1)
-				.build(point))
-			.retrieve()
-			.body(OsrmNearestResponse.class);
+		OsrmNearestResponse osrmResponse;
+
+		try {
+			osrmResponse = restClient.get()
+				.uri(uriBuilder -> uriBuilder
+					.path("/nearest/v1/driving/{point}")
+					.queryParam("number", 1)
+					.build(point))
+				.retrieve()
+				.body(OsrmNearestResponse.class);
+		} catch (ResourceAccessException exception) {
+			throw routingEngineUnavailable();
+		} catch (RestClientResponseException exception) {
+			throw routingEngineError();
+		} catch (RestClientException exception) {
+			throw routingEngineError();
+		}
 
 		if (osrmResponse == null || !"Ok".equals(osrmResponse.code())) {
-			throw new RuntimeException("OSRM did not return a successful nearest response");
+			throw routingEngineError();
 		}
 
 		if (osrmResponse.waypoints() == null || osrmResponse.waypoints().isEmpty()) {
-			throw new RuntimeException("OSRM did not return a nearest waypoint");
+			throw new RoutingEngineException(
+				"NEAREST_POINT_NOT_FOUND",
+				"Routing engine did not return a nearest point"
+			);
 		}
 
 		OsrmWaypoint waypoint = osrmResponse.waypoints().getFirst();
 
 		if (waypoint.location() == null || waypoint.location().size() < 2) {
-			throw new RuntimeException("OSRM nearest waypoint location is missing");
+			throw new RoutingEngineException(
+				"ROUTING_ENGINE_INVALID_RESPONSE",
+				"Routing engine returned an invalid nearest point"
+			);
 		}
 
 		return new NearestResponse(
 			new CoordinateDto(waypoint.location().get(1), waypoint.location().get(0)),
 			waypoint.distance(),
 			waypoint.name()
+		);
+	}
+
+	private RoutingEngineException routingEngineUnavailable() {
+		return new RoutingEngineException(
+			"ROUTING_ENGINE_UNAVAILABLE",
+			"Routing engine is not reachable"
+		);
+	}
+
+	private RoutingEngineException routingEngineError() {
+		return new RoutingEngineException(
+			"ROUTING_ENGINE_ERROR",
+			"Routing engine returned an unsuccessful response"
 		);
 	}
 
