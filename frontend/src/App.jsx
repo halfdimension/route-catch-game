@@ -51,11 +51,15 @@ function App() {
   } = useGameSession()
   const {
     backendSession,
+    backendScore,
+    backendCaughtCount,
     sessionNotice,
+    catchSubmissionWarning,
     isSessionPending,
     beginSession,
     finishSession,
     replaceSession,
+    submitBackendCatch,
   } = useBackendGameSession()
   const {
     xp,
@@ -98,8 +102,15 @@ function App() {
       addXp(target.score)
       setCatchToastTarget(target)
       playCatchSound(target.rarity)
+
+      void submitBackendCatch({
+        creatureId: target.creatureId,
+        creatureName: target.name,
+        rarity: target.rarity,
+        scoreValue: target.score,
+      })
     },
-    [addXp, removeTarget],
+    [addXp, removeTarget, submitBackendCatch],
   )
 
   useCatchDetection({
@@ -251,7 +262,10 @@ function App() {
         onStartGame={handleStartGame}
         onEndGame={handleEndGame}
         backendSession={backendSession}
+        backendScore={backendScore}
+        backendCaughtCount={backendCaughtCount}
         sessionNotice={sessionNotice}
+        catchSubmissionWarning={catchSubmissionWarning}
         isSessionPending={isSessionPending}
       />
       <GameControlsPanel

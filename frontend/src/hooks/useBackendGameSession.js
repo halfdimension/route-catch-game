@@ -3,23 +3,36 @@ import {
   createGameSession,
   endGameSession,
   startGameSession,
+  submitCatch,
 } from '../api/gameSessionClient'
 
 export function useBackendGameSession() {
   const [backendSession, setBackendSessionState] = useState(null)
   const [sessionNotice, setSessionNotice] = useState(null)
+  const [catchSubmissionWarning, setCatchSubmissionWarning] = useState('')
+  const [backendScore, setBackendScore] = useState(0)
+  const [backendCaughtCount, setBackendCaughtCount] = useState(0)
   const [isSessionPending, setIsSessionPending] = useState(false)
   const backendSessionRef = useRef(null)
 
   const setBackendSession = useCallback((session) => {
     backendSessionRef.current = session
     setBackendSessionState(session)
+
+    if (typeof session.score === 'number') {
+      setBackendScore(session.score)
+    }
+
+    if (typeof session.caughtCount === 'number') {
+      setBackendCaughtCount(session.caughtCount)
+    }
   }, [])
 
   const beginSession = useCallback(
     async (durationSeconds) => {
       setIsSessionPending(true)
       setSessionNotice(null)
+      setCatchSubmissionWarning('')
 
       try {
         const createdSession = await createGameSession(durationSeconds)
@@ -75,6 +88,7 @@ export function useBackendGameSession() {
     async (durationSeconds) => {
       setIsSessionPending(true)
       setSessionNotice(null)
+      setCatchSubmissionWarning('')
 
       const currentSession = backendSessionRef.current
       let previousSessionEndFailed = false
@@ -120,12 +134,51 @@ export function useBackendGameSession() {
     [setBackendSession],
   )
 
+  const submitBackendCatch = useCallback(async (catchPayload) => {
+    const currentSession = backendSessionRef.current
+
+    if (!currentSession || currentSession.status !== 'RUNNING') {
+      return null
+    }
+
+    const submittingSessionId = currentSession.sessionId
+
+    try {
+      const response = await submitCatch(submittingSessionId, catchPayload)
+
+      if (backendSessionRef.current?.sessionId !== submittingSessionId) {
+        return response
+      }
+
+      setBackendScore((currentScore) =>
+        Math.max(currentScore, response.score ?? currentScore),
+      )
+      setBackendCaughtCount((currentCount) =>
+        Math.max(currentCount, response.caughtCount ?? currentCount),
+      )
+      setCatchSubmissionWarning('')
+      return response
+    } catch {
+      if (backendSessionRef.current?.sessionId === submittingSessionId) {
+        setCatchSubmissionWarning(
+          'Catch saved locally, but backend sync failed.',
+        )
+      }
+
+      return null
+    }
+  }, [])
+
   return {
     backendSession,
+    backendScore,
+    backendCaughtCount,
     sessionNotice,
+    catchSubmissionWarning,
     isSessionPending,
     beginSession,
     finishSession,
     replaceSession,
+    submitBackendCatch,
   }
 }

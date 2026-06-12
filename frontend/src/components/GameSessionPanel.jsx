@@ -6,7 +6,10 @@ function GameSessionPanel({
   onStartGame,
   onEndGame,
   backendSession,
+  backendScore,
+  backendCaughtCount,
   sessionNotice,
+  catchSubmissionWarning,
   isSessionPending,
 }) {
   function handleDurationChange(event) {
@@ -56,13 +59,18 @@ function GameSessionPanel({
       )}
 
       {backendSession && (
-        <div
-          className="backend-session-status"
-          title={backendSession.sessionId}
-        >
-          <span>API {backendSession.sessionId.slice(0, 8)}</span>
-          <strong>{backendSession.status}</strong>
-        </div>
+        <>
+          <div
+            className="backend-session-status"
+            title={backendSession.sessionId}
+          >
+            <span>API {backendSession.sessionId.slice(0, 8)}</span>
+            <strong>{backendSession.status}</strong>
+          </div>
+          <div className="backend-session-totals">
+            Backend: {backendScore} pts · {backendCaughtCount} caught
+          </div>
+        </>
       )}
 
       {sessionNotice && (
@@ -71,6 +79,12 @@ function GameSessionPanel({
           role="status"
         >
           {sessionNotice.message}
+        </p>
+      )}
+
+      {catchSubmissionWarning && (
+        <p className="backend-session-notice is-warning" role="status">
+          {catchSubmissionWarning}
         </p>
       )}
 

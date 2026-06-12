@@ -44,3 +44,13 @@ export function endGameSession(sessionId) {
     method: 'POST',
   })
 }
+
+export function submitCatch(sessionId, catchPayload) {
+  return requestGameSession(`/api/game/sessions/${sessionId}/catches`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(catchPayload),
+  })
+}
