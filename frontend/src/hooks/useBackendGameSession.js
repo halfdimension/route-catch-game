@@ -134,7 +134,7 @@ export function useBackendGameSession() {
     [setBackendSession],
   )
 
-  const submitBackendCatch = useCallback(async (catchPayload) => {
+  const submitBackendCatch = useCallback(async (creatureId) => {
     const currentSession = backendSessionRef.current
 
     if (!currentSession || currentSession.status !== 'RUNNING') {
@@ -144,7 +144,7 @@ export function useBackendGameSession() {
     const submittingSessionId = currentSession.sessionId
 
     try {
-      const response = await submitCatch(submittingSessionId, catchPayload)
+      const response = await submitCatch(submittingSessionId, creatureId)
 
       if (backendSessionRef.current?.sessionId !== submittingSessionId) {
         return response

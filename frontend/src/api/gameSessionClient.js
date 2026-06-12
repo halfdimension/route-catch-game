@@ -45,12 +45,12 @@ export function endGameSession(sessionId) {
   })
 }
 
-export function submitCatch(sessionId, catchPayload) {
+export function submitCatch(sessionId, creatureId) {
   return requestGameSession(`/api/game/sessions/${sessionId}/catches`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(catchPayload),
+    body: JSON.stringify({ creatureId }),
   })
 }

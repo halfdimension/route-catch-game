@@ -103,12 +103,7 @@ function App() {
       setCatchToastTarget(target)
       playCatchSound(target.rarity)
 
-      void submitBackendCatch({
-        creatureId: target.creatureId,
-        creatureName: target.name,
-        rarity: target.rarity,
-        scoreValue: target.score,
-      })
+      void submitBackendCatch(target.creatureId)
     },
     [addXp, removeTarget, submitBackendCatch],
   )
