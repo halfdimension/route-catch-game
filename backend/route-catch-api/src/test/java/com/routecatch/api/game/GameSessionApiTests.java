@@ -60,6 +60,17 @@ class GameSessionApiTests {
 	}
 
 	@Test
+	void malformedSessionIdReturnsBadRequest() throws Exception {
+		mockMvc.perform(get("/api/game/sessions/not-a-uuid"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("INVALID_PATH_PARAMETER"))
+			.andExpect(jsonPath("$.message").value("Invalid value for sessionId"))
+			.andExpect(jsonPath("$.path").value(
+				"/api/game/sessions/not-a-uuid"
+			));
+	}
+
+	@Test
 	void invalidCatchScoreReturnsValidationError() throws Exception {
 		UUID sessionId = UUID.randomUUID();
 

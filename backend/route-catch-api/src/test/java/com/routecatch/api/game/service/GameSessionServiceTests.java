@@ -8,10 +8,10 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
-import com.routecatch.api.game.exception.GameSessionNotFoundException;
-import com.routecatch.api.game.exception.InvalidGameSessionStateException;
 import com.routecatch.api.game.dto.SubmitCatchRequest;
 import com.routecatch.api.game.dto.SubmitCatchResponse;
+import com.routecatch.api.game.exception.GameSessionNotFoundException;
+import com.routecatch.api.game.exception.InvalidGameSessionStateException;
 import com.routecatch.api.game.model.GameSession;
 import com.routecatch.api.game.model.GameSessionStatus;
 

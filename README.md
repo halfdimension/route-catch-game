@@ -2,7 +2,7 @@
 
 Route Catch Game is a map-based creature-catching game built with React, Leaflet, and Spring Boot. Players follow real road routes, chase timed creatures, and build score and progression during configurable game rounds.
 
-The current version is a frontend gameplay prototype backed by Spring Boot routing endpoints. The frontend sends route and nearest-road requests to the API, and the API calls a local OSRM service.
+The current version is a frontend gameplay prototype backed by Spring Boot. The backend wraps OSRM routing, owns an in-memory game session lifecycle, and accepts catch submissions while the frontend continues to run the live game simulation.
 
 For a concise technical overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -108,6 +108,13 @@ The API runs at `http://localhost:8080` and exposes:
 - `GET /api/health`
 - `POST /api/routes`
 - `POST /api/nearest`
+- `POST /api/game/sessions`
+- `GET /api/game/sessions/{sessionId}`
+- `POST /api/game/sessions/{sessionId}/start`
+- `POST /api/game/sessions/{sessionId}/end`
+- `POST /api/game/sessions/{sessionId}/catches`
+
+Game sessions, scores, and caught counts are currently stored in memory and are cleared whenever the backend restarts.
 
 ## Run the OSRM Dependency
 
@@ -132,15 +139,15 @@ Place an OpenStreetMap extract at `osrm-data/map.osm.pbf` before running these c
 
 ## Gameplay Flow
 
-1. Start a round and choose its duration.
+1. Choose a round duration; the frontend creates and starts a backend game session.
 2. Creature targets spawn while the round is running.
 3. The frontend asks Spring Boot to snap each target to the nearest road.
 4. Spring Boot requests nearest-road and route data from OSRM.
 5. Route distance, simulation speed, and target lifetime determine difficulty.
 6. Click a creature or target-list item to chase it immediately.
 7. Click empty map space to confirm movement to that location.
-8. Catch creatures before they expire to gain score and XP.
-9. When the round ends, movement and spawning stop and a summary appears.
+8. Catch creatures before they expire to gain local score and XP; catches are also submitted to the running backend session.
+9. When the round ends, the frontend ends the backend session, stops movement and spawning, and shows a summary.
 
 ## Project Structure
 
@@ -160,6 +167,7 @@ backend/
       controller/ REST endpoints
       dto/        API request and response models
       service/    OSRM integration
+      game/       In-memory session lifecycle and catch submission
 docs/
   ARCHITECTURE.md
 scripts/
@@ -174,7 +182,7 @@ scripts/
 
 - JWT authentication
 - User profiles and avatar upload
-- PostgreSQL/PostGIS persistence
+- PostgreSQL/PostGIS persistence for sessions, catches, and users
 - Multiplayer WebSocket support
 - Valhalla isochrone integration
 - Leaderboard
