@@ -10,6 +10,7 @@ import PlayerHudPanel from './components/PlayerHudPanel'
 import RoundSummaryPanel from './components/RoundSummaryPanel'
 import TargetInfoPanel from './components/TargetInfoPanel'
 import { MAX_SIMULATION_SPEED } from './config/gameConfig'
+import { useBackendGameSession } from './hooks/useBackendGameSession'
 import { useCatchDetection } from './hooks/useCatchDetection'
 import { useGameSession } from './hooks/useGameSession'
 import { usePlayerProgression } from './hooks/usePlayerProgression'
@@ -48,6 +49,14 @@ function App() {
     restartGame: restartGameSession,
     resetGameSession,
   } = useGameSession()
+  const {
+    backendSession,
+    sessionNotice,
+    isSessionPending,
+    beginSession,
+    finishSession,
+    replaceSession,
+  } = useBackendGameSession()
   const {
     xp,
     level,
@@ -122,7 +131,10 @@ function App() {
 
     clearTargets()
     stopPlayerMovement()
-  }, [clearTargets, gameState, stopPlayerMovement])
+    void finishSession(
+      'Round ended locally, but the backend session could not be closed.',
+    )
+  }, [clearTargets, finishSession, gameState, stopPlayerMovement])
 
   function resetScore() {
     setCaughtTargets([])
@@ -135,6 +147,7 @@ function App() {
   }
 
   function resetGame() {
+    void finishSession()
     resetPlayerState()
     clearTargets()
     resetScore()
@@ -142,7 +155,26 @@ function App() {
     resetGameSession()
   }
 
-  function restartGame() {
+  async function handleStartGame() {
+    const didStartBackendSession = await beginSession(selectedRoundSeconds)
+
+    if (didStartBackendSession) {
+      startGame()
+    }
+  }
+
+  async function handleEndGame() {
+    await finishSession()
+    endGame()
+  }
+
+  async function restartGame() {
+    const didStartBackendSession = await replaceSession(selectedRoundSeconds)
+
+    if (!didStartBackendSession) {
+      return
+    }
+
     resetPlayerState()
     clearTargets()
     resetScore()
@@ -216,8 +248,11 @@ function App() {
         selectedRoundSeconds={selectedRoundSeconds}
         roundDurationOptions={roundDurationOptions}
         onRoundDurationChange={setSelectedRoundSeconds}
-        onStartGame={startGame}
-        onEndGame={endGame}
+        onStartGame={handleStartGame}
+        onEndGame={handleEndGame}
+        backendSession={backendSession}
+        sessionNotice={sessionNotice}
+        isSessionPending={isSessionPending}
       />
       <GameControlsPanel
         gameState={gameState}
@@ -240,6 +275,7 @@ function App() {
           caughtTargets={caughtTargets}
           level={level}
           onRestartGame={restartGame}
+          isRestarting={isSessionPending}
         />
       )}
 

@@ -5,6 +5,9 @@ function GameSessionPanel({
   onRoundDurationChange,
   onStartGame,
   onEndGame,
+  backendSession,
+  sessionNotice,
+  isSessionPending,
 }) {
   function handleDurationChange(event) {
     onRoundDurationChange(Number(event.target.value))
@@ -17,7 +20,11 @@ function GameSessionPanel({
       {canChooseDuration && (
         <label className="round-duration-control">
           <span>Duration</span>
-          <select value={selectedRoundSeconds} onChange={handleDurationChange}>
+          <select
+            value={selectedRoundSeconds}
+            onChange={handleDurationChange}
+            disabled={isSessionPending}
+          >
             {roundDurationOptions.map((durationSeconds) => (
               <option key={durationSeconds} value={durationSeconds}>
                 {durationSeconds}s
@@ -28,15 +35,43 @@ function GameSessionPanel({
       )}
 
       {gameState === 'ready' && (
-        <button type="button" className="primary-button" onClick={onStartGame}>
-          Start Game
+        <button
+          type="button"
+          className="primary-button"
+          onClick={onStartGame}
+          disabled={isSessionPending}
+        >
+          {isSessionPending ? 'Starting...' : 'Start Game'}
         </button>
       )}
 
       {gameState === 'running' && (
-        <button type="button" onClick={onEndGame}>
-          End Game
+        <button
+          type="button"
+          onClick={onEndGame}
+          disabled={isSessionPending}
+        >
+          {isSessionPending ? 'Ending...' : 'End Game'}
         </button>
+      )}
+
+      {backendSession && (
+        <div
+          className="backend-session-status"
+          title={backendSession.sessionId}
+        >
+          <span>API {backendSession.sessionId.slice(0, 8)}</span>
+          <strong>{backendSession.status}</strong>
+        </div>
+      )}
+
+      {sessionNotice && (
+        <p
+          className={`backend-session-notice is-${sessionNotice.tone}`}
+          role="status"
+        >
+          {sessionNotice.message}
+        </p>
       )}
 
     </section>

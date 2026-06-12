@@ -12,6 +12,7 @@ For a concise technical overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.m
 - Compact HUD for score, catches, level, XP, and session status.
 - Plain map-click movement confirmation and direct creature chasing.
 - Spring Boot wrappers for OSRM route and nearest-road requests.
+- Backend-linked game session creation, start, end, and restart lifecycle.
 - Configurable 60, 120, 180, or 300-second game sessions.
 - Original common, rare, and legendary route-game creatures.
 - Level progression, speed-limit bonuses, and level-based rarity weights.

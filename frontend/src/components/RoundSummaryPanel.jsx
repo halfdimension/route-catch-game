@@ -13,6 +13,7 @@ function RoundSummaryPanel({
   caughtTargets,
   level,
   onRestartGame,
+  isRestarting = false,
 }) {
   const bestCatch = getBestCatch(caughtTargets)
 
@@ -46,8 +47,9 @@ function RoundSummaryPanel({
         type="button"
         className="primary-button"
         onClick={onRestartGame}
+        disabled={isRestarting}
       >
-        Restart Game
+        {isRestarting ? 'Restarting...' : 'Restart Game'}
       </button>
     </section>
   )
