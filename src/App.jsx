@@ -6,10 +6,12 @@ import GameSessionPanel from './components/GameSessionPanel'
 import GameMap from './components/GameMap'
 import MovementStatusPanel from './components/MovementStatusPanel'
 import MoveConfirmPanel from './components/MoveConfirmPanel'
-import ScorePanel from './components/ScorePanel'
+import PlayerHudPanel from './components/PlayerHudPanel'
 import TargetInfoPanel from './components/TargetInfoPanel'
+import { MAX_SIMULATION_SPEED } from './config/gameConfig'
 import { useCatchDetection } from './hooks/useCatchDetection'
 import { useGameSession } from './hooks/useGameSession'
+import { usePlayerProgression } from './hooks/usePlayerProgression'
 import { usePlayerState } from './hooks/usePlayerState'
 import { useTargetSpawner } from './hooks/useTargetSpawner'
 import { playCatchSound } from './utils/soundEffects'
@@ -37,24 +39,39 @@ function App() {
   const {
     gameState,
     remainingSeconds,
+    selectedRoundSeconds,
+    roundDurationOptions,
+    setSelectedRoundSeconds,
     startGame,
     endGame,
     restartGame: restartGameSession,
     resetGameSession,
   } = useGameSession()
   const {
+    xp,
+    level,
+    nextLevelXp,
+    speedBonus,
+    addXp,
+    resetProgression,
+  } = usePlayerProgression()
+  const {
     targets,
     isSpawningPaused,
     removeTarget,
     clearTargets,
     toggleSpawning,
-  } = useTargetSpawner(playerPosition, simulationSpeed, gameState === 'running')
+  } = useTargetSpawner(
+    playerPosition,
+    simulationSpeed,
+    gameState === 'running',
+    level,
+  )
   const [caughtTargets, setCaughtTargets] = useState([])
   const [score, setScore] = useState(0)
   const [catchToastTarget, setCatchToastTarget] = useState(null)
   const previousGameStateRef = useRef(gameState)
   const targetsRef = useRef(targets)
-  const lastCaughtTarget = caughtTargets[0]
 
   useEffect(() => {
     targetsRef.current = targets
@@ -68,10 +85,11 @@ function App() {
         ...currentCaughtTargets,
       ])
       setScore((currentScore) => currentScore + target.score)
+      addXp(target.score)
       setCatchToastTarget(target)
       playCatchSound(target.rarity)
     },
-    [removeTarget],
+    [addXp, removeTarget],
   )
 
   useCatchDetection({
@@ -119,6 +137,7 @@ function App() {
     resetPlayerState()
     clearTargets()
     resetScore()
+    resetProgression()
     resetGameSession()
   }
 
@@ -126,6 +145,7 @@ function App() {
     resetPlayerState()
     clearTargets()
     resetScore()
+    resetProgression()
     restartGameSession()
   }
 
@@ -179,20 +199,28 @@ function App() {
         isMoving={isMoving}
         simulationSpeed={simulationSpeed}
       />
-      <ScorePanel
+      <PlayerHudPanel
         score={score}
         caughtCount={caughtTargets.length}
-        lastCaughtName={lastCaughtTarget?.name}
+        level={level}
+        xp={xp}
+        nextLevelXp={nextLevelXp}
+        gameState={gameState}
+        remainingSeconds={remainingSeconds}
+        selectedRoundSeconds={selectedRoundSeconds}
       />
       <CatchToast caughtTarget={catchToastTarget} />
       <GameSessionPanel
         gameState={gameState}
-        remainingSeconds={remainingSeconds}
+        selectedRoundSeconds={selectedRoundSeconds}
+        roundDurationOptions={roundDurationOptions}
+        onRoundDurationChange={setSelectedRoundSeconds}
         onStartGame={startGame}
         onEndGame={endGame}
         onRestartGame={restartGame}
       />
       <GameControlsPanel
+        gameState={gameState}
         isSpawningPaused={isSpawningPaused}
         simulationSpeed={simulationSpeed}
         onToggleSpawning={toggleSpawning}
@@ -201,6 +229,7 @@ function App() {
         onResetPlayer={resetPlayer}
         onResetGame={resetGame}
         onSimulationSpeedChange={setSimulationSpeed}
+        maxSimulationSpeed={MAX_SIMULATION_SPEED + speedBonus}
       />
       <TargetInfoPanel targets={targets} onTargetClick={handleTargetClick} />
       <CaughtInventoryPanel caughtTargets={caughtTargets} />

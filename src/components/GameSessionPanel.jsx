@@ -1,15 +1,32 @@
 function GameSessionPanel({
   gameState,
-  remainingSeconds,
+  selectedRoundSeconds,
+  roundDurationOptions,
+  onRoundDurationChange,
   onStartGame,
   onEndGame,
   onRestartGame,
 }) {
+  function handleDurationChange(event) {
+    onRoundDurationChange(Number(event.target.value))
+  }
+
+  const canChooseDuration = gameState !== 'running'
+
   return (
     <section className="game-session-panel" aria-label="Game session">
-      <p>Session</p>
-      <span>State: {gameState}</span>
-      <strong>{remainingSeconds}s</strong>
+      {canChooseDuration && (
+        <label className="round-duration-control">
+          <span>Duration</span>
+          <select value={selectedRoundSeconds} onChange={handleDurationChange}>
+            {roundDurationOptions.map((durationSeconds) => (
+              <option key={durationSeconds} value={durationSeconds}>
+                {durationSeconds}s
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       {gameState === 'ready' && (
         <button type="button" className="primary-button" onClick={onStartGame}>

@@ -1,0 +1,59 @@
+import { mockUserProfile } from '../data/mockUserProfile'
+
+function getInitial(displayName) {
+  return displayName.trim().charAt(0).toUpperCase()
+}
+
+function PlayerHudPanel({
+  score,
+  caughtCount,
+  level,
+  xp,
+  nextLevelXp,
+  gameState,
+  remainingSeconds,
+  selectedRoundSeconds,
+}) {
+  const profile = mockUserProfile
+  const sessionTime =
+    gameState === 'running' ? remainingSeconds : selectedRoundSeconds
+
+  return (
+    <section className="player-hud-panel" aria-label="Player HUD">
+      <div className="player-hud-profile">
+        <div className="player-hud-avatar" aria-hidden="true">
+          {profile.avatarUrl ? (
+            <img src={profile.avatarUrl} alt="" />
+          ) : (
+            <span>{getInitial(profile.displayName)}</span>
+          )}
+        </div>
+        <div>
+          <p>{profile.displayName}</p>
+          <span>{gameState}</span>
+        </div>
+      </div>
+
+      <div className="player-hud-stats">
+        <span>
+          Score <strong>{score}</strong>
+        </span>
+        <span>
+          Catches <strong>{caughtCount}</strong>
+        </span>
+        <span>
+          Level <strong>{level}</strong>
+        </span>
+        <span>
+          Time <strong>{sessionTime}s</strong>
+        </span>
+      </div>
+
+      <div className="player-hud-xp">
+        XP: {xp} / {nextLevelXp === null ? 'Max' : nextLevelXp}
+      </div>
+    </section>
+  )
+}
+
+export default PlayerHudPanel

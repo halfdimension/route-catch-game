@@ -5,21 +5,24 @@ import {
   TARGET_SPAWN_INTERVAL_MS,
 } from '../config/gameConfig'
 import { getCreaturesByRarity } from '../data/creatureCatalog'
+import { getSpawnRarityWeights } from './usePlayerProgression'
 
 const EARTH_RADIUS_METERS = 6371000
 
-function getRandomRarity() {
-  const roll = Math.random()
+function getRandomRarity(playerLevel) {
+  const weights = getSpawnRarityWeights(playerLevel)
+  const totalWeight = weights.common + weights.rare + weights.legendary
+  const roll = Math.random() * totalWeight
 
-  if (roll < 0.05) {
-    return 'legendary'
+  if (roll < weights.common) {
+    return 'common'
   }
 
-  if (roll < 0.3) {
+  if (roll < weights.common + weights.rare) {
     return 'rare'
   }
 
-  return 'common'
+  return 'legendary'
 }
 
 function getRandomBetween(min, max) {
@@ -74,8 +77,12 @@ function getDifficulty(estimatedGameTravelSeconds, lifetimeSeconds) {
   return 'Almost Impossible'
 }
 
-async function createTarget(playerPosition, simulationSpeedMetersPerSecond) {
-  const rarity = getRandomRarity()
+async function createTarget(
+  playerPosition,
+  simulationSpeedMetersPerSecond,
+  playerLevel,
+) {
+  const rarity = getRandomRarity(playerLevel)
   const rules = TARGET_RARITY_RULES[rarity]
   const creature = getRandomCreature(rarity)
   const distanceMeters = getRandomBetween(
@@ -150,11 +157,13 @@ export function useTargetSpawner(
   playerPosition,
   simulationSpeedMetersPerSecond,
   canSpawnTargets,
+  playerLevel,
 ) {
   const [targets, setTargets] = useState([])
   const [isSpawningPaused, setIsSpawningPaused] = useState(false)
   const playerPositionRef = useRef(playerPosition)
   const simulationSpeedRef = useRef(simulationSpeedMetersPerSecond)
+  const playerLevelRef = useRef(playerLevel)
   const canSpawnTargetsRef = useRef(canSpawnTargets)
   const isSpawningPausedRef = useRef(isSpawningPaused)
   const isMountedRef = useRef(true)
@@ -182,6 +191,10 @@ export function useTargetSpawner(
   }, [simulationSpeedMetersPerSecond])
 
   useEffect(() => {
+    playerLevelRef.current = playerLevel
+  }, [playerLevel])
+
+  useEffect(() => {
     canSpawnTargetsRef.current = canSpawnTargets
   }, [canSpawnTargets])
 
@@ -197,7 +210,11 @@ export function useTargetSpawner(
         return
       }
 
-      createTarget(playerPositionRef.current, simulationSpeedRef.current)
+      createTarget(
+        playerPositionRef.current,
+        simulationSpeedRef.current,
+        playerLevelRef.current,
+      )
         .then((target) => {
           if (
             !isMountedRef.current ||

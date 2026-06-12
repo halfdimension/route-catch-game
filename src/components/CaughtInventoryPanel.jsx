@@ -1,39 +1,45 @@
-function formatCaughtTime(caughtAt) {
-  if (!caughtAt) {
-    return 'Unknown time'
-  }
-
-  return new Date(caughtAt).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+import { useState } from 'react'
 
 function CaughtInventoryPanel({ caughtTargets }) {
+  const [isCollapsed, setIsCollapsed] = useState(caughtTargets.length === 0)
+  const recentCaughtTargets = caughtTargets.slice(0, 3)
+
   return (
-    <section className="caught-inventory-panel" aria-label="Caught inventory">
-      <p>Catches</p>
-      {caughtTargets.length === 0 ? (
-        <span>No catches yet</span>
-      ) : (
-        <ul>
-          {caughtTargets.map((target) => (
-            <li key={`${target.id}-${target.caughtAt}`}>
-              <strong>
-                <span className="creature-symbol">{target.symbol}</span>
-                {target.name}
-              </strong>
-              <span>
-                {target.type} · {target.rarity} · {target.score} pts ·{' '}
-                {target.difficulty}
-              </span>
-              <span>{target.shortDescription}</span>
-              <time dateTime={new Date(target.caughtAt).toISOString()}>
-                {formatCaughtTime(target.caughtAt)}
-              </time>
-            </li>
-          ))}
-        </ul>
+    <section
+      className={`caught-inventory-panel${isCollapsed ? ' is-collapsed' : ''}`}
+      aria-label="Caught inventory"
+    >
+      <button
+        type="button"
+        className="caught-inventory-toggle"
+        onClick={() => setIsCollapsed((currentValue) => !currentValue)}
+        aria-expanded={!isCollapsed}
+      >
+        <span>Recent Catches</span>
+        <span>{caughtTargets.length}</span>
+        <span>{isCollapsed ? 'Show' : 'Hide'}</span>
+      </button>
+
+      {!isCollapsed && (
+        <div className="caught-inventory-content">
+          {caughtTargets.length === 0 ? (
+            <span>No catches yet</span>
+          ) : (
+            <ul>
+              {recentCaughtTargets.map((target) => (
+                <li key={`${target.id}-${target.caughtAt}`}>
+                  <strong>
+                    <span className="creature-symbol">{target.symbol}</span>
+                    {target.name}
+                  </strong>
+                  <span>
+                    +{target.score} · {target.rarity}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </section>
   )
