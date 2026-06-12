@@ -1,8 +1,11 @@
 package com.routecatch.api;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +70,35 @@ class ApiErrorHandlingTests {
 			.andExpect(jsonPath("$.errorCode").value("ROUTING_ENGINE_UNAVAILABLE"))
 			.andExpect(jsonPath("$.message").value("Routing engine is not reachable"))
 			.andExpect(jsonPath("$.path").value("/api/routes"))
+			.andExpect(jsonPath("$.timestamp").isNotEmpty());
+	}
+
+	@Test
+	void getCatchEndpointReturnsCleanMethodNotAllowed() throws Exception {
+		UUID sessionId = UUID.randomUUID();
+		String path = "/api/game/sessions/" + sessionId + "/catches";
+
+		assertMethodNotAllowed(path);
+	}
+
+	@Test
+	void getNearestEndpointReturnsCleanMethodNotAllowed() throws Exception {
+		assertMethodNotAllowed("/api/nearest");
+	}
+
+	@Test
+	void getRoutesEndpointReturnsCleanMethodNotAllowed() throws Exception {
+		assertMethodNotAllowed("/api/routes");
+	}
+
+	private void assertMethodNotAllowed(String path) throws Exception {
+		mockMvc.perform(get(path))
+			.andExpect(status().isMethodNotAllowed())
+			.andExpect(jsonPath("$.errorCode").value("METHOD_NOT_ALLOWED"))
+			.andExpect(jsonPath("$.message").value(
+				"HTTP method is not supported for this endpoint"
+			))
+			.andExpect(jsonPath("$.path").value(path))
 			.andExpect(jsonPath("$.timestamp").isNotEmpty());
 	}
 }
