@@ -1,59 +1,60 @@
-import polyline from '@mapbox/polyline'
-import { OSRM_BASE_URL } from '../config/routingConfig'
+import { API_BASE_URL } from '../config/apiConfig'
 
 export async function fetchRoute(source, destination) {
-  const url = new URL(
-    `/route/v1/driving/${source.lon},${source.lat};${destination.lon},${destination.lat}`,
-    OSRM_BASE_URL,
-  )
-
-  url.searchParams.set('overview', 'full')
-  url.searchParams.set('geometries', 'polyline6')
-  url.searchParams.set('steps', 'true')
-
-  const response = await fetch(url)
+  const response = await fetch(`${API_BASE_URL}/api/routes`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sourceLat: source.lat,
+      sourceLon: source.lon,
+      destinationLat: destination.lat,
+      destinationLon: destination.lon,
+    }),
+  })
 
   if (!response.ok) {
-    throw new Error(`OSRM request failed with status ${response.status}`)
+    throw new Error(`Route request failed with status ${response.status}`)
   }
 
   const data = await response.json()
-  const route = data.routes?.[0]
 
-  if (!route?.geometry) {
-    throw new Error('OSRM did not return a route geometry')
+  if (!Array.isArray(data.coordinates)) {
+    throw new Error('Route response did not include coordinates')
   }
 
   return {
-    coordinates: polyline.decode(route.geometry, 6),
-    distanceMeters: route.distance ?? null,
-    durationSeconds: route.duration ?? null,
+    coordinates: data.coordinates.map((coordinate) => [
+      coordinate.lat,
+      coordinate.lon,
+    ]),
+    distanceMeters: data.distanceMeters ?? null,
+    durationSeconds: data.durationSeconds ?? null,
   }
 }
 
 export async function fetchNearestRoadPoint(point) {
-  const url = new URL(
-    `/nearest/v1/driving/${point.lon},${point.lat}`,
-    OSRM_BASE_URL,
-  )
-
-  url.searchParams.set('number', '1')
-
-  const response = await fetch(url)
+  const response = await fetch(`${API_BASE_URL}/api/nearest`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      lat: point.lat,
+      lon: point.lon,
+    }),
+  })
 
   if (!response.ok) {
-    throw new Error(`OSRM nearest request failed with status ${response.status}`)
+    throw new Error(`Nearest request failed with status ${response.status}`)
   }
 
   const data = await response.json()
-  const location = data.waypoints?.[0]?.location
 
-  if (!location) {
-    throw new Error('OSRM did not return a nearest road point')
+  if (!data.snappedPoint) {
+    throw new Error('Nearest response did not include a snapped point')
   }
 
-  return {
-    lat: location[1],
-    lon: location[0],
-  }
+  return data.snappedPoint
 }

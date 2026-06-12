@@ -1,39 +1,38 @@
 # Architecture
 
-Route Catch Game is currently a frontend prototype built with React, Vite, and Leaflet. The browser owns the game loop, map interaction, routing requests, animation, target spawning, configurable session timer, progression, score, and caught inventory.
+Route Catch Game uses a React frontend for map gameplay and a Spring Boot API for routing integration. The browser still owns the prototype game state, while the backend isolates OSRM from the frontend.
 
-## Current Prototype
+## Current Architecture
 
 ```text
-React UI -> osrmClient.js -> OSRM server
+React UI -> osrmClient.js -> Spring Boot API -> OSRM server
 ```
 
-- React + Vite render the application shell, compact player HUD, controls, round summary, and gameplay state.
-- Leaflet and React Leaflet render the map, player marker, route line, and creature markers.
-- The frontend calls OSRM directly through `src/api/osrmClient.js`.
-- Route animation is handled in the browser by walking along decoded OSRM route coordinates.
-- Target spawning is handled in the browser, including level-based rarity selection, road snapping, route feasibility, and expiry.
-- Game session state and selectable round duration are handled in the browser with a local timer.
-- XP, levels, speed-limit bonuses, score, catches, and round summaries are calculated from local frontend state.
+- React and Vite render the application, HUD, controls, and gameplay state.
+- Leaflet and React Leaflet render the map, player, route, and creatures.
+- `frontend/src/api/osrmClient.js` calls Spring Boot through `POST /api/routes` and `POST /api/nearest`.
+- Spring Boot validates requests, calls OSRM, and returns frontend-friendly coordinate objects.
+- Route animation, target spawning, game sessions, progression, scoring, and catches remain frontend-controlled.
 
 ## Main Modules
 
-- `src/components`: Presentational and interactive UI pieces such as the map, panels, markers, route line, inventory, and feedback toast.
-- `src/hooks`: Frontend gameplay logic for player state, progression, route animation, target spawning, catch detection, and game sessions.
-- `src/config`: Centralized configuration for game constants, map defaults, and routing URLs.
-- `src/api`: Client-side API adapters, currently direct OSRM route and nearest-road calls.
-- `src/data`: Local prototype data such as the creature catalog and mock user profile.
-- `src/utils`: Small helpers that do not fit into UI, hooks, data, or API modules.
+- `frontend/src/components`: Map elements, markers, HUD panels, controls, inventory, feedback, and round summary.
+- `frontend/src/hooks`: Player movement, route animation, spawning, catch detection, sessions, and progression.
+- `frontend/src/config`: API endpoint, game, map, and progression configuration.
+- `frontend/src/api`: Spring Boot API adapters used by frontend gameplay hooks.
+- `frontend/src/data`: Original creature catalog and mock player profile.
+- `frontend/src/utils`: Browser-generated sound effects and small helpers.
+- `backend/route-catch-api`: Spring Boot controllers, DTOs, and OSRM routing service.
 
 ## Current Limitations
 
-- No backend yet.
-- No authentication yet.
-- Game state is controlled by the frontend and can be reset or manipulated locally.
+- No authentication.
+- Game state and validation are still controlled by the frontend.
 - No persistence for users, scores, catches, or sessions.
 - No multiplayer or shared realtime state.
+- The backend currently wraps routing services only.
 
-## Planned Backend Architecture
+## Planned Architecture
 
 ```text
 React -> Spring Boot -> OSRM/Valhalla
@@ -41,4 +40,4 @@ Spring Boot -> PostgreSQL/PostGIS
 Spring Boot -> WebSocket clients
 ```
 
-The planned backend will move trusted game/session logic behind Spring Boot, proxy routing and isochrone services, persist user and gameplay data in PostgreSQL/PostGIS, and support realtime multiplayer through WebSocket clients.
+Future backend work will add trusted game and session logic, persistence, authentication, isochrone support, and realtime multiplayer while retaining the existing routing wrapper.

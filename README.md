@@ -1,82 +1,80 @@
 # Route Catch Game
 
-Route Catch Game is a React + Vite + Leaflet prototype where a player moves through a real map, routes through OSRM, and catches timed creature targets before they expire.
+Route Catch Game is a map-based creature-catching game built with React, Leaflet, and Spring Boot. Players follow real road routes, chase timed creatures, and build score and progression during configurable game rounds.
 
-The current version is a frontend prototype. It calls OSRM directly from the browser at `http://localhost:5000` and does not yet include a backend, authentication, persistence, or deployment setup.
+The current version is a frontend gameplay prototype backed by Spring Boot routing endpoints. The frontend sends route and nearest-road requests to the API, and the API calls a local OSRM service.
 
 For a concise technical overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Current Features
 
-- Interactive Leaflet map centered around Delhi.
-- Player avatar marker with mock user profile data.
-- Compact player HUD with score, catches, level, XP, and session status.
-- Plain map click movement with route confirmation.
-- Direct creature chasing from map markers and the active target list.
-- OSRM route fetching and animated movement along route geometry.
-- OSRM nearest-road snapping for spawned creature targets.
+- Interactive Leaflet map with an animated player avatar.
+- Compact HUD for score, catches, level, XP, and session status.
+- Plain map-click movement confirmation and direct creature chasing.
+- Spring Boot wrappers for OSRM route and nearest-road requests.
 - Configurable 60, 120, 180, or 300-second game sessions.
-- Original route-game creature catalog with common, rare, and legendary creatures.
-- XP progression, levels, speed-limit bonuses, and level-based rarity weights.
-- ETA-based target difficulty from route distance and simulation speed.
-- Catch detection, scoring, catch toast feedback, and generated browser sound effects.
-- Collapsible recent catches panel and end-of-round summary.
-- Game controls for spawning, reset actions, and simulation speed up to 700 m/s.
+- Original common, rare, and legendary route-game creatures.
+- Level progression, speed-limit bonuses, and level-based rarity weights.
+- ETA-based target difficulty using route distance and simulation speed.
+- Catch scoring, toast and sound feedback, recent catches, and round summaries.
 
 ## Tech Stack
 
-- React
-- Vite
-- Leaflet
-- React Leaflet
-- OSRM backend service running locally
+- React and Vite
+- Leaflet and React Leaflet
+- Spring Boot and Maven
+- OSRM
 - ESLint
 
 ## Run the Frontend
 
-Install dependencies:
-
 ```bash
+cd frontend
 npm install
-```
-
-Optional environment setup:
-
-```bash
 cp .env.example .env
-```
-
-Configure `VITE_OSRM_BASE_URL` in `.env` if your OSRM service is not running at the default `http://localhost:5000`.
-
-Start the Vite development server:
-
-```bash
 npm run dev
 ```
 
-Build for production:
+The default frontend API setting is:
 
-```bash
-npm run build
+```env
+VITE_API_BASE_URL=http://localhost:8080
 ```
 
-Run lint:
+Change `VITE_API_BASE_URL` in `frontend/.env` when the Spring Boot API runs at another address.
+
+Build and lint the frontend with:
 
 ```bash
+cd frontend
+npm run build
 npm run lint
 ```
 
+## Run the Backend
+
+```bash
+cd backend/route-catch-api
+./mvnw spring-boot:run
+```
+
+The API runs at `http://localhost:8080` and exposes:
+
+- `GET /api/health`
+- `POST /api/routes`
+- `POST /api/nearest`
+
 ## Run the OSRM Dependency
 
-The frontend expects OSRM at:
+The Spring Boot backend expects OSRM at:
 
 ```text
 http://localhost:5000
 ```
 
-This value is configured by `VITE_OSRM_BASE_URL`. If the variable is not set, the app falls back to `http://localhost:5000`.
+This is configured by `osrm.base-url` in the backend application properties. The frontend does not call OSRM directly.
 
-One common local setup is to run OSRM with Docker and an OpenStreetMap extract. Example:
+One common local setup is:
 
 ```bash
 docker run -t -v "$PWD/osrm-data:/data" osrm/osrm-backend osrm-extract -p /opt/car.lua /data/map.osm.pbf
@@ -85,71 +83,47 @@ docker run -t -v "$PWD/osrm-data:/data" osrm/osrm-backend osrm-customize /data/m
 docker run -p 5000:5000 -v "$PWD/osrm-data:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/map.osrm
 ```
 
-Place your downloaded `.osm.pbf` file at `osrm-data/map.osm.pbf` before running these commands. Use an extract that covers the area you want to play in.
+Place an OpenStreetMap extract at `osrm-data/map.osm.pbf` before running these commands.
 
 ## Gameplay Flow
 
-1. Start a game session from the session panel.
-2. Creature targets spawn only while the game is running.
-3. Each target is snapped to the nearest road when possible.
-4. The app asks OSRM for a route from the current player position to the target.
-5. Route distance, route duration, simulation speed, and target lifetime are used to assign difficulty.
-6. Click a creature marker or active target list item to immediately chase it.
-7. Click an empty map area to preview movement and confirm with the "Move here?" panel.
-8. Catch a creature by moving within the catch radius before it expires.
-9. Catches update score, show feedback, play a generated sound, and appear in the inventory.
-10. When the session ends, active targets and movement stop while final score and inventory remain visible.
+1. Start a round and choose its duration.
+2. Creature targets spawn while the round is running.
+3. The frontend asks Spring Boot to snap each target to the nearest road.
+4. Spring Boot requests nearest-road and route data from OSRM.
+5. Route distance, simulation speed, and target lifetime determine difficulty.
+6. Click a creature or target-list item to chase it immediately.
+7. Click empty map space to confirm movement to that location.
+8. Catch creatures before they expire to gain score and XP.
+9. When the round ends, movement and spawning stop and a summary appears.
 
 ## Project Structure
 
 ```text
-src/
-  api/
-    osrmClient.js
-  components/
-    CatchToast.jsx
-    CaughtInventoryPanel.jsx
-    GameControlsPanel.jsx
-    GameMap.jsx
-    GameSessionPanel.jsx
-    MoveConfirmPanel.jsx
-    MovementStatusPanel.jsx
-    PlayerHudPanel.jsx
-    PlayerMarker.jsx
-    RoundSummaryPanel.jsx
-    RouteLine.jsx
-    TargetInfoPanel.jsx
-    TargetLayer.jsx
-    TargetMarker.jsx
-  config/
-    gameConfig.js
-    mapConfig.js
-    progressionConfig.js
-    routingConfig.js
-  data/
-    creatureCatalog.js
-    mockUserProfile.js
-  hooks/
-    useCatchDetection.js
-    useGameSession.js
-    usePlayerProgression.js
-    usePlayerState.js
-    useRouteAnimation.js
-    useTargetSpawner.js
-  styles/
-    global.css
-  utils/
-    soundEffects.js
-  App.jsx
-  main.jsx
+frontend/
+  src/
+    api/          Backend API client
+    components/   Map, markers, HUD, controls, and panels
+    config/       API, game, map, and progression configuration
+    data/         Creature catalog and mock player profile
+    hooks/        Session, movement, spawning, catch, and progression logic
+    styles/       Global UI styles
+    utils/        Browser sound effects
+backend/
+  route-catch-api/
+    src/main/java/com/routecatch/api/
+      controller/ REST endpoints
+      dto/        API request and response models
+      service/    OSRM integration
+docs/
+  ARCHITECTURE.md
 ```
 
 ## Roadmap
 
-- Spring Boot backend wrapper
-- JWT auth
+- JWT authentication
 - User profiles and avatar upload
-- PostgreSQL persistence
+- PostgreSQL/PostGIS persistence
 - Multiplayer WebSocket support
 - Valhalla isochrone integration
 - Leaderboard

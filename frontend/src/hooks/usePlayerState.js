@@ -4,7 +4,7 @@ import {
   DEFAULT_SIMULATION_SPEED,
   INITIAL_PLAYER_POSITION,
 } from '../config/gameConfig'
-import { OSRM_BASE_URL } from '../config/routingConfig'
+import { API_BASE_URL } from '../config/apiConfig'
 import { useRouteAnimation } from './useRouteAnimation'
 
 export function usePlayerState() {
@@ -72,7 +72,7 @@ export function usePlayerState() {
       }
 
       console.error('Route fetch failed:', error)
-      setRouteError(`Could not fetch route. Is OSRM running at ${OSRM_BASE_URL}?`)
+      setRouteError(`Could not fetch route. Is the API running at ${API_BASE_URL}?`)
       return false
     } finally {
       if (routeRequestId === routeRequestIdRef.current) {
