@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.routecatch.api.game.dto.CreateGameSessionRequest;
 import com.routecatch.api.game.dto.GameSessionResponse;
+import com.routecatch.api.game.dto.SubmitCatchRequest;
+import com.routecatch.api.game.dto.SubmitCatchResponse;
 import com.routecatch.api.game.service.GameSessionService;
 
 import jakarta.validation.Valid;
@@ -47,5 +49,13 @@ public class GameSessionController {
 	@PostMapping("/{sessionId}/end")
 	public GameSessionResponse endSession(@PathVariable UUID sessionId) {
 		return GameSessionResponse.from(gameSessionService.endSession(sessionId));
+	}
+
+	@PostMapping("/{sessionId}/catches")
+	public SubmitCatchResponse submitCatch(
+		@PathVariable UUID sessionId,
+		@Valid @RequestBody SubmitCatchRequest request
+	) {
+		return gameSessionService.submitCatch(sessionId, request);
 	}
 }

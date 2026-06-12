@@ -58,4 +58,29 @@ class GameSessionApiTests {
 			.andExpect(jsonPath("$.errorCode").value("GAME_SESSION_NOT_FOUND"))
 			.andExpect(jsonPath("$.path").value("/api/game/sessions/" + sessionId));
 	}
+
+	@Test
+	void invalidCatchScoreReturnsValidationError() throws Exception {
+		UUID sessionId = UUID.randomUUID();
+
+		mockMvc.perform(post(
+				"/api/game/sessions/{sessionId}/catches",
+				sessionId
+			)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"creatureId": "sparkbit",
+						"creatureName": "Sparkbit",
+						"rarity": "common",
+						"scoreValue": 0
+					}
+					"""))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"))
+			.andExpect(jsonPath("$.message").value("scoreValue must be at least 1"))
+			.andExpect(jsonPath("$.path").value(
+				"/api/game/sessions/" + sessionId + "/catches"
+			));
+	}
 }

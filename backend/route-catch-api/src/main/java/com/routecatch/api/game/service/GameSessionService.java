@@ -6,6 +6,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
 
+import com.routecatch.api.game.dto.SubmitCatchRequest;
+import com.routecatch.api.game.dto.SubmitCatchResponse;
 import com.routecatch.api.game.exception.GameSessionNotFoundException;
 import com.routecatch.api.game.exception.InvalidGameSessionStateException;
 import com.routecatch.api.game.model.GameSession;
@@ -93,5 +95,35 @@ public class GameSessionService {
 				session.caughtCount()
 			);
 		});
+	}
+
+	public SubmitCatchResponse submitCatch(
+		UUID sessionId,
+		SubmitCatchRequest request
+	) {
+		GameSession updatedSession = sessions.compute(sessionId, (id, session) -> {
+			if (session == null) {
+				throw new GameSessionNotFoundException(id);
+			}
+
+			if (session.status() != GameSessionStatus.RUNNING) {
+				throw new InvalidGameSessionStateException(
+					"Catches can only be submitted to running game sessions"
+				);
+			}
+
+			return new GameSession(
+				session.sessionId(),
+				session.status(),
+				session.createdAt(),
+				session.startedAt(),
+				session.endedAt(),
+				session.durationSeconds(),
+				session.score() + request.scoreValue(),
+				session.caughtCount() + 1
+			);
+		});
+
+		return SubmitCatchResponse.from(updatedSession, request);
 	}
 }
