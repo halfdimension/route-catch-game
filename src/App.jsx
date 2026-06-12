@@ -32,7 +32,7 @@ function App() {
     removeTarget,
     clearTargets,
     toggleSpawning,
-  } = useTargetSpawner(playerPosition)
+  } = useTargetSpawner(playerPosition, simulationSpeed)
   const [pendingTarget, setPendingTarget] = useState(null)
   const [caughtTargets, setCaughtTargets] = useState([])
   const [score, setScore] = useState(0)

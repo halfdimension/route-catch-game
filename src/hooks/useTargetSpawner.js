@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fetchNearestRoadPoint } from '../api/osrmClient'
+import { fetchNearestRoadPoint, fetchRoute } from '../api/osrmClient'
 
 const SPAWN_INTERVAL_MS = 5000
 const EARTH_RADIUS_METERS = 6371000
@@ -84,7 +84,23 @@ function getPointAtDistance(origin, distanceMeters, bearingRadians) {
   }
 }
 
-async function createTarget(playerPosition) {
+function getDifficulty(estimatedGameTravelSeconds, lifetimeSeconds) {
+  if (estimatedGameTravelSeconds <= lifetimeSeconds * 0.5) {
+    return 'Easy'
+  }
+
+  if (estimatedGameTravelSeconds <= lifetimeSeconds * 0.8) {
+    return 'Medium'
+  }
+
+  if (estimatedGameTravelSeconds <= lifetimeSeconds) {
+    return 'Hard'
+  }
+
+  return 'Almost Impossible'
+}
+
+async function createTarget(playerPosition, simulationSpeedMetersPerSecond) {
   const rarity = getRandomRarity()
   const rules = TARGET_RULES[rarity]
   const distanceMeters = getRandomBetween(
@@ -99,12 +115,33 @@ async function createTarget(playerPosition) {
   )
   let spawnPosition = rawPosition
   let snappedToRoad = false
+  let routeDistanceMeters = null
+  let routeDurationSeconds = null
+  let estimatedGameTravelSeconds = null
+  let difficulty = 'Unknown'
 
   try {
     spawnPosition = await fetchNearestRoadPoint(rawPosition)
     snappedToRoad = true
   } catch (error) {
     console.warn('Nearest road lookup failed; using raw target point:', error)
+  }
+
+  try {
+    const route = await fetchRoute(playerPosition, spawnPosition)
+    routeDistanceMeters = route.distanceMeters
+    routeDurationSeconds = route.durationSeconds
+
+    if (routeDistanceMeters !== null && simulationSpeedMetersPerSecond > 0) {
+      estimatedGameTravelSeconds =
+        routeDistanceMeters / simulationSpeedMetersPerSecond
+      difficulty = getDifficulty(
+        estimatedGameTravelSeconds,
+        rules.lifetimeMs / 1000,
+      )
+    }
+  } catch (error) {
+    console.warn('Target route lookup failed; difficulty unknown:', error)
   }
 
   const now = Date.now()
@@ -120,13 +157,18 @@ async function createTarget(playerPosition) {
     score: rules.score,
     expiresAt: now + rules.lifetimeMs,
     lifetimeMs: rules.lifetimeMs,
+    routeDistanceMeters,
+    routeDurationSeconds,
+    estimatedGameTravelSeconds,
+    difficulty,
   }
 }
 
-export function useTargetSpawner(playerPosition) {
+export function useTargetSpawner(playerPosition, simulationSpeedMetersPerSecond) {
   const [targets, setTargets] = useState([])
   const [isSpawningPaused, setIsSpawningPaused] = useState(false)
   const playerPositionRef = useRef(playerPosition)
+  const simulationSpeedRef = useRef(simulationSpeedMetersPerSecond)
   const isSpawningPausedRef = useRef(isSpawningPaused)
   const isMountedRef = useRef(true)
 
@@ -149,6 +191,10 @@ export function useTargetSpawner(playerPosition) {
   }, [playerPosition])
 
   useEffect(() => {
+    simulationSpeedRef.current = simulationSpeedMetersPerSecond
+  }, [simulationSpeedMetersPerSecond])
+
+  useEffect(() => {
     isSpawningPausedRef.current = isSpawningPaused
   }, [isSpawningPaused])
 
@@ -160,7 +206,7 @@ export function useTargetSpawner(playerPosition) {
         return
       }
 
-      createTarget(playerPositionRef.current)
+      createTarget(playerPositionRef.current, simulationSpeedRef.current)
         .then((target) => {
           if (!isMountedRef.current || isSpawningPausedRef.current) {
             return

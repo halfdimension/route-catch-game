@@ -25,7 +25,11 @@ export async function fetchRoute(source, destination) {
     throw new Error('OSRM did not return a route geometry')
   }
 
-  return polyline.decode(route.geometry, 6)
+  return {
+    coordinates: polyline.decode(route.geometry, 6),
+    distanceMeters: route.distance ?? null,
+    durationSeconds: route.duration ?? null,
+  }
 }
 
 export async function fetchNearestRoadPoint(point) {

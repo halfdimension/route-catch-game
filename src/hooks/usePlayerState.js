@@ -41,7 +41,8 @@ export function usePlayerState() {
     cancelAnimation()
 
     try {
-      const nextRouteCoordinates = await fetchRoute(playerPosition, destination)
+      const route = await fetchRoute(playerPosition, destination)
+      const nextRouteCoordinates = route.coordinates
 
       setRouteCoordinates(nextRouteCoordinates)
       startAnimation(nextRouteCoordinates)
