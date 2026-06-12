@@ -31,6 +31,10 @@ export function usePlayerState() {
     setRouteError('')
   }
 
+  function showRouteMessage(message) {
+    setRouteError(message)
+  }
+
   async function moveToDestination(destination, options = {}) {
     if (!destination) {
       return
@@ -47,10 +51,15 @@ export function usePlayerState() {
       const route = await fetchRoute(playerPosition, destination)
       const nextRouteCoordinates = route.coordinates
 
-      if (
-        routeRequestId !== routeRequestIdRef.current ||
-        options.shouldStart?.() === false
-      ) {
+      if (routeRequestId !== routeRequestIdRef.current) {
+        return false
+      }
+
+      if (options.shouldStart?.() === false) {
+        if (options.blockedMessage) {
+          setRouteError(options.blockedMessage)
+        }
+
         return false
       }
 
@@ -109,6 +118,7 @@ export function usePlayerState() {
     routeError,
     setSimulationSpeed,
     setPendingDestination: handlePendingDestinationChange,
+    showRouteMessage,
     clearPendingDestination,
     confirmPendingMove,
     moveToDestination,

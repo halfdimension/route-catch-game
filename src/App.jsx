@@ -14,6 +14,8 @@ import { usePlayerState } from './hooks/usePlayerState'
 import { useTargetSpawner } from './hooks/useTargetSpawner'
 import { playCatchSound } from './utils/soundEffects'
 
+const TARGET_EXPIRED_MESSAGE = 'Target expired'
+
 function App() {
   const {
     playerPosition,
@@ -25,6 +27,7 @@ function App() {
     simulationSpeed,
     setSimulationSpeed,
     setPendingDestination,
+    showRouteMessage,
     clearPendingDestination,
     confirmPendingMove,
     moveToDestination,
@@ -130,9 +133,17 @@ function App() {
     setPendingDestination(destination)
   }
 
+  const isTargetActive = useCallback((targetId) => {
+    return targetsRef.current.some(
+      (currentTarget) =>
+        currentTarget.id === targetId && currentTarget.expiresAt > Date.now(),
+    )
+  }, [])
+
   const handleTargetClick = useCallback(
     async (target) => {
-      if (target.expiresAt <= Date.now()) {
+      if (!isTargetActive(target.id)) {
+        showRouteMessage(TARGET_EXPIRED_MESSAGE)
         return
       }
 
@@ -143,16 +154,12 @@ function App() {
           lon: target.lon,
         },
         {
-          shouldStart: () =>
-            targetsRef.current.some(
-              (currentTarget) =>
-                currentTarget.id === target.id &&
-                currentTarget.expiresAt > Date.now(),
-            ),
+          blockedMessage: TARGET_EXPIRED_MESSAGE,
+          shouldStart: () => isTargetActive(target.id),
         },
       )
     },
-    [clearPendingDestination, moveToDestination],
+    [clearPendingDestination, isTargetActive, moveToDestination, showRouteMessage],
   )
 
   return (
