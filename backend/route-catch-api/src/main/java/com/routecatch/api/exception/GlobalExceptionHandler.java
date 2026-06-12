@@ -11,11 +11,39 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.routecatch.api.dto.ApiErrorResponse;
+import com.routecatch.api.game.exception.GameSessionNotFoundException;
+import com.routecatch.api.game.exception.InvalidGameSessionStateException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+	@ExceptionHandler(GameSessionNotFoundException.class)
+	public ResponseEntity<ApiErrorResponse> handleGameSessionNotFound(
+		GameSessionNotFoundException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.NOT_FOUND,
+			"GAME_SESSION_NOT_FOUND",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(InvalidGameSessionStateException.class)
+	public ResponseEntity<ApiErrorResponse> handleInvalidGameSessionState(
+		InvalidGameSessionStateException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.CONFLICT,
+			"INVALID_GAME_SESSION_STATE",
+			exception.getMessage(),
+			request
+		);
+	}
 
 	@ExceptionHandler(RoutingEngineException.class)
 	public ResponseEntity<ApiErrorResponse> handleRoutingEngineException(
