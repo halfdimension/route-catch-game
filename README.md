@@ -4,6 +4,8 @@ Route Catch Game is a React + Vite + Leaflet prototype where a player moves thro
 
 The current version is a frontend prototype. It calls OSRM directly from the browser at `http://localhost:5000` and does not yet include a backend, authentication, persistence, or deployment setup.
 
+For a concise technical overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Current Features
 
 - Interactive Leaflet map centered around Delhi.
