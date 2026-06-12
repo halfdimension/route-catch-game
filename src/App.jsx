@@ -7,6 +7,7 @@ import GameMap from './components/GameMap'
 import MovementStatusPanel from './components/MovementStatusPanel'
 import MoveConfirmPanel from './components/MoveConfirmPanel'
 import PlayerHudPanel from './components/PlayerHudPanel'
+import RoundSummaryPanel from './components/RoundSummaryPanel'
 import TargetInfoPanel from './components/TargetInfoPanel'
 import { MAX_SIMULATION_SPEED } from './config/gameConfig'
 import { useCatchDetection } from './hooks/useCatchDetection'
@@ -217,7 +218,6 @@ function App() {
         onRoundDurationChange={setSelectedRoundSeconds}
         onStartGame={startGame}
         onEndGame={endGame}
-        onRestartGame={restartGame}
       />
       <GameControlsPanel
         gameState={gameState}
@@ -233,6 +233,15 @@ function App() {
       />
       <TargetInfoPanel targets={targets} onTargetClick={handleTargetClick} />
       <CaughtInventoryPanel caughtTargets={caughtTargets} />
+
+      {gameState === 'ended' && (
+        <RoundSummaryPanel
+          score={score}
+          caughtTargets={caughtTargets}
+          level={level}
+          onRestartGame={restartGame}
+        />
+      )}
 
       {pendingDestination && (
         <MoveConfirmPanel

@@ -5,7 +5,6 @@ function GameSessionPanel({
   onRoundDurationChange,
   onStartGame,
   onEndGame,
-  onRestartGame,
 }) {
   function handleDurationChange(event) {
     onRoundDurationChange(Number(event.target.value))
@@ -40,15 +39,6 @@ function GameSessionPanel({
         </button>
       )}
 
-      {gameState === 'ended' && (
-        <button
-          type="button"
-          className="primary-button"
-          onClick={onRestartGame}
-        >
-          Restart Game
-        </button>
-      )}
     </section>
   )
 }
