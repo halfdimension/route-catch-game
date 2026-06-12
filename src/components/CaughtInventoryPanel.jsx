@@ -24,8 +24,10 @@ function CaughtInventoryPanel({ caughtTargets }) {
                 {target.name}
               </strong>
               <span>
-                {target.rarity} · {target.score} pts · {target.difficulty}
+                {target.type} · {target.rarity} · {target.score} pts ·{' '}
+                {target.difficulty}
               </span>
+              <span>{target.shortDescription}</span>
               <time dateTime={new Date(target.caughtAt).toISOString()}>
                 {formatCaughtTime(target.caughtAt)}
               </time>

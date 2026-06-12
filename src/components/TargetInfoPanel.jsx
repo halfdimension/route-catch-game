@@ -44,9 +44,10 @@ function TargetInfoPanel({ targets, onTargetClick }) {
                     {target.name}
                   </strong>
                   <span>
-                    {target.rarity} · {target.score} pts ·{' '}
+                    {target.type} · {target.rarity} · {target.score} pts ·{' '}
                     {getRemainingSeconds(target)}s
                   </span>
+                  <span>{target.shortDescription}</span>
                   <span>Difficulty: {target.difficulty}</span>
                   {routeDistance && <span>Route: {routeDistance}</span>}
                   {estimatedTravelSeconds && (
