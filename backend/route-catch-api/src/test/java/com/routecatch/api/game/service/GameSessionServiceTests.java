@@ -8,8 +8,10 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
+import com.routecatch.api.game.creature.CreatureCatalogService;
 import com.routecatch.api.game.dto.SubmitCatchRequest;
 import com.routecatch.api.game.dto.SubmitCatchResponse;
+import com.routecatch.api.game.exception.CreatureNotFoundException;
 import com.routecatch.api.game.exception.GameSessionNotFoundException;
 import com.routecatch.api.game.exception.InvalidGameSessionStateException;
 import com.routecatch.api.game.model.GameSession;
@@ -17,7 +19,9 @@ import com.routecatch.api.game.model.GameSessionStatus;
 
 class GameSessionServiceTests {
 
-	private final GameSessionService service = new GameSessionService();
+	private final GameSessionService service = new GameSessionService(
+		new CreatureCatalogService()
+	);
 
 	@Test
 	void createSessionReturnsCreatedSession() {
@@ -77,7 +81,7 @@ class GameSessionServiceTests {
 
 		SubmitCatchResponse response = service.submitCatch(
 			created.sessionId(),
-			catchRequest("sparkbit", 10)
+			catchRequest("sparkbit", null)
 		);
 
 		assertEquals(10, response.score());
@@ -91,15 +95,36 @@ class GameSessionServiceTests {
 		GameSession created = service.createSession(60);
 		service.startSession(created.sessionId());
 
-		service.submitCatch(created.sessionId(), catchRequest("sparkbit", 10));
+		service.submitCatch(created.sessionId(), catchRequest("sparkbit", null));
 		SubmitCatchResponse response = service.submitCatch(
 			created.sessionId(),
-			catchRequest("voltfox", 25)
+			catchRequest("voltfox", null)
 		);
 
-		assertEquals(35, response.score());
+		assertEquals(40, response.score());
 		assertEquals(2, response.caughtCount());
-		assertEquals(35, service.getSession(created.sessionId()).score());
+		assertEquals(40, service.getSession(created.sessionId()).score());
+	}
+
+	@Test
+	void frontendSuppliedCatchValuesAreIgnored() {
+		GameSession created = service.createSession(60);
+		service.startSession(created.sessionId());
+
+		SubmitCatchResponse response = service.submitCatch(
+			created.sessionId(),
+			new SubmitCatchRequest(
+				"sparkbit",
+				"Fake Creature",
+				"legendary",
+				9999
+			)
+		);
+
+		assertEquals(10, response.score());
+		assertEquals(10, response.acceptedCatchScore());
+		assertEquals("Sparkbit", response.creatureName());
+		assertEquals("common", response.rarity());
 	}
 
 	@Test
@@ -110,7 +135,7 @@ class GameSessionServiceTests {
 			InvalidGameSessionStateException.class,
 			() -> service.submitCatch(
 				created.sessionId(),
-				catchRequest("sparkbit", 10)
+				catchRequest("sparkbit", null)
 			)
 		);
 	}
@@ -125,7 +150,7 @@ class GameSessionServiceTests {
 			InvalidGameSessionStateException.class,
 			() -> service.submitCatch(
 				created.sessionId(),
-				catchRequest("sparkbit", 10)
+				catchRequest("sparkbit", null)
 			)
 		);
 	}
@@ -136,12 +161,29 @@ class GameSessionServiceTests {
 			GameSessionNotFoundException.class,
 			() -> service.submitCatch(
 				UUID.randomUUID(),
-				catchRequest("sparkbit", 10)
+				catchRequest("sparkbit", null)
 			)
 		);
 	}
 
-	private SubmitCatchRequest catchRequest(String creatureId, int scoreValue) {
+	@Test
+	void unknownCreatureCannotBeCaught() {
+		GameSession created = service.createSession(60);
+		service.startSession(created.sessionId());
+
+		assertThrows(
+			CreatureNotFoundException.class,
+			() -> service.submitCatch(
+				created.sessionId(),
+				catchRequest("unknown-creature", null)
+			)
+		);
+	}
+
+	private SubmitCatchRequest catchRequest(
+		String creatureId,
+		Integer scoreValue
+	) {
 		return new SubmitCatchRequest(
 			creatureId,
 			creatureId,

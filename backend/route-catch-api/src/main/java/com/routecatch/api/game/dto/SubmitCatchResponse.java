@@ -1,5 +1,6 @@
 package com.routecatch.api.game.dto;
 
+import com.routecatch.api.game.creature.CreatureDefinition;
 import com.routecatch.api.game.model.GameSession;
 import com.routecatch.api.game.model.GameSessionStatus;
 
@@ -16,17 +17,17 @@ public record SubmitCatchResponse(
 
 	public static SubmitCatchResponse from(
 		GameSession session,
-		SubmitCatchRequest request
+		CreatureDefinition creature
 	) {
 		return new SubmitCatchResponse(
 			session.sessionId().toString(),
 			session.status(),
 			session.score(),
 			session.caughtCount(),
-			request.scoreValue(),
-			request.creatureId(),
-			request.creatureName(),
-			request.rarity()
+			creature.scoreValue(),
+			creature.creatureId(),
+			creature.creatureName(),
+			creature.rarity()
 		);
 	}
 }

@@ -14,12 +14,18 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.routecatch.api.game.model.GameSession;
+import com.routecatch.api.game.service.GameSessionService;
+
 @SpringBootTest
 @AutoConfigureMockMvc
 class GameSessionApiTests {
 
 	@Autowired
 	private MockMvc mockMvc;
+
+	@Autowired
+	private GameSessionService gameSessionService;
 
 	@Test
 	void createSessionReturnsCreatedStatus() throws Exception {
@@ -71,7 +77,7 @@ class GameSessionApiTests {
 	}
 
 	@Test
-	void invalidCatchScoreReturnsValidationError() throws Exception {
+	void missingCreatureIdReturnsValidationError() throws Exception {
 		UUID sessionId = UUID.randomUUID();
 
 		mockMvc.perform(post(
@@ -81,7 +87,6 @@ class GameSessionApiTests {
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
 					{
-						"creatureId": "sparkbit",
 						"creatureName": "Sparkbit",
 						"rarity": "common",
 						"scoreValue": 0
@@ -89,9 +94,40 @@ class GameSessionApiTests {
 					"""))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"))
-			.andExpect(jsonPath("$.message").value("scoreValue must be at least 1"))
+			.andExpect(jsonPath("$.message").value("creatureId must not be blank"))
 			.andExpect(jsonPath("$.path").value(
 				"/api/game/sessions/" + sessionId + "/catches"
+			));
+	}
+
+	@Test
+	void creatureCatalogEndpointReturnsBackendCatalog() throws Exception {
+		mockMvc.perform(get("/api/game/creatures"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(9))
+			.andExpect(jsonPath("$[0].creatureId").value("sparkbit"))
+			.andExpect(jsonPath("$[0].scoreValue").value(10))
+			.andExpect(jsonPath("$[8].creatureId").value("chronodrake"))
+			.andExpect(jsonPath("$[8].scoreValue").value(100));
+	}
+
+	@Test
+	void unknownCreatureReturnsNotFound() throws Exception {
+		GameSession session = gameSessionService.createSession(60);
+		gameSessionService.startSession(session.sessionId());
+
+		mockMvc.perform(post(
+				"/api/game/sessions/{sessionId}/catches",
+				session.sessionId()
+			)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"creatureId": "unknown-creature"}
+					"""))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.errorCode").value("CREATURE_NOT_FOUND"))
+			.andExpect(jsonPath("$.message").value(
+				"Creature not found: unknown-creature"
 			));
 	}
 }

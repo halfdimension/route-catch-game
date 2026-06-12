@@ -6,6 +6,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
 
+import com.routecatch.api.game.creature.CreatureCatalogService;
+import com.routecatch.api.game.creature.CreatureDefinition;
 import com.routecatch.api.game.dto.SubmitCatchRequest;
 import com.routecatch.api.game.dto.SubmitCatchResponse;
 import com.routecatch.api.game.exception.GameSessionNotFoundException;
@@ -17,6 +19,11 @@ import com.routecatch.api.game.model.GameSessionStatus;
 public class GameSessionService {
 
 	private final ConcurrentHashMap<UUID, GameSession> sessions = new ConcurrentHashMap<>();
+	private final CreatureCatalogService creatureCatalogService;
+
+	public GameSessionService(CreatureCatalogService creatureCatalogService) {
+		this.creatureCatalogService = creatureCatalogService;
+	}
 
 	public GameSession createSession(int durationSeconds) {
 		Instant createdAt = Instant.now();
@@ -101,6 +108,10 @@ public class GameSessionService {
 		UUID sessionId,
 		SubmitCatchRequest request
 	) {
+		getSession(sessionId);
+		CreatureDefinition creature =
+			creatureCatalogService.getCreatureById(request.creatureId());
+
 		GameSession updatedSession = sessions.compute(sessionId, (id, session) -> {
 			if (session == null) {
 				throw new GameSessionNotFoundException(id);
@@ -119,11 +130,11 @@ public class GameSessionService {
 				session.startedAt(),
 				session.endedAt(),
 				session.durationSeconds(),
-				session.score() + request.scoreValue(),
+				session.score() + creature.scoreValue(),
 				session.caughtCount() + 1
 			);
 		});
 
-		return SubmitCatchResponse.from(updatedSession, request);
+		return SubmitCatchResponse.from(updatedSession, creature);
 	}
 }

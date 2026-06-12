@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.routecatch.api.dto.ApiErrorResponse;
+import com.routecatch.api.game.exception.CreatureNotFoundException;
 import com.routecatch.api.game.exception.GameSessionNotFoundException;
 import com.routecatch.api.game.exception.InvalidGameSessionStateException;
 
@@ -19,6 +20,19 @@ import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+	@ExceptionHandler(CreatureNotFoundException.class)
+	public ResponseEntity<ApiErrorResponse> handleCreatureNotFound(
+		CreatureNotFoundException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.NOT_FOUND,
+			"CREATURE_NOT_FOUND",
+			exception.getMessage(),
+			request
+		);
+	}
 
 	@ExceptionHandler(GameSessionNotFoundException.class)
 	public ResponseEntity<ApiErrorResponse> handleGameSessionNotFound(
