@@ -1,11 +1,10 @@
-function ScorePanel({ score, caughtCount, lastCaughtName, caughtNotice }) {
+function ScorePanel({ score, caughtCount, lastCaughtName }) {
   return (
     <section className="score-panel" aria-label="Score">
       <p>Score</p>
       <strong>{score}</strong>
       <span>Caught: {caughtCount}</span>
       {lastCaughtName && <span>Last: {lastCaughtName}</span>}
-      {caughtNotice && <div className="caught-notice">{caughtNotice}</div>}
     </section>
   )
 }

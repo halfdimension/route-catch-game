@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import CatchToast from './components/CatchToast'
 import CaughtInventoryPanel from './components/CaughtInventoryPanel'
 import GameControlsPanel from './components/GameControlsPanel'
 import GameSessionPanel from './components/GameSessionPanel'
@@ -11,6 +12,7 @@ import { useCatchDetection } from './hooks/useCatchDetection'
 import { useGameSession } from './hooks/useGameSession'
 import { usePlayerState } from './hooks/usePlayerState'
 import { useTargetSpawner } from './hooks/useTargetSpawner'
+import { playCatchSound } from './utils/soundEffects'
 
 function App() {
   const {
@@ -46,7 +48,7 @@ function App() {
   } = useTargetSpawner(playerPosition, simulationSpeed, gameState === 'running')
   const [caughtTargets, setCaughtTargets] = useState([])
   const [score, setScore] = useState(0)
-  const [caughtNotice, setCaughtNotice] = useState('')
+  const [catchToastTarget, setCatchToastTarget] = useState(null)
   const previousGameStateRef = useRef(gameState)
   const targetsRef = useRef(targets)
   const lastCaughtTarget = caughtTargets[0]
@@ -63,7 +65,8 @@ function App() {
         ...currentCaughtTargets,
       ])
       setScore((currentScore) => currentScore + target.score)
-      setCaughtNotice(`Caught ${target.name}!`)
+      setCatchToastTarget(target)
+      playCatchSound(target.rarity)
     },
     [removeTarget],
   )
@@ -76,16 +79,16 @@ function App() {
   })
 
   useEffect(() => {
-    if (!caughtNotice) {
+    if (!catchToastTarget) {
       return undefined
     }
 
     const timerId = setTimeout(() => {
-      setCaughtNotice('')
-    }, 2500)
+      setCatchToastTarget(null)
+    }, 1500)
 
     return () => clearTimeout(timerId)
-  }, [caughtNotice])
+  }, [catchToastTarget])
 
   useEffect(() => {
     const previousGameState = previousGameStateRef.current
@@ -102,7 +105,7 @@ function App() {
   function resetScore() {
     setCaughtTargets([])
     setScore(0)
-    setCaughtNotice('')
+    setCatchToastTarget(null)
   }
 
   function resetPlayer() {
@@ -173,8 +176,8 @@ function App() {
         score={score}
         caughtCount={caughtTargets.length}
         lastCaughtName={lastCaughtTarget?.name}
-        caughtNotice={caughtNotice}
       />
+      <CatchToast caughtTarget={catchToastTarget} />
       <GameSessionPanel
         gameState={gameState}
         remainingSeconds={remainingSeconds}
