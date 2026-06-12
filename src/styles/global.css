@@ -321,3 +321,58 @@ button:focus-visible {
   font-style: normal;
   font-weight: 700;
 }
+
+.caught-inventory-panel {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1000;
+  width: min(240px, calc(100vw - 32px));
+  max-height: min(220px, calc(100vh - 360px));
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(23, 32, 51, 0.15);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
+}
+
+.caught-inventory-panel p {
+  margin: 0 0 8px;
+  color: #172033;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.caught-inventory-panel > span {
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.caught-inventory-panel ul {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.caught-inventory-panel li {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(243, 246, 248, 0.9);
+}
+
+.caught-inventory-panel strong {
+  color: #172033;
+  font-size: 13px;
+}
+
+.caught-inventory-panel li span,
+.caught-inventory-panel time {
+  color: #4b5563;
+  font-size: 12px;
+  text-transform: capitalize;
+}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import CaughtInventoryPanel from './components/CaughtInventoryPanel'
 import GameControlsPanel from './components/GameControlsPanel'
 import GameMap from './components/GameMap'
 import MovementStatusPanel from './components/MovementStatusPanel'
@@ -154,6 +155,7 @@ function App() {
         onSimulationSpeedChange={setSimulationSpeed}
       />
       <TargetInfoPanel targets={targets} />
+      <CaughtInventoryPanel caughtTargets={caughtTargets} />
 
       {pendingDestination && (
         <MoveConfirmPanel
