@@ -1,6 +1,6 @@
 # Architecture
 
-Route Catch Game is currently a frontend prototype built with React, Vite, and Leaflet. The browser owns the game loop, map interaction, routing requests, animation, target spawning, session timer, score, and caught inventory.
+Route Catch Game is currently a frontend prototype built with React, Vite, and Leaflet. The browser owns the game loop, map interaction, routing requests, animation, target spawning, configurable session timer, progression, score, and caught inventory.
 
 ## Current Prototype
 
@@ -8,17 +8,18 @@ Route Catch Game is currently a frontend prototype built with React, Vite, and L
 React UI -> osrmClient.js -> OSRM server
 ```
 
-- React + Vite render the application shell, panels, controls, and gameplay state.
+- React + Vite render the application shell, compact player HUD, controls, round summary, and gameplay state.
 - Leaflet and React Leaflet render the map, player marker, route line, and creature markers.
 - The frontend calls OSRM directly through `src/api/osrmClient.js`.
 - Route animation is handled in the browser by walking along decoded OSRM route coordinates.
-- Target spawning is handled in the browser, including rarity selection, road snapping, route feasibility, and expiry.
-- Game session state is handled in the browser with a local timer.
+- Target spawning is handled in the browser, including level-based rarity selection, road snapping, route feasibility, and expiry.
+- Game session state and selectable round duration are handled in the browser with a local timer.
+- XP, levels, speed-limit bonuses, score, catches, and round summaries are calculated from local frontend state.
 
 ## Main Modules
 
 - `src/components`: Presentational and interactive UI pieces such as the map, panels, markers, route line, inventory, and feedback toast.
-- `src/hooks`: Frontend gameplay logic for player state, route animation, target spawning, catch detection, and game sessions.
+- `src/hooks`: Frontend gameplay logic for player state, progression, route animation, target spawning, catch detection, and game sessions.
 - `src/config`: Centralized configuration for game constants, map defaults, and routing URLs.
 - `src/api`: Client-side API adapters, currently direct OSRM route and nearest-road calls.
 - `src/data`: Local prototype data such as the creature catalog and mock user profile.

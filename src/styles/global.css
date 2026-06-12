@@ -89,31 +89,6 @@ button:focus-visible {
   flex: 1;
 }
 
-.target-confirm-details {
-  display: grid;
-  gap: 3px;
-  margin-bottom: 12px;
-}
-
-.target-confirm-details strong {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #172033;
-  font-size: 14px;
-}
-
-.target-confirm-details span {
-  margin: 0;
-  color: #4b5563;
-  font-size: 13px;
-  text-transform: capitalize;
-}
-
-.target-confirm-details .creature-symbol {
-  margin: 0;
-}
-
 .primary-button {
   border-color: #1d4ed8;
   color: #ffffff;
@@ -165,40 +140,6 @@ button:focus-visible {
 }
 
 .movement-status-panel span {
-  color: #4b5563;
-  font-size: 13px;
-}
-
-.score-panel {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 1000;
-  width: min(136px, calc(100vw - 32px));
-  padding: 10px;
-  border: 1px solid rgba(23, 32, 51, 0.15);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
-}
-
-.score-panel p {
-  margin: 0 0 3px;
-  color: #172033;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.score-panel strong {
-  display: block;
-  margin-bottom: 3px;
-  color: #172033;
-  font-size: 24px;
-  line-height: 1;
-}
-
-.score-panel span {
-  display: block;
   color: #4b5563;
   font-size: 13px;
 }
@@ -291,40 +232,6 @@ button:focus-visible {
   margin-top: 7px;
   color: #4b5563;
   font-size: 12px;
-}
-
-.progression-panel {
-  position: absolute;
-  top: 92px;
-  left: 16px;
-  z-index: 1000;
-  width: min(154px, calc(100vw - 32px));
-  padding: 10px;
-  border: 1px solid rgba(23, 32, 51, 0.15);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
-}
-
-.progression-panel p {
-  margin: 0 0 3px;
-  color: #172033;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.progression-panel strong {
-  display: block;
-  margin-bottom: 3px;
-  color: #172033;
-  font-size: 20px;
-  line-height: 1;
-}
-
-.progression-panel span {
-  display: block;
-  color: #4b5563;
-  font-size: 13px;
 }
 
 .game-session-panel {
@@ -634,17 +541,6 @@ button:focus-visible {
   font-size: 13px;
   line-height: 1;
   text-transform: none;
-}
-
-.road-snapped-label {
-  width: fit-content;
-  padding: 2px 6px;
-  border-radius: 999px;
-  color: #1d4ed8;
-  background: #dbeafe;
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 700;
 }
 
 .caught-inventory-panel {

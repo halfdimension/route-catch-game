@@ -10,15 +10,17 @@ For a concise technical overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.m
 
 - Interactive Leaflet map centered around Delhi.
 - Player avatar marker with mock user profile data.
+- Compact player HUD with score, catches, level, XP, and session status.
 - Plain map click movement with route confirmation.
 - Direct creature chasing from map markers and the active target list.
 - OSRM route fetching and animated movement along route geometry.
 - OSRM nearest-road snapping for spawned creature targets.
-- Timed 60-second game sessions with ready, running, and ended states.
-- Creature catalog with common, rare, and legendary creatures.
+- Configurable 60, 120, 180, or 300-second game sessions.
+- Original route-game creature catalog with common, rare, and legendary creatures.
+- XP progression, levels, speed-limit bonuses, and level-based rarity weights.
 - ETA-based target difficulty from route distance and simulation speed.
 - Catch detection, scoring, catch toast feedback, and generated browser sound effects.
-- Caught creature inventory panel.
+- Collapsible recent catches panel and end-of-round summary.
 - Game controls for spawning, reset actions, and simulation speed up to 700 m/s.
 
 ## Tech Stack
@@ -112,18 +114,25 @@ src/
     GameSessionPanel.jsx
     MoveConfirmPanel.jsx
     MovementStatusPanel.jsx
+    PlayerHudPanel.jsx
     PlayerMarker.jsx
+    RoundSummaryPanel.jsx
     RouteLine.jsx
-    ScorePanel.jsx
     TargetInfoPanel.jsx
     TargetLayer.jsx
     TargetMarker.jsx
+  config/
+    gameConfig.js
+    mapConfig.js
+    progressionConfig.js
+    routingConfig.js
   data/
     creatureCatalog.js
     mockUserProfile.js
   hooks/
     useCatchDetection.js
     useGameSession.js
+    usePlayerProgression.js
     usePlayerState.js
     useRouteAnimation.js
     useTargetSpawner.js
