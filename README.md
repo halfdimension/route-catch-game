@@ -36,6 +36,14 @@ Install dependencies:
 npm install
 ```
 
+Optional environment setup:
+
+```bash
+cp .env.example .env
+```
+
+Configure `VITE_OSRM_BASE_URL` in `.env` if your OSRM service is not running at the default `http://localhost:5000`.
+
 Start the Vite development server:
 
 ```bash
@@ -61,6 +69,8 @@ The frontend expects OSRM at:
 ```text
 http://localhost:5000
 ```
+
+This value is configured by `VITE_OSRM_BASE_URL`. If the variable is not set, the app falls back to `http://localhost:5000`.
 
 One common local setup is to run OSRM with Docker and an OpenStreetMap extract. Example:
 
