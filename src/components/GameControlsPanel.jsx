@@ -8,8 +8,11 @@ function GameControlsPanel({
   onResetGame,
   onSimulationSpeedChange,
 }) {
+  const maxSimulationSpeed = 700
+
   function handleSpeedChange(event) {
-    onSimulationSpeedChange(Number(event.target.value))
+    const nextSpeed = Number(event.target.value)
+    onSimulationSpeedChange(Math.min(maxSimulationSpeed, Math.max(10, nextSpeed)))
   }
 
   return (
@@ -18,14 +21,24 @@ function GameControlsPanel({
 
       <label className="speed-control">
         <span>Speed: {simulationSpeed} m/s</span>
-        <input
-          type="range"
-          min="10"
-          max="240"
-          step="10"
-          value={simulationSpeed}
-          onChange={handleSpeedChange}
-        />
+        <div className="speed-control-inputs">
+          <input
+            type="range"
+            min="10"
+            max={maxSimulationSpeed}
+            step="10"
+            value={simulationSpeed}
+            onChange={handleSpeedChange}
+          />
+          <input
+            type="number"
+            min="10"
+            max={maxSimulationSpeed}
+            step="10"
+            value={simulationSpeed}
+            onChange={handleSpeedChange}
+          />
+        </div>
       </label>
 
       <div className="game-control-actions">

@@ -19,7 +19,10 @@ function CaughtInventoryPanel({ caughtTargets }) {
         <ul>
           {caughtTargets.map((target) => (
             <li key={`${target.id}-${target.caughtAt}`}>
-              <strong>{target.name}</strong>
+              <strong>
+                <span className="creature-symbol">{target.symbol}</span>
+                {target.name}
+              </strong>
               <span>
                 {target.rarity} · {target.score} pts · {target.difficulty}
               </span>

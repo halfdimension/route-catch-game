@@ -22,7 +22,7 @@ function formatSeconds(seconds) {
   return `${Math.ceil(seconds)}s`
 }
 
-function TargetInfoPanel({ targets }) {
+function TargetInfoPanel({ targets, onTargetClick }) {
   return (
     <section className="target-info-panel" aria-label="Active targets">
       <p>Targets</p>
@@ -38,18 +38,24 @@ function TargetInfoPanel({ targets }) {
 
             return (
               <li key={target.id}>
-                <strong>{target.name}</strong>
-                <span>
-                  {target.rarity} · {getRemainingSeconds(target)}s
-                </span>
-                <span>Difficulty: {target.difficulty}</span>
-                {routeDistance && <span>Route: {routeDistance}</span>}
-                {estimatedTravelSeconds && (
-                  <span>ETA: {estimatedTravelSeconds}</span>
-                )}
-                {target.snappedToRoad && (
-                  <em className="road-snapped-label">road-snapped</em>
-                )}
+                <button type="button" onClick={() => onTargetClick(target)}>
+                  <strong>
+                    <span className="creature-symbol">{target.symbol}</span>
+                    {target.name}
+                  </strong>
+                  <span>
+                    {target.rarity} · {target.score} pts ·{' '}
+                    {getRemainingSeconds(target)}s
+                  </span>
+                  <span>Difficulty: {target.difficulty}</span>
+                  {routeDistance && <span>Route: {routeDistance}</span>}
+                  {estimatedTravelSeconds && (
+                    <span>ETA: {estimatedTravelSeconds}</span>
+                  )}
+                  {target.snappedToRoad && (
+                    <em className="road-snapped-label">road-snapped</em>
+                  )}
+                </button>
               </li>
             )
           })}

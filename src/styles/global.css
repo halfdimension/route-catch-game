@@ -96,6 +96,9 @@ button:focus-visible {
 }
 
 .target-confirm-details strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: #172033;
   font-size: 14px;
 }
@@ -105,6 +108,10 @@ button:focus-visible {
   color: #4b5563;
   font-size: 13px;
   text-transform: capitalize;
+}
+
+.target-confirm-details .creature-symbol {
+  margin: 0;
 }
 
 .primary-button {
@@ -282,6 +289,22 @@ button:focus-visible {
   accent-color: #2563eb;
 }
 
+.speed-control-inputs {
+  display: grid;
+  grid-template-columns: 1fr 64px;
+  gap: 8px;
+  align-items: center;
+}
+
+.speed-control-inputs input[type='number'] {
+  padding: 5px 6px;
+  border: 1px solid #c8d0d9;
+  border-radius: 6px;
+  color: #172033;
+  font: inherit;
+  font-size: 13px;
+}
+
 .game-control-actions {
   display: grid;
   gap: 8px;
@@ -333,14 +356,28 @@ button:focus-visible {
 }
 
 .target-info-panel li {
+  margin: 0;
+}
+
+.target-info-panel li button {
   display: grid;
   gap: 2px;
+  width: 100%;
   padding: 8px;
+  border: 0;
   border-radius: 6px;
+  text-align: left;
   background: rgba(243, 246, 248, 0.9);
 }
 
+.target-info-panel li button:hover {
+  background: rgba(229, 235, 242, 0.95);
+}
+
 .target-info-panel strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: #172033;
   font-size: 13px;
 }
@@ -349,6 +386,18 @@ button:focus-visible {
   color: #4b5563;
   font-size: 12px;
   text-transform: capitalize;
+}
+
+.creature-symbol {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: #172033;
+  font-size: 13px;
+  line-height: 1;
+  text-transform: none;
 }
 
 .road-snapped-label {
@@ -406,6 +455,9 @@ button:focus-visible {
 }
 
 .caught-inventory-panel strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: #172033;
   font-size: 13px;
 }
@@ -415,4 +467,29 @@ button:focus-visible {
   color: #4b5563;
   font-size: 12px;
   text-transform: capitalize;
+}
+
+.caught-inventory-panel .creature-symbol {
+  color: #172033;
+  font-size: 13px;
+  text-transform: none;
+}
+
+.target-creature-marker {
+  background: transparent;
+  border: 0;
+}
+
+.target-creature-marker span {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 8px 16px rgba(23, 32, 51, 0.22);
 }

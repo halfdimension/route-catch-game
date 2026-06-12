@@ -6,7 +6,6 @@ import GameMap from './components/GameMap'
 import MovementStatusPanel from './components/MovementStatusPanel'
 import MoveConfirmPanel from './components/MoveConfirmPanel'
 import ScorePanel from './components/ScorePanel'
-import TargetConfirmPanel from './components/TargetConfirmPanel'
 import TargetInfoPanel from './components/TargetInfoPanel'
 import { useCatchDetection } from './hooks/useCatchDetection'
 import { useGameSession } from './hooks/useGameSession'
@@ -45,22 +44,20 @@ function App() {
     clearTargets,
     toggleSpawning,
   } = useTargetSpawner(playerPosition, simulationSpeed, gameState === 'running')
-  const [pendingTarget, setPendingTarget] = useState(null)
   const [caughtTargets, setCaughtTargets] = useState([])
   const [score, setScore] = useState(0)
   const [caughtNotice, setCaughtNotice] = useState('')
   const previousGameStateRef = useRef(gameState)
-  const activePendingTarget = pendingTarget
-    ? targets.find((target) => target.id === pendingTarget.id)
-    : null
+  const targetsRef = useRef(targets)
   const lastCaughtTarget = caughtTargets[0]
+
+  useEffect(() => {
+    targetsRef.current = targets
+  }, [targets])
 
   const handleCatchTarget = useCallback(
     (target) => {
       removeTarget(target.id)
-      setPendingTarget((currentTarget) =>
-        currentTarget?.id === target.id ? null : currentTarget,
-      )
       setCaughtTargets((currentCaughtTargets) => [
         { ...target, caughtAt: Date.now() },
         ...currentCaughtTargets,
@@ -98,7 +95,6 @@ function App() {
       return
     }
 
-    setPendingTarget(null)
     clearTargets()
     stopPlayerMovement()
   }, [clearTargets, gameState, stopPlayerMovement])
@@ -110,12 +106,10 @@ function App() {
   }
 
   function resetPlayer() {
-    setPendingTarget(null)
     resetPlayerState()
   }
 
   function resetGame() {
-    setPendingTarget(null)
     resetPlayerState()
     clearTargets()
     resetScore()
@@ -123,7 +117,6 @@ function App() {
   }
 
   function restartGame() {
-    setPendingTarget(null)
     resetPlayerState()
     clearTargets()
     resetScore()
@@ -131,29 +124,33 @@ function App() {
   }
 
   function handleMapClick(destination) {
-    setPendingTarget(null)
     setPendingDestination(destination)
   }
 
-  function handleTargetClick(target) {
-    clearPendingDestination()
-    setPendingTarget(target)
-  }
+  const handleTargetClick = useCallback(
+    async (target) => {
+      if (target.expiresAt <= Date.now()) {
+        return
+      }
 
-  async function confirmPendingTargetMove() {
-    if (!activePendingTarget) {
-      return
-    }
-
-    const didStartMoving = await moveToDestination({
-      lat: activePendingTarget.lat,
-      lon: activePendingTarget.lon,
-    })
-
-    if (didStartMoving) {
-      setPendingTarget(null)
-    }
-  }
+      clearPendingDestination()
+      await moveToDestination(
+        {
+          lat: target.lat,
+          lon: target.lon,
+        },
+        {
+          shouldStart: () =>
+            targetsRef.current.some(
+              (currentTarget) =>
+                currentTarget.id === target.id &&
+                currentTarget.expiresAt > Date.now(),
+            ),
+        },
+      )
+    },
+    [clearPendingDestination, moveToDestination],
+  )
 
   return (
     <main className="game-shell">
@@ -195,7 +192,7 @@ function App() {
         onResetGame={resetGame}
         onSimulationSpeedChange={setSimulationSpeed}
       />
-      <TargetInfoPanel targets={targets} />
+      <TargetInfoPanel targets={targets} onTargetClick={handleTargetClick} />
       <CaughtInventoryPanel caughtTargets={caughtTargets} />
 
       {pendingDestination && (
@@ -207,14 +204,6 @@ function App() {
         />
       )}
 
-      {activePendingTarget && (
-        <TargetConfirmPanel
-          target={activePendingTarget}
-          onConfirm={confirmPendingTargetMove}
-          onCancel={() => setPendingTarget(null)}
-          isLoading={isRouteLoading}
-        />
-      )}
     </main>
   )
 }

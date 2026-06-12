@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchNearestRoadPoint, fetchRoute } from '../api/osrmClient'
+import { getCreaturesByRarity } from '../data/creatureCatalog'
 
 const SPAWN_INTERVAL_MS = 5000
 const EARTH_RADIUS_METERS = 6371000
@@ -7,31 +8,19 @@ const EARTH_RADIUS_METERS = 6371000
 const TARGET_RULES = {
   common: {
     lifetimeMs: 12000,
-    score: 10,
     minDistanceMeters: 100,
     maxDistanceMeters: 250,
-    color: '#f97316',
   },
   rare: {
     lifetimeMs: 8000,
-    score: 30,
     minDistanceMeters: 250,
     maxDistanceMeters: 500,
-    color: '#ef4444',
   },
   legendary: {
     lifetimeMs: 5000,
-    score: 100,
     minDistanceMeters: 500,
     maxDistanceMeters: 800,
-    color: '#9333ea',
   },
-}
-
-const TARGET_NAMES = {
-  common: ['Street Spark', 'Metro Token', 'Route Dot'],
-  rare: ['Signal Flare', 'Hidden Turn', 'Fast Lane'],
-  legendary: ['Purple Beacon', 'Delhi Crown', 'Night Pulse'],
 }
 
 function getRandomRarity() {
@@ -52,9 +41,9 @@ function getRandomBetween(min, max) {
   return min + Math.random() * (max - min)
 }
 
-function getRandomName(rarity) {
-  const names = TARGET_NAMES[rarity]
-  return names[Math.floor(Math.random() * names.length)]
+function getRandomCreature(rarity) {
+  const creatures = getCreaturesByRarity(rarity)
+  return creatures[Math.floor(Math.random() * creatures.length)]
 }
 
 function getPointAtDistance(origin, distanceMeters, bearingRadians) {
@@ -103,6 +92,7 @@ function getDifficulty(estimatedGameTravelSeconds, lifetimeSeconds) {
 async function createTarget(playerPosition, simulationSpeedMetersPerSecond) {
   const rarity = getRandomRarity()
   const rules = TARGET_RULES[rarity]
+  const creature = getRandomCreature(rarity)
   const distanceMeters = getRandomBetween(
     rules.minDistanceMeters,
     rules.maxDistanceMeters,
@@ -152,9 +142,12 @@ async function createTarget(playerPosition, simulationSpeedMetersPerSecond) {
     rawLat: rawPosition.lat,
     rawLon: rawPosition.lon,
     snappedToRoad,
-    name: getRandomName(rarity),
+    creatureId: creature.id,
+    name: creature.name,
     rarity,
-    score: rules.score,
+    score: creature.score,
+    color: creature.color,
+    symbol: creature.symbol,
     expiresAt: now + rules.lifetimeMs,
     lifetimeMs: rules.lifetimeMs,
     routeDistanceMeters,
