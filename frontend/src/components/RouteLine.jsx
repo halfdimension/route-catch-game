@@ -1,6 +1,6 @@
 import { Polyline } from 'react-leaflet'
 
-function RouteLine({ coordinates }) {
+function RouteLine({ coordinates, isChaseActive = false }) {
   if (!coordinates.length) {
     return null
   }
@@ -9,9 +9,10 @@ function RouteLine({ coordinates }) {
     <Polyline
       positions={coordinates}
       pathOptions={{
-        color: '#2563eb',
-        opacity: 0.9,
-        weight: 5,
+        color: isChaseActive ? '#7c3aed' : '#2563eb',
+        dashArray: isChaseActive ? '10 8' : undefined,
+        opacity: isChaseActive ? 0.95 : 0.9,
+        weight: isChaseActive ? 6 : 5,
       }}
     />
   )

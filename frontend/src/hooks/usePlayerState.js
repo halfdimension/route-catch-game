@@ -64,7 +64,7 @@ export function usePlayerState() {
       }
 
       setRouteCoordinates(nextRouteCoordinates)
-      startAnimation(nextRouteCoordinates)
+      startAnimation(nextRouteCoordinates, options.onComplete)
       return true
     } catch (error) {
       if (routeRequestId !== routeRequestIdRef.current) {

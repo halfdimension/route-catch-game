@@ -1,6 +1,11 @@
 import TargetMarker from './TargetMarker'
 
-function TargetLayer({ targets, onTargetClick }) {
+function TargetLayer({
+  targets,
+  onTargetClick,
+  chasedTargetId,
+  routingTargetId,
+}) {
   return (
     <>
       {targets.map((target) => (
@@ -8,6 +13,8 @@ function TargetLayer({ targets, onTargetClick }) {
           key={target.id}
           target={target}
           onClick={onTargetClick}
+          isChased={target.id === chasedTargetId}
+          isRouting={target.id === routingTargetId}
         />
       ))}
     </>

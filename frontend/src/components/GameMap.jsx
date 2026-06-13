@@ -34,6 +34,8 @@ function GameMap({
   routeCoordinates,
   targets,
   caughtTarget,
+  chasedTargetId,
+  routingTargetId,
   onMapClick,
   onTargetClick,
 }) {
@@ -50,8 +52,16 @@ function GameMap({
       />
 
       <MapClickHandler onMapClick={onMapClick} />
-      <RouteLine coordinates={routeCoordinates} />
-      <TargetLayer targets={targets} onTargetClick={onTargetClick} />
+      <RouteLine
+        coordinates={routeCoordinates}
+        isChaseActive={Boolean(chasedTargetId)}
+      />
+      <TargetLayer
+        targets={targets}
+        onTargetClick={onTargetClick}
+        chasedTargetId={chasedTargetId}
+        routingTargetId={routingTargetId}
+      />
       <CatchMapEffect caughtTarget={caughtTarget} />
       <PlayerMarker position={playerPosition} />
 

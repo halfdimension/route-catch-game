@@ -70,6 +70,39 @@ function App() {
     addXp,
     resetProgression,
   } = usePlayerProgression()
+  const [chasedTargetId, setChasedTargetId] = useState(null)
+  const [routingTargetId, setRoutingTargetId] = useState(null)
+  const chasedTargetIdRef = useRef(null)
+  const routingTargetIdRef = useRef(null)
+
+  const updateChasedTargetId = useCallback((targetId) => {
+    chasedTargetIdRef.current = targetId
+    setChasedTargetId(targetId)
+  }, [])
+
+  const updateRoutingTargetId = useCallback((targetId) => {
+    routingTargetIdRef.current = targetId
+    setRoutingTargetId(targetId)
+  }, [])
+
+  const clearChaseState = useCallback(() => {
+    updateChasedTargetId(null)
+    updateRoutingTargetId(null)
+  }, [updateChasedTargetId, updateRoutingTargetId])
+
+  const handleTargetExpired = useCallback(
+    (target) => {
+      if (chasedTargetIdRef.current !== target.id) {
+        return
+      }
+
+      stopPlayerMovement()
+      clearChaseState()
+      showRouteMessage(TARGET_EXPIRED_MESSAGE)
+    },
+    [clearChaseState, showRouteMessage, stopPlayerMovement],
+  )
+
   const {
     targets,
     isSpawningPaused,
@@ -81,6 +114,7 @@ function App() {
     simulationSpeed,
     gameState === 'running',
     level,
+    handleTargetExpired,
   )
   const [caughtTargets, setCaughtTargets] = useState([])
   const [score, setScore] = useState(0)
@@ -96,6 +130,10 @@ function App() {
   const handleCatchTarget = useCallback(
     (target) => {
       removeTarget(target.id)
+      if (chasedTargetIdRef.current === target.id) {
+        stopPlayerMovement()
+        clearChaseState()
+      }
       setCaughtTargets((currentCaughtTargets) => [
         { ...target, caughtAt: Date.now() },
         ...currentCaughtTargets,
@@ -111,7 +149,13 @@ function App() {
         }
       })
     },
-    [addXp, removeTarget, submitBackendCatch],
+    [
+      addXp,
+      clearChaseState,
+      removeTarget,
+      stopPlayerMovement,
+      submitBackendCatch,
+    ],
   )
 
   useCatchDetection({
@@ -143,6 +187,7 @@ function App() {
 
     clearTargets()
     stopPlayerMovement()
+    clearChaseState()
     void finishSession(
       'Round ended locally, but the backend session could not be closed.',
     ).then((didEndSession) => {
@@ -150,7 +195,13 @@ function App() {
         setHistoryRefreshVersion((version) => version + 1)
       }
     })
-  }, [clearTargets, finishSession, gameState, stopPlayerMovement])
+  }, [
+    clearChaseState,
+    clearTargets,
+    finishSession,
+    gameState,
+    stopPlayerMovement,
+  ])
 
   function resetScore() {
     setCaughtTargets([])
@@ -160,11 +211,13 @@ function App() {
 
   function resetPlayer() {
     resetPlayerState()
+    clearChaseState()
   }
 
   function resetGame() {
     void finishSession()
     resetPlayerState()
+    clearChaseState()
     clearTargets()
     resetScore()
     resetProgression()
@@ -197,6 +250,7 @@ function App() {
     }
 
     resetPlayerState()
+    clearChaseState()
     clearTargets()
     resetScore()
     resetProgression()
@@ -208,6 +262,16 @@ function App() {
     setPendingDestination(destination)
   }
 
+  async function handleConfirmPendingMove() {
+    clearChaseState()
+    await confirmPendingMove()
+  }
+
+  function handleCancelChase() {
+    stopPlayerMovement()
+    clearChaseState()
+  }
+
   const isTargetActive = useCallback((targetId) => {
     return targetsRef.current.some(
       (currentTarget) =>
@@ -217,13 +281,23 @@ function App() {
 
   const handleTargetClick = useCallback(
     async (target) => {
+      if (
+        routingTargetIdRef.current === target.id ||
+        chasedTargetIdRef.current === target.id
+      ) {
+        return
+      }
+
       if (!isTargetActive(target.id)) {
         showRouteMessage(TARGET_EXPIRED_MESSAGE)
         return
       }
 
       clearPendingDestination()
-      await moveToDestination(
+      updateChasedTargetId(target.id)
+      updateRoutingTargetId(target.id)
+
+      const didStartChase = await moveToDestination(
         {
           lat: target.lat,
           lon: target.lon,
@@ -231,10 +305,35 @@ function App() {
         {
           blockedMessage: TARGET_EXPIRED_MESSAGE,
           shouldStart: () => isTargetActive(target.id),
+          onComplete: () => {
+            if (chasedTargetIdRef.current === target.id) {
+              stopPlayerMovement()
+              clearChaseState()
+            }
+          },
         },
       )
+
+      if (routingTargetIdRef.current !== target.id) {
+        return
+      }
+
+      updateRoutingTargetId(null)
+
+      if (!didStartChase) {
+        updateChasedTargetId(null)
+      }
     },
-    [clearPendingDestination, isTargetActive, moveToDestination, showRouteMessage],
+    [
+      clearPendingDestination,
+      isTargetActive,
+      moveToDestination,
+      showRouteMessage,
+      stopPlayerMovement,
+      clearChaseState,
+      updateChasedTargetId,
+      updateRoutingTargetId,
+    ],
   )
 
   return (
@@ -245,6 +344,8 @@ function App() {
         routeCoordinates={routeCoordinates}
         targets={targets}
         caughtTarget={catchToastTarget}
+        chasedTargetId={chasedTargetId}
+        routingTargetId={routingTargetId}
         onMapClick={handleMapClick}
         onTargetClick={handleTargetClick}
       />
@@ -292,7 +393,13 @@ function App() {
         onSimulationSpeedChange={setSimulationSpeed}
         maxSimulationSpeed={MAX_SIMULATION_SPEED + speedBonus}
       />
-      <TargetInfoPanel targets={targets} onTargetClick={handleTargetClick} />
+      <TargetInfoPanel
+        targets={targets}
+        onTargetClick={handleTargetClick}
+        chasedTargetId={chasedTargetId}
+        routingTargetId={routingTargetId}
+        onCancelChase={handleCancelChase}
+      />
       <CaughtInventoryPanel caughtTargets={caughtTargets} />
       <StatsDrawer
         activeSessionId={backendSession?.sessionId}
@@ -312,7 +419,7 @@ function App() {
       {pendingDestination && (
         <MoveConfirmPanel
           destination={pendingDestination}
-          onConfirm={confirmPendingMove}
+          onConfirm={handleConfirmPendingMove}
           onCancel={clearPendingDestination}
           isLoading={isRouteLoading}
         />

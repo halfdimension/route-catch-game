@@ -158,6 +158,7 @@ export function useTargetSpawner(
   simulationSpeedMetersPerSecond,
   canSpawnTargets,
   playerLevel,
+  onTargetExpired,
 ) {
   const [targets, setTargets] = useState([])
   const [isSpawningPaused, setIsSpawningPaused] = useState(false)
@@ -167,14 +168,21 @@ export function useTargetSpawner(
   const canSpawnTargetsRef = useRef(canSpawnTargets)
   const isSpawningPausedRef = useRef(isSpawningPaused)
   const isMountedRef = useRef(true)
+  const targetsRef = useRef([])
+  const onTargetExpiredRef = useRef(onTargetExpired)
 
   const removeTarget = useCallback((targetId) => {
-    setTargets((currentTargets) =>
-      currentTargets.filter((target) => target.id !== targetId),
-    )
+    setTargets((currentTargets) => {
+      const nextTargets = currentTargets.filter(
+        (target) => target.id !== targetId,
+      )
+      targetsRef.current = nextTargets
+      return nextTargets
+    })
   }, [])
 
   const clearTargets = useCallback(() => {
+    targetsRef.current = []
     setTargets([])
   }, [])
 
@@ -203,6 +211,10 @@ export function useTargetSpawner(
   }, [isSpawningPaused])
 
   useEffect(() => {
+    onTargetExpiredRef.current = onTargetExpired
+  }, [onTargetExpired])
+
+  useEffect(() => {
     isMountedRef.current = true
 
     const spawnTimerId = setInterval(() => {
@@ -226,6 +238,7 @@ export function useTargetSpawner(
 
           setTargets((currentTargets) => {
             const nextTargets = [...currentTargets, target]
+            targetsRef.current = nextTargets
             return nextTargets
           })
         })
@@ -236,9 +249,20 @@ export function useTargetSpawner(
 
     const expiryTimerId = setInterval(() => {
       const now = Date.now()
-      setTargets((currentTargets) =>
-        currentTargets.filter((target) => target.expiresAt > now),
+      const expiredTargets = targetsRef.current.filter(
+        (target) => target.expiresAt <= now,
       )
+
+      if (expiredTargets.length === 0) {
+        return
+      }
+
+      const activeTargets = targetsRef.current.filter(
+        (target) => target.expiresAt > now,
+      )
+      targetsRef.current = activeTargets
+      setTargets(activeTargets)
+      expiredTargets.forEach((target) => onTargetExpiredRef.current?.(target))
     }, 1000)
 
     return () => {

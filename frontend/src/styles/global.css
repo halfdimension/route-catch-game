@@ -580,11 +580,57 @@ button:focus-visible {
   box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
 }
 
+.target-info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
 .target-info-panel p {
   margin: 0 0 6px;
   color: #172033;
   font-size: 14px;
   font-weight: 700;
+}
+
+.target-info-header p {
+  margin: 0;
+}
+
+.target-info-header button {
+  padding: 3px 6px;
+  color: #b91c1c;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.target-chase-status {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 7px;
+  padding: 5px 6px;
+  border: 1px solid #c4b5fd;
+  border-radius: 6px;
+  color: #5b21b6;
+  background: #f5f3ff;
+  font-size: 10px;
+}
+
+.target-chase-status strong {
+  color: #6d28d9;
+  font-size: 10px;
+}
+
+.target-chase-status span:last-child {
+  overflow: hidden;
+  color: #4c1d95;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .target-info-panel > span {
@@ -618,6 +664,17 @@ button:focus-visible {
 
 .target-info-panel li button:hover {
   background: rgba(229, 235, 242, 0.95);
+}
+
+.target-info-panel li button[aria-current='true'] {
+  border-color: #a78bfa;
+  background: #f5f3ff;
+  box-shadow: inset 3px 0 0 #7c3aed;
+}
+
+.target-info-panel li button:disabled {
+  cursor: wait;
+  opacity: 0.78;
 }
 
 .target-info-panel li button:focus-visible {
@@ -1352,6 +1409,27 @@ button:focus-visible {
   font-size: 17px;
 }
 
+.target-creature-marker.is-chased::after {
+  position: absolute;
+  inset: -4px;
+  border: 2px dashed #7c3aed;
+  border-radius: 50%;
+  content: '';
+  pointer-events: none;
+  animation: chased-target-spin 5s linear infinite;
+}
+
+.target-creature-marker.is-chased .target-creature-marker-core {
+  box-shadow:
+    0 10px 22px rgba(23, 32, 51, 0.26),
+    0 0 0 5px rgba(124, 58, 237, 0.2);
+}
+
+.target-creature-marker.is-routing::after {
+  border-style: solid dashed;
+  animation-duration: 1.2s;
+}
+
 @keyframes target-marker-pulse {
   0% {
     opacity: 0.9;
@@ -1362,6 +1440,12 @@ button:focus-visible {
   100% {
     opacity: 0;
     transform: scale(1.16);
+  }
+}
+
+@keyframes chased-target-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -1460,6 +1544,7 @@ button:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .target-creature-marker::before,
+  .target-creature-marker.is-chased::after,
   .catch-toast,
   .catch-map-effect-ring,
   .catch-map-effect-score,

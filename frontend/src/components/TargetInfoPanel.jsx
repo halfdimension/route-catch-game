@@ -4,10 +4,34 @@ function getRemainingSeconds(target) {
   return Math.max(0, Math.ceil((target.expiresAt - Date.now()) / 1000))
 }
 
-function TargetInfoPanel({ targets, onTargetClick }) {
+function TargetInfoPanel({
+  targets,
+  onTargetClick,
+  chasedTargetId,
+  routingTargetId,
+  onCancelChase,
+}) {
+  const chasedTarget = targets.find((target) => target.id === chasedTargetId)
+
   return (
     <section className="target-info-panel" aria-label="Active targets">
-      <p>Targets</p>
+      <div className="target-info-header">
+        <p>Targets</p>
+        {chasedTarget && (
+          <button type="button" onClick={onCancelChase}>
+            Cancel chase
+          </button>
+        )}
+      </div>
+      {chasedTarget && (
+        <div className="target-chase-status" role="status">
+          <span>{chasedTarget.symbol}</span>
+          <strong>
+            {routingTargetId === chasedTarget.id ? 'Routing...' : 'Chasing'}
+          </strong>
+          <span>{chasedTarget.name}</span>
+        </div>
+      )}
       {targets.length === 0 ? (
         <span>No active targets</span>
       ) : (
@@ -21,6 +45,10 @@ function TargetInfoPanel({ targets, onTargetClick }) {
                   type="button"
                   className={`target-info-row ${rarityClassName}`}
                   onClick={() => onTargetClick(target)}
+                  disabled={routingTargetId === target.id}
+                  aria-current={
+                    chasedTargetId === target.id ? 'true' : undefined
+                  }
                 >
                   <strong>
                     <span className="creature-symbol">{target.symbol}</span>
@@ -32,7 +60,13 @@ function TargetInfoPanel({ targets, onTargetClick }) {
                     </span>
                     <span>{getRemainingSeconds(target)}s</span>
                   </span>
-                  <span className="target-difficulty">{target.difficulty}</span>
+                  <span className="target-difficulty">
+                    {routingTargetId === target.id
+                      ? 'Routing...'
+                      : chasedTargetId === target.id
+                        ? 'Chasing'
+                        : target.difficulty}
+                  </span>
                 </button>
               </li>
             )

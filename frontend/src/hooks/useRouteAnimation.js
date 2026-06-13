@@ -80,7 +80,7 @@ export function useRouteAnimation({
   }, [])
 
   const startAnimation = useCallback(
-    (routeCoordinates) => {
+    (routeCoordinates, onComplete) => {
       cancelAnimation()
 
       if (routeCoordinates.length === 0) {
@@ -89,6 +89,7 @@ export function useRouteAnimation({
 
       if (routeCoordinates.length === 1) {
         onPositionChangeRef.current(toPlayerPosition(routeCoordinates[0]))
+        onComplete?.()
         return
       }
 
@@ -103,6 +104,7 @@ export function useRouteAnimation({
 
       if (totalDistance === 0) {
         onPositionChangeRef.current(finalPosition)
+        onComplete?.()
         return
       }
 
@@ -112,6 +114,7 @@ export function useRouteAnimation({
         segments,
         totalDistance,
         finalPosition,
+        onComplete,
       }
 
       setIsMoving(true)
@@ -135,6 +138,7 @@ export function useRouteAnimation({
           animationRef.current = null
           frameIdRef.current = null
           setIsMoving(false)
+          animation.onComplete?.()
           return
         }
 
