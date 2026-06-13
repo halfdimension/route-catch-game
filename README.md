@@ -1,5 +1,7 @@
 # Route Catch Game
 
+[![Route Catch Game CI](https://github.com/halfdimension/route-catch-game/actions/workflows/ci.yml/badge.svg)](https://github.com/halfdimension/route-catch-game/actions/workflows/ci.yml)
+
 **A full-stack map game where players chase creatures along real road routes.**
 
 Route Catch Game combines interactive Leaflet gameplay with OSRM routing,
