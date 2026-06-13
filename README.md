@@ -1,10 +1,26 @@
 # Route Catch Game
 
-Route Catch Game is a map-based creature chase game built around real road
-routes. Players start timed rounds, chase creatures on a Leaflet map, and catch
-them before they expire. The frontend animates gameplay while a Spring Boot API
-wraps OSRM routing and persists sessions, catches, scores, and the creature
-catalog in PostgreSQL.
+**A full-stack map game where players chase creatures along real road routes.**
+
+Route Catch Game combines interactive Leaflet gameplay with OSRM routing,
+Spring Boot APIs, and PostgreSQL persistence. Players start timed rounds, chase
+rarity-based creatures, follow animated road routes, and build persisted
+session history and leaderboard scores.
+
+`React 19` · `Vite 8` · `Leaflet` · `Java 21` · `Spring Boot 4` ·
+`PostgreSQL` · `Flyway` · `OSRM` · `Docker Compose`
+
+## Highlights
+
+- Real-road creature chasing with OSRM nearest-road and route integration.
+- Animated player movement, active chase state, cancellation, and route
+  feedback.
+- Common, rare, and legendary creatures with route-based difficulty.
+- Timed rounds, score, XP, levels, catch effects, and round summaries.
+- Backend-owned creature scoring and persisted game sessions and catches.
+- Stats drawer with session history, catch history, and leaderboard.
+- Automatic stale-session expiry and consistent JSON API errors.
+- Reproducible PostgreSQL setup and local service scripts.
 
 ## Documentation
 
@@ -13,16 +29,37 @@ catalog in PostgreSQL.
 - [Demo script](docs/DEMO_SCRIPT.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 
-## Architecture
+## Screenshots and Demo
 
-```text
-React + Leaflet frontend
-          |
-          v
-Spring Boot REST API
-     |          |
-     v          v
-   OSRM     PostgreSQL
+Screenshot slots are prepared for:
+
+| View | Target path |
+| --- | --- |
+| Active chase gameplay | `docs/screenshots/gameplay.png` |
+| Stats drawer and history | `docs/screenshots/stats-drawer.png` |
+| Completed-session leaderboard | `docs/screenshots/leaderboard.png` |
+
+Place captured PNG files at those paths, then add them to this section using
+standard Markdown images. Capture guidance is in
+[`docs/screenshots/README.md`](docs/screenshots/README.md).
+
+For a concise interview walkthrough, use
+[`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md).
+
+## Architecture Overview
+
+```mermaid
+flowchart LR
+    frontend["React + Leaflet Frontend"]
+    backend["Spring Boot Backend"]
+    osrm["OSRM Routing Engine"]
+    postgres[("PostgreSQL")]
+    flyway["Flyway Migrations"]
+
+    frontend -->|REST/JSON| backend
+    backend -->|Route + nearest requests| osrm
+    backend -->|JPA transactions| postgres
+    flyway -->|Schema + seed data| postgres
 ```
 
 - The frontend owns live map rendering, route animation, target spawning,
@@ -33,19 +70,9 @@ Spring Boot REST API
 - PostgreSQL stores the creature catalog, game sessions, and caught-creature
   snapshots. Flyway creates and seeds the schema.
 
-## Main Features
-
-- Leaflet map with animated player movement along OSRM road routes.
-- Original common, rare, and legendary creatures with rarity-based markers.
-- Direct target chasing, active chase state, route feedback, and cancellation.
-- Configurable timed rounds with score, XP, levels, and speed-limit bonuses.
-- ETA-based target difficulty derived from route distance and simulation speed.
-- Catch toast, sound, map effects, recent catches, and round summaries.
-- Backend-created game sessions and catalog-validated catch submission.
-- PostgreSQL-persisted sessions, scores, catches, and creature definitions.
-- Automatic expiry of stale `RUNNING` backend sessions.
-- Stats drawer with persisted game history, catch history, and leaderboard.
-- Consistent JSON API errors for validation, routing, state, and method errors.
+The browser never calls OSRM or PostgreSQL directly. Spring Boot provides the
+application boundary for routing, validation, persistence, history, and
+leaderboard operations.
 
 ## Tech Stack
 
@@ -66,6 +93,23 @@ Spring Boot REST API
 
 - PostgreSQL
 - OSRM using the MLD algorithm
+
+## What This Project Demonstrates
+
+- **Full-stack integration:** coordinated React, Spring Boot, PostgreSQL, and
+  OSRM workflows.
+- **Routing engine integration:** nearest-road snapping, route geometry,
+  distance, duration, and frontend animation.
+- **REST API design:** layered controllers and services, DTO validation, stable
+  response contracts, and history queries.
+- **Persistence and migrations:** JPA transactions, relational game records,
+  deterministic Flyway schema creation, and catalog seed data.
+- **Frontend state management:** concurrent local gameplay, backend session
+  synchronization, route request guards, and resilient non-blocking updates.
+- **Error handling:** consistent API errors and graceful frontend fallback when
+  routing, history, or backend synchronization is unavailable.
+- **Developer tooling:** Docker Compose for PostgreSQL, service orchestration,
+  diagnostics, tests, build checks, and focused project documentation.
 
 ## Local Prerequisites
 
@@ -327,19 +371,18 @@ fixes.
 
 ## Current Limitations
 
-- No authentication or users.
-- No multiplayer or shared realtime game state.
-- Live spawning, movement, catch radius checks, and progression remain
-  frontend-controlled.
-- Backend catalog validation prevents client-supplied score values, but broader
-  anti-cheat validation is not implemented.
+- No authentication or user accounts yet.
+- OSRM binary and dataset paths in `scripts/run-osrm.sh` are local-machine
+  dependent.
+- The frontend and runtime scripts are currently focused on local demos.
+- No hosted deployment or CI/CD pipeline is configured.
+- Live spawning, movement, and catch detection remain frontend-controlled.
 
 ## Roadmap
 
-- JWT authentication and persisted user profiles
-- Avatar upload
-- PostGIS-backed spatial features
-- Multiplayer WebSocket sessions
-- Valhalla isochrone integration
+- User profiles, JWT authentication, and avatar storage
+- Hosted frontend, backend, database, and routing deployment
+- Richer creature catalog, abilities, and collection views
+- Route challenges, objectives, and location-based events
+- Player analytics, profile statistics, and deeper leaderboards
 - Stronger server-authoritative gameplay validation
-- Deployment and production observability
