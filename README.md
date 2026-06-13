@@ -124,7 +124,9 @@ The API runs at `http://localhost:8080` and exposes:
 - `POST /api/routes`
 - `POST /api/nearest`
 - `POST /api/game/sessions`
+- `GET /api/game/sessions?limit=20`
 - `GET /api/game/sessions/{sessionId}`
+- `GET /api/game/sessions/{sessionId}/catches`
 - `POST /api/game/sessions/{sessionId}/start`
 - `POST /api/game/sessions/{sessionId}/end`
 - `POST /api/game/sessions/{sessionId}/catches`

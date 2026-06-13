@@ -8,7 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface CaughtCreatureRepository
 	extends JpaRepository<CaughtCreatureEntity, UUID> {
 
-	List<CaughtCreatureEntity> findBySessionIdOrderByCaughtAtDesc(
+	List<CaughtCreatureEntity> findBySessionIdOrderByCaughtAtAsc(
 		UUID sessionId
 	);
 }

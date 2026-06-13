@@ -1,5 +1,6 @@
 package com.routecatch.api;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -74,11 +75,18 @@ class ApiErrorHandlingTests {
 	}
 
 	@Test
-	void getCatchEndpointReturnsCleanMethodNotAllowed() throws Exception {
+	void deleteCatchEndpointReturnsCleanMethodNotAllowed() throws Exception {
 		UUID sessionId = UUID.randomUUID();
 		String path = "/api/game/sessions/" + sessionId + "/catches";
 
-		assertMethodNotAllowed(path);
+		mockMvc.perform(delete(path))
+			.andExpect(status().isMethodNotAllowed())
+			.andExpect(jsonPath("$.errorCode").value("METHOD_NOT_ALLOWED"))
+			.andExpect(jsonPath("$.message").value(
+				"HTTP method is not supported for this endpoint"
+			))
+			.andExpect(jsonPath("$.path").value(path))
+			.andExpect(jsonPath("$.timestamp").isNotEmpty());
 	}
 
 	@Test

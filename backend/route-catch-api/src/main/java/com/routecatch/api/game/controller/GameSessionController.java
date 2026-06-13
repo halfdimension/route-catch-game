@@ -1,5 +1,6 @@
 package com.routecatch.api.game.controller;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.web.bind.annotation.GetMapping;
@@ -7,8 +8,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.routecatch.api.game.dto.CaughtCreatureResponse;
 import com.routecatch.api.game.dto.CreateGameSessionRequest;
 import com.routecatch.api.game.dto.GameSessionResponse;
 import com.routecatch.api.game.dto.SubmitCatchRequest;
@@ -36,9 +39,26 @@ public class GameSessionController {
 		);
 	}
 
+	@GetMapping
+	public List<GameSessionResponse> listRecentSessions(
+		@RequestParam(defaultValue = "20") int limit
+	) {
+		return gameSessionService.listRecentSessions(limit)
+			.stream()
+			.map(GameSessionResponse::from)
+			.toList();
+	}
+
 	@GetMapping("/{sessionId}")
 	public GameSessionResponse getSession(@PathVariable UUID sessionId) {
 		return GameSessionResponse.from(gameSessionService.getSession(sessionId));
+	}
+
+	@GetMapping("/{sessionId}/catches")
+	public List<CaughtCreatureResponse> listCatchesForSession(
+		@PathVariable UUID sessionId
+	) {
+		return gameSessionService.listCatchesForSession(sessionId);
 	}
 
 	@PostMapping("/{sessionId}/start")

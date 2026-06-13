@@ -146,7 +146,7 @@ class GameSessionServiceTests {
 			.findById(created.sessionId())
 			.orElseThrow();
 		CaughtCreatureEntity persistedCatch = caughtCreatureRepository
-			.findBySessionIdOrderByCaughtAtDesc(created.sessionId())
+			.findBySessionIdOrderByCaughtAtAsc(created.sessionId())
 			.getFirst();
 
 		assertEquals(10, response.score());
@@ -176,7 +176,7 @@ class GameSessionServiceTests {
 		assertEquals(
 			2,
 			caughtCreatureRepository
-				.findBySessionIdOrderByCaughtAtDesc(created.sessionId())
+				.findBySessionIdOrderByCaughtAtAsc(created.sessionId())
 				.size()
 		);
 	}
@@ -231,7 +231,7 @@ class GameSessionServiceTests {
 
 		assertTrue(
 			caughtCreatureRepository
-				.findBySessionIdOrderByCaughtAtDesc(created.sessionId())
+				.findBySessionIdOrderByCaughtAtAsc(created.sessionId())
 				.isEmpty()
 		);
 	}

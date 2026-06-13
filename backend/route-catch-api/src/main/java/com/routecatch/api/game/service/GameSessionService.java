@@ -1,16 +1,20 @@
 package com.routecatch.api.game.service;
 
+import java.util.List;
 import java.util.UUID;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.routecatch.api.game.creature.CreatureCatalogService;
 import com.routecatch.api.game.creature.CreatureDefinition;
+import com.routecatch.api.game.dto.CaughtCreatureResponse;
 import com.routecatch.api.game.dto.SubmitCatchRequest;
 import com.routecatch.api.game.dto.SubmitCatchResponse;
 import com.routecatch.api.game.exception.GameSessionNotFoundException;
 import com.routecatch.api.game.exception.InvalidGameSessionStateException;
+import com.routecatch.api.game.exception.InvalidSessionHistoryLimitException;
 import com.routecatch.api.game.model.GameSession;
 import com.routecatch.api.game.model.GameSessionStatus;
 import com.routecatch.api.game.persistence.CaughtCreatureEntity;
@@ -48,6 +52,30 @@ public class GameSessionService {
 	@Transactional(readOnly = true)
 	public GameSession getSession(UUID sessionId) {
 		return toModel(findSession(sessionId));
+	}
+
+	@Transactional(readOnly = true)
+	public List<GameSession> listRecentSessions(int limit) {
+		if (limit < 1 || limit > 100) {
+			throw new InvalidSessionHistoryLimitException();
+		}
+
+		return gameSessionRepository
+			.findAllByOrderByCreatedAtDesc(PageRequest.of(0, limit))
+			.stream()
+			.map(this::toModel)
+			.toList();
+	}
+
+	@Transactional(readOnly = true)
+	public List<CaughtCreatureResponse> listCatchesForSession(UUID sessionId) {
+		findSession(sessionId);
+
+		return caughtCreatureRepository
+			.findBySessionIdOrderByCaughtAtAsc(sessionId)
+			.stream()
+			.map(CaughtCreatureResponse::from)
+			.toList();
 	}
 
 	@Transactional

@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -14,7 +15,10 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.routecatch.api.game.dto.SubmitCatchRequest;
 import com.routecatch.api.game.model.GameSession;
+import com.routecatch.api.game.persistence.CaughtCreatureRepository;
+import com.routecatch.api.game.persistence.GameSessionRepository;
 import com.routecatch.api.game.service.GameSessionService;
 
 @SpringBootTest
@@ -26,6 +30,18 @@ class GameSessionApiTests {
 
 	@Autowired
 	private GameSessionService gameSessionService;
+
+	@Autowired
+	private GameSessionRepository gameSessionRepository;
+
+	@Autowired
+	private CaughtCreatureRepository caughtCreatureRepository;
+
+	@BeforeEach
+	void clearSessionHistory() {
+		caughtCreatureRepository.deleteAll();
+		gameSessionRepository.deleteAll();
+	}
 
 	@Test
 	void createSessionReturnsCreatedStatus() throws Exception {
@@ -151,6 +167,103 @@ class GameSessionApiTests {
 			))
 			.andExpect(jsonPath("$.path").value(
 				"/api/game/sessions/" + session.sessionId() + "/catches"
+			));
+	}
+
+	@Test
+	void listSessionsReturnsMostRecentFirst() throws Exception {
+		GameSession older = gameSessionService.createSession(60);
+		Thread.sleep(2);
+		GameSession newer = gameSessionService.createSession(120);
+
+		mockMvc.perform(get("/api/game/sessions"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(2))
+			.andExpect(jsonPath("$[0].sessionId").value(
+				newer.sessionId().toString()
+			))
+			.andExpect(jsonPath("$[0].durationSeconds").value(120))
+			.andExpect(jsonPath("$[1].sessionId").value(
+				older.sessionId().toString()
+			));
+	}
+
+	@Test
+	void listSessionsHonorsLimit() throws Exception {
+		gameSessionService.createSession(60);
+		gameSessionService.createSession(120);
+
+		mockMvc.perform(get("/api/game/sessions").param("limit", "1"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(1));
+	}
+
+	@Test
+	void listSessionsRejectsInvalidLimit() throws Exception {
+		mockMvc.perform(get("/api/game/sessions").param("limit", "0"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"))
+			.andExpect(jsonPath("$.message").value(
+				"limit must be between 1 and 100"
+			))
+			.andExpect(jsonPath("$.path").value("/api/game/sessions"));
+	}
+
+	@Test
+	void listSessionCatchesReturnsOldestFirst() throws Exception {
+		GameSession session = gameSessionService.createSession(60);
+		gameSessionService.startSession(session.sessionId());
+		gameSessionService.submitCatch(
+			session.sessionId(),
+			new SubmitCatchRequest(
+				"sparkbit",
+				null,
+				null,
+				null
+			)
+		);
+		Thread.sleep(2);
+		gameSessionService.submitCatch(
+			session.sessionId(),
+			new SubmitCatchRequest(
+				"voltfox",
+				null,
+				null,
+				null
+			)
+		);
+
+		mockMvc.perform(get(
+				"/api/game/sessions/{sessionId}/catches",
+				session.sessionId()
+			))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(2))
+			.andExpect(jsonPath("$[0].sessionId").value(
+				session.sessionId().toString()
+			))
+			.andExpect(jsonPath("$[0].creatureId").value("sparkbit"))
+			.andExpect(jsonPath("$[0].scoreValue").value(10))
+			.andExpect(jsonPath("$[0].catchId").isNotEmpty())
+			.andExpect(jsonPath("$[0].caughtAt").isNotEmpty())
+			.andExpect(jsonPath("$[1].creatureId").value("voltfox"))
+			.andExpect(jsonPath("$[1].scoreValue").value(30));
+	}
+
+	@Test
+	void listCatchesForUnknownSessionReturnsNotFound() throws Exception {
+		UUID sessionId = UUID.randomUUID();
+
+		mockMvc.perform(get(
+				"/api/game/sessions/{sessionId}/catches",
+				sessionId
+			))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.errorCode").value(
+				"GAME_SESSION_NOT_FOUND"
+			))
+			.andExpect(jsonPath("$.path").value(
+				"/api/game/sessions/" + sessionId + "/catches"
 			));
 	}
 }
