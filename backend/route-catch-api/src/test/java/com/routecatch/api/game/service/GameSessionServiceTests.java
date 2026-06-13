@@ -2,9 +2,12 @@ package com.routecatch.api.game.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -261,6 +264,96 @@ class GameSessionServiceTests {
 		);
 	}
 
+	@Test
+	void getSessionAutoExpiresStaleRunningSession() {
+		GameSession created = service.createSession(60);
+		Instant startedAt = setSessionRunningAt(
+			created.sessionId(),
+			Instant.now().minusSeconds(61)
+		);
+
+		GameSession expired = service.getSession(created.sessionId());
+
+		assertEquals(GameSessionStatus.ENDED, expired.status());
+		assertEquals(startedAt.plusSeconds(60), expired.endedAt());
+	}
+
+	@Test
+	void listRecentSessionsAutoExpiresStaleRunningSession() {
+		GameSession created = service.createSession(60);
+		Instant startedAt = setSessionRunningAt(
+			created.sessionId(),
+			Instant.now().minusSeconds(61)
+		);
+
+		List<GameSession> sessions = service.listRecentSessions(20);
+		GameSession expired = sessions.stream()
+			.filter((session) -> session.sessionId().equals(created.sessionId()))
+			.findFirst()
+			.orElseThrow();
+
+		assertEquals(GameSessionStatus.ENDED, expired.status());
+		assertEquals(startedAt.plusSeconds(60), expired.endedAt());
+	}
+
+	@Test
+	void staleRunningSessionCannotAcceptCatch() {
+		GameSession created = service.createSession(60);
+		Instant startedAt = setSessionRunningAt(
+			created.sessionId(),
+			Instant.now().minusSeconds(61)
+		);
+
+		assertThrows(
+			InvalidGameSessionStateException.class,
+			() -> service.submitCatch(
+				created.sessionId(),
+				catchRequest("sparkbit")
+			)
+		);
+		flushAndClear();
+
+		GameSessionEntity persisted = gameSessionRepository
+			.findById(created.sessionId())
+			.orElseThrow();
+
+		assertEquals(GameSessionStatus.ENDED, persisted.getStatus());
+		assertEquals(startedAt.plusSeconds(60), persisted.getEndedAt());
+		assertEquals(0, persisted.getScore());
+		assertEquals(0, persisted.getCaughtCount());
+		assertTrue(
+			caughtCreatureRepository
+				.findBySessionIdOrderByCaughtAtAsc(created.sessionId())
+				.isEmpty()
+		);
+	}
+
+	@Test
+	void nonExpiredRunningSessionStaysRunning() {
+		GameSession created = service.createSession(60);
+		Instant startedAt = setSessionRunningAt(
+			created.sessionId(),
+			Instant.now().minusSeconds(10)
+		);
+
+		GameSession running = service.getSession(created.sessionId());
+
+		assertEquals(GameSessionStatus.RUNNING, running.status());
+		assertEquals(startedAt, running.startedAt());
+		assertNull(running.endedAt());
+	}
+
+	@Test
+	void createdSessionIsNotAutoExpired() {
+		GameSession created = service.createSession(60);
+
+		GameSession unchanged = service.getSession(created.sessionId());
+
+		assertEquals(GameSessionStatus.CREATED, unchanged.status());
+		assertNull(unchanged.startedAt());
+		assertNull(unchanged.endedAt());
+	}
+
 	private SubmitCatchRequest catchRequest(String creatureId) {
 		return new SubmitCatchRequest(
 			creatureId,
@@ -268,6 +361,20 @@ class GameSessionServiceTests {
 			null,
 			null
 		);
+	}
+
+	private Instant setSessionRunningAt(UUID sessionId, Instant startedAt) {
+		GameSessionEntity session = gameSessionRepository
+			.findById(sessionId)
+			.orElseThrow();
+		session.start(startedAt);
+		gameSessionRepository.save(session);
+		flushAndClear();
+
+		return gameSessionRepository
+			.findById(sessionId)
+			.orElseThrow()
+			.getStartedAt();
 	}
 
 	private void flushAndClear() {

@@ -52,14 +52,29 @@ public class GameSessionEntity {
 		this.durationSeconds = durationSeconds;
 	}
 
-	public void start() {
+	public void start(Instant startTime) {
 		status = GameSessionStatus.RUNNING;
-		startedAt = Instant.now();
+		startedAt = startTime;
 	}
 
-	public void end() {
+	public void end(Instant endTime) {
 		status = GameSessionStatus.ENDED;
-		endedAt = Instant.now();
+		endedAt = endTime;
+	}
+
+	public boolean expireIfStale(Instant currentTime) {
+		if (status != GameSessionStatus.RUNNING || startedAt == null) {
+			return false;
+		}
+
+		Instant expiresAt = startedAt.plusSeconds(durationSeconds);
+
+		if (!currentTime.isAfter(expiresAt)) {
+			return false;
+		}
+
+		end(expiresAt);
+		return true;
 	}
 
 	public void recordCatch(int scoreValue) {

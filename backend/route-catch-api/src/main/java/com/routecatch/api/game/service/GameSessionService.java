@@ -1,5 +1,6 @@
 package com.routecatch.api.game.service;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -49,20 +50,32 @@ public class GameSessionService {
 		return toModel(gameSessionRepository.save(session));
 	}
 
-	@Transactional(readOnly = true)
+	@Transactional
 	public GameSession getSession(UUID sessionId) {
-		return toModel(findSession(sessionId));
+		return toModel(findSessionWithExpiry(sessionId, Instant.now()));
 	}
 
-	@Transactional(readOnly = true)
+	@Transactional
 	public List<GameSession> listRecentSessions(int limit) {
 		if (limit < 1 || limit > 100) {
 			throw new InvalidSessionHistoryLimitException();
 		}
 
+		Instant currentTime = Instant.now();
+
 		return gameSessionRepository
 			.findAllByOrderByCreatedAtDesc(PageRequest.of(0, limit))
 			.stream()
+			.map((session) -> {
+				if (session.getStatus() != GameSessionStatus.RUNNING) {
+					return session;
+				}
+
+				GameSessionEntity lockedSession =
+					findSessionForUpdate(session.getSessionId());
+				lockedSession.expireIfStale(currentTime);
+				return lockedSession;
+			})
 			.map(this::toModel)
 			.toList();
 	}
@@ -78,9 +91,10 @@ public class GameSessionService {
 			.toList();
 	}
 
-	@Transactional
+	@Transactional(noRollbackFor = InvalidGameSessionStateException.class)
 	public GameSession startSession(UUID sessionId) {
 		GameSessionEntity session = findSessionForUpdate(sessionId);
+		session.expireIfStale(Instant.now());
 
 		if (session.getStatus() == GameSessionStatus.RUNNING) {
 			return toModel(session);
@@ -92,28 +106,31 @@ public class GameSessionService {
 			);
 		}
 
-		session.start();
+		session.start(Instant.now());
 		return toModel(gameSessionRepository.save(session));
 	}
 
 	@Transactional
 	public GameSession endSession(UUID sessionId) {
 		GameSessionEntity session = findSessionForUpdate(sessionId);
+		Instant currentTime = Instant.now();
+		session.expireIfStale(currentTime);
 
 		if (session.getStatus() == GameSessionStatus.ENDED) {
 			return toModel(session);
 		}
 
-		session.end();
+		session.end(currentTime);
 		return toModel(gameSessionRepository.save(session));
 	}
 
-	@Transactional
+	@Transactional(noRollbackFor = InvalidGameSessionStateException.class)
 	public SubmitCatchResponse submitCatch(
 		UUID sessionId,
 		SubmitCatchRequest request
 	) {
 		GameSessionEntity session = findSessionForUpdate(sessionId);
+		session.expireIfStale(Instant.now());
 
 		if (session.getStatus() != GameSessionStatus.RUNNING) {
 			throw new InvalidGameSessionStateException(
@@ -144,6 +161,21 @@ public class GameSessionService {
 	private GameSessionEntity findSessionForUpdate(UUID sessionId) {
 		return gameSessionRepository.findByIdForUpdate(sessionId)
 			.orElseThrow(() -> new GameSessionNotFoundException(sessionId));
+	}
+
+	private GameSessionEntity findSessionWithExpiry(
+		UUID sessionId,
+		Instant currentTime
+	) {
+		GameSessionEntity session = findSession(sessionId);
+
+		if (session.getStatus() != GameSessionStatus.RUNNING) {
+			return session;
+		}
+
+		GameSessionEntity lockedSession = findSessionForUpdate(sessionId);
+		lockedSession.expireIfStale(currentTime);
+		return lockedSession;
 	}
 
 	private GameSession toModel(GameSessionEntity entity) {

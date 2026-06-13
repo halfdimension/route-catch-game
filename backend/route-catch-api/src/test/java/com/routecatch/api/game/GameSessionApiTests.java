@@ -1,10 +1,13 @@
 package com.routecatch.api.game;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -17,7 +20,9 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.routecatch.api.game.dto.SubmitCatchRequest;
 import com.routecatch.api.game.model.GameSession;
+import com.routecatch.api.game.model.GameSessionStatus;
 import com.routecatch.api.game.persistence.CaughtCreatureRepository;
+import com.routecatch.api.game.persistence.GameSessionEntity;
 import com.routecatch.api.game.persistence.GameSessionRepository;
 import com.routecatch.api.game.service.GameSessionService;
 
@@ -265,5 +270,50 @@ class GameSessionApiTests {
 			.andExpect(jsonPath("$.path").value(
 				"/api/game/sessions/" + sessionId + "/catches"
 			));
+	}
+
+	@Test
+	void catchOnStaleRunningSessionReturnsConflictAndAutoEnds() throws Exception {
+		GameSession session = gameSessionService.createSession(60);
+		GameSessionEntity persistedSession = gameSessionRepository
+			.findById(session.sessionId())
+			.orElseThrow();
+		Instant startedAt = Instant.now().minusSeconds(61);
+		persistedSession.start(startedAt);
+		gameSessionRepository.saveAndFlush(persistedSession);
+		Instant persistedStartedAt = gameSessionRepository
+			.findById(session.sessionId())
+			.orElseThrow()
+			.getStartedAt();
+
+		mockMvc.perform(post(
+				"/api/game/sessions/{sessionId}/catches",
+				session.sessionId()
+			)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"creatureId": "sparkbit"}
+					"""))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.errorCode").value(
+				"INVALID_GAME_SESSION_STATE"
+			));
+
+		GameSessionEntity expiredSession = gameSessionRepository
+			.findById(session.sessionId())
+			.orElseThrow();
+
+		assertEquals(GameSessionStatus.ENDED, expiredSession.getStatus());
+		assertEquals(
+			persistedStartedAt.plusSeconds(60),
+			expiredSession.getEndedAt()
+		);
+		assertEquals(0, expiredSession.getScore());
+		assertEquals(0, expiredSession.getCaughtCount());
+		assertTrue(
+			caughtCreatureRepository
+				.findBySessionIdOrderByCaughtAtAsc(session.sessionId())
+				.isEmpty()
+		);
 	}
 }
