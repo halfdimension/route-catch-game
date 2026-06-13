@@ -10,12 +10,22 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import com.routecatch.api.game.model.GameSessionStatus;
+
 import jakarta.persistence.LockModeType;
 
 public interface GameSessionRepository
 	extends JpaRepository<GameSessionEntity, UUID> {
 
 	List<GameSessionEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+	List<GameSessionEntity> findAllByStatus(GameSessionStatus status);
+
+	List<GameSessionEntity>
+		findAllByStatusOrderByScoreDescCaughtCountDescEndedAtAscCreatedAtDesc(
+			GameSessionStatus status,
+			Pageable pageable
+		);
 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("""

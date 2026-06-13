@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.routecatch.api.game.creature.CreatureCatalogService;
 import com.routecatch.api.game.creature.CreatureDefinition;
 import com.routecatch.api.game.dto.CaughtCreatureResponse;
+import com.routecatch.api.game.dto.LeaderboardEntryResponse;
 import com.routecatch.api.game.dto.SubmitCatchRequest;
 import com.routecatch.api.game.dto.SubmitCatchResponse;
 import com.routecatch.api.game.exception.GameSessionNotFoundException;
@@ -88,6 +89,25 @@ public class GameSessionService {
 			.findBySessionIdOrderByCaughtAtAsc(sessionId)
 			.stream()
 			.map(CaughtCreatureResponse::from)
+			.toList();
+	}
+
+	@Transactional
+	public List<LeaderboardEntryResponse> getLeaderboard(int limit) {
+		validateLimit(limit);
+		expireStaleRunningSessions(Instant.now());
+		gameSessionRepository.flush();
+
+		List<GameSessionEntity> sessions = gameSessionRepository
+			.findAllByStatusOrderByScoreDescCaughtCountDescEndedAtAscCreatedAtDesc(
+				GameSessionStatus.ENDED,
+				PageRequest.of(0, limit)
+			);
+
+		return java.util.stream.IntStream.range(0, sessions.size())
+			.mapToObj((index) ->
+				LeaderboardEntryResponse.from(index + 1, sessions.get(index))
+			)
 			.toList();
 	}
 
@@ -176,6 +196,22 @@ public class GameSessionService {
 		GameSessionEntity lockedSession = findSessionForUpdate(sessionId);
 		lockedSession.expireIfStale(currentTime);
 		return lockedSession;
+	}
+
+	private void expireStaleRunningSessions(Instant currentTime) {
+		gameSessionRepository
+			.findAllByStatus(GameSessionStatus.RUNNING)
+			.forEach((session) -> {
+				GameSessionEntity lockedSession =
+					findSessionForUpdate(session.getSessionId());
+				lockedSession.expireIfStale(currentTime);
+			});
+	}
+
+	private void validateLimit(int limit) {
+		if (limit < 1 || limit > 100) {
+			throw new InvalidSessionHistoryLimitException();
+		}
 	}
 
 	private GameSession toModel(GameSessionEntity entity) {
