@@ -31,20 +31,23 @@ session history and leaderboard scores.
 
 ## Screenshots and Demo
 
-Screenshot slots are prepared for:
+These screenshots are local demo captures of the current application.
 
-| View | Target path |
-| --- | --- |
-| Active chase gameplay | `docs/screenshots/gameplay.png` |
-| Stats drawer and history | `docs/screenshots/stats-drawer.png` |
-| Completed-session leaderboard | `docs/screenshots/leaderboard.png` |
+### Active Chase Gameplay
 
-Place captured PNG files at those paths, then add them to this section using
-standard Markdown images. Capture guidance is in
-[`docs/screenshots/README.md`](docs/screenshots/README.md).
+![Active creature chase on the Route Catch Game map](docs/screenshots/gameplay.png)
+
+### Stats Drawer and History
+
+![Stats drawer showing persisted game history](docs/screenshots/stats-drawer.png)
+
+### Leaderboard
+
+![Leaderboard showing completed game sessions](docs/screenshots/leaderboard.png)
 
 For a concise interview walkthrough, use
-[`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md).
+[`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md). Capture guidance remains in
+[`docs/screenshots/README.md`](docs/screenshots/README.md).
 
 ## Architecture Overview
 
