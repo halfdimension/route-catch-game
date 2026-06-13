@@ -4,6 +4,7 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import { INITIAL_MAP_CENTER, INITIAL_MAP_ZOOM } from '../config/mapConfig'
+import CatchMapEffect from './CatchMapEffect'
 import PlayerMarker from './PlayerMarker'
 import RouteLine from './RouteLine'
 import TargetLayer from './TargetLayer'
@@ -32,6 +33,7 @@ function GameMap({
   pendingDestination,
   routeCoordinates,
   targets,
+  caughtTarget,
   onMapClick,
   onTargetClick,
 }) {
@@ -50,6 +52,7 @@ function GameMap({
       <MapClickHandler onMapClick={onMapClick} />
       <RouteLine coordinates={routeCoordinates} />
       <TargetLayer targets={targets} onTargetClick={onTargetClick} />
+      <CatchMapEffect caughtTarget={caughtTarget} />
       <PlayerMarker position={playerPosition} />
 
       {pendingDestination && (

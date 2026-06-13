@@ -244,6 +244,7 @@ function App() {
         pendingDestination={pendingDestination}
         routeCoordinates={routeCoordinates}
         targets={targets}
+        caughtTarget={catchToastTarget}
         onMapClick={handleMapClick}
         onTargetClick={handleTargetClick}
       />

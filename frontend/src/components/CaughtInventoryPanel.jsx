@@ -27,13 +27,16 @@ function CaughtInventoryPanel({ caughtTargets }) {
             <span>No catches yet</span>
           ) : (
             <ul>
-              {recentCaughtTargets.map((target) => {
+              {recentCaughtTargets.map((target, index) => {
                 const rarityClassName = getRarityClassName(target.rarity)
+                const catchKey = `${target.id}-${target.caughtAt}`
 
                 return (
                   <li
-                    key={`${target.id}-${target.caughtAt}`}
-                    className={rarityClassName}
+                    key={catchKey}
+                    className={`${rarityClassName}${
+                      index === 0 ? ' is-new-catch' : ''
+                    }`}
                   >
                     <strong>
                       <span className="creature-symbol">{target.symbol}</span>
