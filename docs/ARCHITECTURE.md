@@ -1,62 +1,177 @@
 # Architecture
 
-Route Catch Game uses a React frontend for live map gameplay and a Spring Boot API for routing and PostgreSQL-backed creature, session, score, and catch records. The browser still owns movement, spawning, catch detection, progression, and presentation.
+Route Catch Game is a four-process local system. React handles realtime game
+presentation, Spring Boot exposes the application API, OSRM supplies routing,
+and PostgreSQL stores durable game records.
 
-## Current Architecture
+## System Diagram
 
 ```text
-React UI -> frontend API clients -> Spring Boot API -> OSRM server
-                                      |
-                                      -> PostgreSQL catalog/sessions/catches
+Browser
+  |
+  v
+React + Vite + Leaflet
+  |
+  | JSON over HTTP
+  v
+Spring Boot API
+  |                    |
+  | route / nearest    | JPA transactions
+  v                    v
+OSRM                  PostgreSQL
 ```
 
-- React and Vite render the application, HUD, controls, and gameplay state.
-- Leaflet and React Leaflet render the map, player, route, and creatures.
-- Frontend API clients call Spring Boot for routing, session lifecycle, and catch submission.
-- Spring Boot validates requests, calls OSRM, and returns frontend-friendly coordinate objects.
-- Flyway creates the database schema and seeds the backend-owned creature catalog.
-- Spring Boot creates, starts, ends, and retrieves persisted game sessions.
-- Valid catches are resolved against the backend catalog, then the catch snapshot and session totals are committed in one transaction.
-- Route animation, target spawning, catch detection, local progression, and the local game timer remain frontend-controlled.
-- Catch submission is non-blocking; backend failures do not undo local catch feedback or scoring.
-
-## Local Processes
-
-Local development runs four independent processes:
+Local ports:
 
 ```text
 Vite frontend     http://localhost:5173
 Spring Boot API   http://localhost:8080
-OSRM server       http://localhost:5000
+OSRM              http://localhost:5000
 PostgreSQL        localhost:5432
 ```
 
-The Vite browser client sends API requests to Spring Boot. Spring Boot validates and translates routing requests before calling OSRM, and uses PostgreSQL for creature definitions. PostgreSQL must be running before the root-level scripts start the other three processes.
+## Frontend
 
-## Main Modules
+The frontend is a React application under `frontend/`.
 
-- `frontend/src/components`: Map elements, markers, HUD panels, controls, inventory, feedback, and round summary.
-- `frontend/src/hooks`: Player movement, route animation, spawning, catch detection, local sessions, backend session synchronization, and progression.
-- `frontend/src/config`: API endpoint, game, map, and progression configuration.
-- `frontend/src/api`: Spring Boot API adapters used by frontend gameplay hooks.
-- `frontend/src/data`: Original creature catalog and mock player profile.
-- `frontend/src/utils`: Browser-generated sound effects and small helpers.
-- `backend/route-catch-api`: Spring Boot routing adapters, API error handling, Flyway migrations, and JPA repositories for creatures, sessions, and catches.
+- `components/` renders the Leaflet map, player and creature markers, routes,
+  compact HUD, target and catch panels, round summary, and Stats drawer.
+- `hooks/` owns route animation, player state, target spawning, catch
+  detection, local sessions, backend session synchronization, and progression.
+- `api/` calls Spring Boot for routes, nearest-road snapping, backend sessions,
+  catch submission, history, and leaderboard data.
+- `config/` centralizes API, game, map, routing, and progression values.
+- `data/` contains frontend creature presentation data and the mock profile.
+- `utils/` contains browser-generated sound and rarity styling helpers.
 
-## Current Limitations
+Live gameplay remains frontend-controlled:
 
-- No authentication.
-- Most gameplay decisions and validation are still controlled by the frontend.
-- PostgreSQL persistence does not yet include users or authentication state.
-- No multiplayer or shared realtime state.
-- Catch submissions validate creature IDs and scoring against the backend catalog, but broader anti-cheat validation is not implemented.
+- The local round timer controls spawning.
+- Target spawning asks the backend for nearest-road and route data.
+- Route distance and simulation speed determine target difficulty.
+- The browser animates the player along returned route coordinates.
+- Catch detection updates local score, XP, inventory, and feedback immediately.
+- Catch submission to the backend is non-blocking; a sync failure does not
+  roll back the local catch.
 
-## Planned Architecture
+## Backend
+
+The Spring Boot application is under `backend/route-catch-api/`.
+
+### Routing APIs
+
+- `POST /api/routes` validates coordinates and wraps OSRM's driving route API.
+- `POST /api/nearest` validates coordinates and wraps OSRM's nearest API.
+- OSRM `[lon, lat]` coordinates are returned as `{ "lat", "lon" }`.
+- Routing engine failures become consistent `502` JSON responses.
+
+### Game APIs
+
+- `GET /api/game/creatures` reads the backend-owned creature catalog.
+- Session endpoints create, start, retrieve, end, and list sessions.
+- Catch submission accepts a creature ID and resolves name, rarity, and score
+  from the backend catalog.
+- Catch insertion and session score/count updates run in one transaction.
+- History endpoints return persisted sessions and their catch snapshots.
+- The leaderboard returns completed sessions only.
+
+Controllers remain thin and delegate to `OsrmRoutingService`,
+`CreatureCatalogService`, and `GameSessionService`. `GlobalExceptionHandler`
+maps validation, malformed JSON, unsupported methods, routing failures,
+missing records, invalid states, and unexpected errors to `ApiErrorResponse`.
+
+## PostgreSQL
+
+Flyway migration `V1__create_game_tables.sql` creates:
+
+### `creature_catalog`
+
+- `creature_id` primary key
+- name, rarity, score value
+- creation timestamp
+
+### `game_sessions`
+
+- UUID session ID
+- status: `CREATED`, `RUNNING`, or `ENDED`
+- created, started, and ended timestamps
+- round duration
+- accumulated score and caught count
+
+### `caught_creatures`
+
+- UUID catch ID
+- foreign keys to session and creature
+- snapshot of creature name, rarity, and score
+- caught timestamp
+
+`V2__seed_creature_catalog.sql` inserts the nine original creatures. Hibernate
+uses schema validation; it does not create or update tables.
+
+## Session Lifecycle
 
 ```text
-React -> Spring Boot -> OSRM/Valhalla
-Spring Boot -> PostgreSQL/PostGIS
-Spring Boot -> WebSocket clients
+POST sessions
+    |
+    v
+ CREATED -- start --> RUNNING -- end/expiry --> ENDED
 ```
 
-Future backend work will add broader trusted game validation, authentication, isochrone support, and realtime multiplayer while retaining the existing routing wrapper.
+- Starting an already running session is idempotent.
+- Starting an ended session returns `409 INVALID_GAME_SESSION_STATE`.
+- Ending an ended session returns the existing ended session.
+- Only running sessions accept catches.
+- Created sessions do not expire because they have no start time.
+
+### Stale Session Auto-Expiry
+
+A running session is stale after:
+
+```text
+startedAt + durationSeconds
+```
+
+When stale, it becomes `ENDED` and receives that calculated expiry instant as
+`endedAt`, not the later request time. Expiry checks run during session get,
+session listing, catch submission, end handling, and leaderboard queries.
+A catch submitted after expiry is rejected with `409` and is not persisted.
+
+## History and Leaderboard
+
+The Stats drawer uses:
+
+```text
+GET /api/game/sessions?limit=20
+GET /api/game/sessions/{sessionId}/catches
+GET /api/game/leaderboard?limit=10
+```
+
+- Session history is ordered by `createdAt` descending.
+- Catch history is ordered by `caughtAt` ascending.
+- Leaderboard entries include only ended sessions and are ordered by score
+  descending, caught count descending, ended time ascending, then creation time
+  descending.
+- History and leaderboard refreshes are non-blocking and do not interrupt play.
+
+## Local Startup
+
+`scripts/run-all.sh` starts OSRM, waits for it, starts Spring Boot, waits for
+health, prepares `frontend/.env` and dependencies when needed, then starts
+Vite. PostgreSQL is intentionally not started by this script and must already
+be available.
+
+Individual scripts are retained for separate logs:
+
+```text
+scripts/run-osrm.sh
+scripts/run-backend.sh
+scripts/run-frontend.sh
+```
+
+## Security and Trust Boundaries
+
+- There is no authentication or user ownership yet.
+- CORS currently allows the local Vite origin.
+- The backend owns catalog score values and ignores legacy client score fields.
+- The browser still controls spawn timing, movement, and catch detection.
+- Broader anti-cheat and fully server-authoritative rounds are future work.

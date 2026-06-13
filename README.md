@@ -1,48 +1,163 @@
 # Route Catch Game
 
-Route Catch Game is a map-based creature-catching game built with React, Leaflet, and Spring Boot. Players follow real road routes, chase timed creatures, and build score and progression during configurable game rounds.
+Route Catch Game is a map-based creature chase game built around real road
+routes. Players start timed rounds, chase creatures on a Leaflet map, and catch
+them before they expire. The frontend animates gameplay while a Spring Boot API
+wraps OSRM routing and persists sessions, catches, scores, and the creature
+catalog in PostgreSQL.
 
-The current version is a frontend gameplay prototype backed by Spring Boot. The backend wraps OSRM routing and persists its creature catalog, game sessions, scores, and caught-creature snapshots in PostgreSQL while the frontend continues to run the live game simulation.
+## Documentation
 
-For a concise technical overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- [Architecture](docs/ARCHITECTURE.md)
+- [API reference](docs/API.md)
+- [Demo script](docs/DEMO_SCRIPT.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
 
-## Current Features
+## Architecture
 
-- Interactive Leaflet map with an animated player avatar.
-- Compact HUD for score, catches, level, XP, and session status.
-- Plain map-click movement confirmation and direct creature chasing.
-- Spring Boot wrappers for OSRM route and nearest-road requests.
-- Backend-linked session lifecycle and non-blocking catch score synchronization.
-- Configurable 60, 120, 180, or 300-second game sessions.
-- Original common, rare, and legendary route-game creatures.
-- Level progression, speed-limit bonuses, and level-based rarity weights.
-- ETA-based target difficulty using route distance and simulation speed.
-- Catch scoring, toast and sound feedback, recent catches, and round summaries.
+```text
+React + Leaflet frontend
+          |
+          v
+Spring Boot REST API
+     |          |
+     v          v
+   OSRM     PostgreSQL
+```
+
+- The frontend owns live map rendering, route animation, target spawning,
+  catch detection, progression, and game presentation.
+- Spring Boot owns routing adapters, backend session lifecycle, catalog-backed
+  catch scoring, history, and leaderboard APIs.
+- OSRM provides nearest-road snapping and driving routes.
+- PostgreSQL stores the creature catalog, game sessions, and caught-creature
+  snapshots. Flyway creates and seeds the schema.
+
+## Main Features
+
+- Leaflet map with animated player movement along OSRM road routes.
+- Original common, rare, and legendary creatures with rarity-based markers.
+- Direct target chasing, active chase state, route feedback, and cancellation.
+- Configurable timed rounds with score, XP, levels, and speed-limit bonuses.
+- ETA-based target difficulty derived from route distance and simulation speed.
+- Catch toast, sound, map effects, recent catches, and round summaries.
+- Backend-created game sessions and catalog-validated catch submission.
+- PostgreSQL-persisted sessions, scores, catches, and creature definitions.
+- Automatic expiry of stale `RUNNING` backend sessions.
+- Stats drawer with persisted game history, catch history, and leaderboard.
+- Consistent JSON API errors for validation, routing, state, and method errors.
 
 ## Tech Stack
 
-- React and Vite
+**Frontend**
+
+- React 19 and Vite 8
 - Leaflet and React Leaflet
-- Spring Boot and Maven
-- PostgreSQL, JPA, and Flyway
-- OSRM
-- ESLint
+- JavaScript, CSS, and ESLint
 
-## Local Development Runbook
+**Backend**
 
-### Recommended Quick Start
+- Java 21
+- Spring Boot 4
+- Spring Web MVC, Validation, Data JPA, and Maven
+- Flyway
 
-Start OSRM, Spring Boot, and Vite together from the project root:
+**Infrastructure**
+
+- PostgreSQL
+- OSRM using the MLD algorithm
+
+## Local Prerequisites
+
+- Bash and `curl`
+- Java 21
+- Node.js `20.19+` or `22.12+` and npm
+- PostgreSQL running on port `5432`
+- `psql` for database setup and inspection
+- A built OSRM server and prepared MLD dataset
+
+The checked-in OSRM scripts currently use these machine-specific paths:
+
+```text
+/home/halfdimension/Projects/practice/osrm-backend/build/osrm-routed
+/home/halfdimension/Projects/osrm-data/northern-zone-latest.osrm
+```
+
+Update `scripts/run-osrm.sh` when OSRM or its dataset is located elsewhere.
+The dataset prefix must have at least `.ebg`, `.partition`, and `.cells`
+companion files.
+
+## Environment Configuration
+
+Create the frontend environment file:
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+Default value:
+
+```env
+VITE_API_BASE_URL=http://localhost:8080
+```
+
+The backend defaults are in
+`backend/route-catch-api/src/main/resources/application.properties`:
+
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/route_catch_game
+spring.datasource.username=route_catch_user
+spring.datasource.password=route_catch_pass
+osrm.base-url=http://localhost:5000
+```
+
+## PostgreSQL Setup
+
+Create the local role and database once:
+
+```bash
+sudo -u postgres psql
+```
+
+```sql
+CREATE USER route_catch_user WITH PASSWORD 'route_catch_pass';
+CREATE DATABASE route_catch_game OWNER route_catch_user;
+\q
+```
+
+On backend startup, Flyway applies:
+
+- `V1__create_game_tables.sql`
+- `V2__seed_creature_catalog.sql`
+
+JPA uses `ddl-auto=validate`, so Flyway remains responsible for schema changes.
+
+## Quick Start
+
+PostgreSQL must already be running. From the project root:
 
 ```bash
 ./scripts/run-all.sh
 ```
 
-PostgreSQL must already be running with the local database and user described below. The script waits for OSRM and the backend to become reachable before starting the frontend. Press Ctrl+C to stop the managed OSRM and backend processes.
+This starts:
 
-### Manual Debug Mode
+- OSRM at `http://localhost:5000`
+- Spring Boot at `http://localhost:8080`
+- Vite at `http://localhost:5173`
 
-Run each service in a separate terminal when you want to inspect OSRM, backend, and frontend logs independently.
+Open `http://localhost:5173`. Press Ctrl+C in the script terminal to stop the
+managed OSRM and backend processes along with the frontend.
+
+Check prerequisites and live services with:
+
+```bash
+./scripts/check-system.sh
+```
+
+## Run Services Separately
+
+Separate terminals are useful when inspecting logs.
 
 Terminal 1:
 
@@ -62,34 +177,29 @@ Terminal 3:
 ./scripts/run-frontend.sh
 ```
 
-The frontend script creates `frontend/.env` from `.env.example` when needed and installs dependencies only when `frontend/node_modules` is absent.
-
-Optionally verify OSRM and both backend routing endpoints:
+Equivalent direct commands:
 
 ```bash
-./scripts/check-system.sh
+cd backend/route-catch-api
+./mvnw spring-boot:run
 ```
-
-Open `http://localhost:5173` after all three services are running.
-
-## Run the Frontend
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env
 npm run dev
 ```
 
-The default frontend API setting is:
+## Tests and Builds
 
-```env
-VITE_API_BASE_URL=http://localhost:8080
+Backend tests use H2 and do not require the local PostgreSQL instance:
+
+```bash
+cd backend/route-catch-api
+./mvnw clean test
 ```
 
-Change `VITE_API_BASE_URL` in `frontend/.env` when the Spring Boot API runs at another address.
-
-Build and lint the frontend with:
+Frontend verification:
 
 ```bash
 cd frontend
@@ -97,115 +207,86 @@ npm run build
 npm run lint
 ```
 
-## Run the Backend
-
-Create the local PostgreSQL database and application user once:
+Shell script syntax:
 
 ```bash
-sudo -u postgres psql
+bash -n scripts/run-all.sh
+bash -n scripts/run-osrm.sh
+bash -n scripts/run-backend.sh
+bash -n scripts/run-frontend.sh
+bash -n scripts/check-system.sh
 ```
-
-```sql
-CREATE USER route_catch_user WITH PASSWORD 'route_catch_pass';
-CREATE DATABASE route_catch_game OWNER route_catch_user;
-\q
-```
-
-Flyway creates the game tables and seeds the creature catalog automatically when the backend starts.
-
-```bash
-cd backend/route-catch-api
-./mvnw spring-boot:run
-```
-
-The API runs at `http://localhost:8080` and exposes:
-
-- `GET /api/health`
-- `POST /api/routes`
-- `POST /api/nearest`
-- `POST /api/game/sessions`
-- `GET /api/game/sessions?limit=20`
-- `GET /api/game/sessions/{sessionId}`
-- `GET /api/game/sessions/{sessionId}/catches`
-- `POST /api/game/sessions/{sessionId}/start`
-- `POST /api/game/sessions/{sessionId}/end`
-- `POST /api/game/sessions/{sessionId}/catches`
-- `GET /api/game/creatures`
-
-The creature catalog, game sessions, scores, caught counts, and caught-creature snapshots are stored in PostgreSQL and survive backend restarts.
-
-## Run the OSRM Dependency
-
-The Spring Boot backend expects OSRM at:
-
-```text
-http://localhost:5000
-```
-
-This is configured by `osrm.base-url` in the backend application properties. The frontend does not call OSRM directly.
-
-One common local setup is:
-
-```bash
-docker run -t -v "$PWD/osrm-data:/data" osrm/osrm-backend osrm-extract -p /opt/car.lua /data/map.osm.pbf
-docker run -t -v "$PWD/osrm-data:/data" osrm/osrm-backend osrm-partition /data/map.osrm
-docker run -t -v "$PWD/osrm-data:/data" osrm/osrm-backend osrm-customize /data/map.osrm
-docker run -p 5000:5000 -v "$PWD/osrm-data:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/map.osrm
-```
-
-Place an OpenStreetMap extract at `osrm-data/map.osm.pbf` before running these commands.
 
 ## Gameplay Flow
 
-1. Choose a round duration; the frontend creates and starts a backend game session.
-2. Creature targets spawn while the round is running.
-3. The frontend asks Spring Boot to snap each target to the nearest road.
-4. Spring Boot requests nearest-road and route data from OSRM.
-5. Route distance, simulation speed, and target lifetime determine difficulty.
-6. Click a creature or target-list item to chase it immediately.
-7. Click empty map space to confirm movement to that location.
-8. Catch creatures before they expire to gain local score and XP; catches are also submitted to the running backend session.
-9. When the round ends, the frontend ends the backend session, stops movement and spawning, and shows a summary.
+1. Choose a round duration and start the game.
+2. The frontend creates and starts a persisted backend session.
+3. Targets spawn, snap to nearby roads, and receive route-based difficulty.
+4. Click a target marker or Targets row to fetch a route and begin chasing.
+5. Catch creatures to receive immediate local score, XP, and visual feedback.
+6. The frontend submits each creature ID to the backend without blocking play.
+7. The backend validates catalog score, stores the catch, and updates the
+   persisted session totals.
+8. End the round and open Stats to inspect History and Leaderboard data.
 
 ## Project Structure
 
 ```text
 frontend/
   src/
-    api/          Backend API client
-    components/   Map, markers, HUD, controls, and panels
-    config/       API, game, map, and progression configuration
-    data/         Creature catalog and mock player profile
-    hooks/        Session, movement, spawning, catch, and progression logic
-    styles/       Global UI styles
-    utils/        Browser sound effects
-backend/
-  route-catch-api/
-    src/main/java/com/routecatch/api/
-      controller/ REST endpoints
-      dto/        API request and response models
-      service/    OSRM integration
-      game/       DB-backed catalog, sessions, and catch submission
-    src/main/resources/db/migration/
-      V1__create_game_tables.sql
-      V2__seed_creature_catalog.sql
+    api/          Spring Boot API clients
+    components/   Map, HUD, targets, feedback, Stats, history, leaderboard
+    config/       API, game, map, routing, and progression settings
+    data/         Frontend creature presentation and mock player profile
+    hooks/        Movement, spawning, sessions, catches, and progression
+    styles/       Global application styles
+    utils/        Rarity and browser sound helpers
+backend/route-catch-api/
+  src/main/java/com/routecatch/api/
+    controller/   Health, route, and nearest endpoints
+    dto/          Shared routing and error DTOs
+    exception/    Global JSON error handling
+    game/         Catalog, sessions, catches, history, and leaderboard
+    service/      OSRM routing integration
+  src/main/resources/db/migration/
 docs/
-  ARCHITECTURE.md
 scripts/
-  check-system.sh
-  run-all.sh
-  run-backend.sh
-  run-frontend.sh
-  run-osrm.sh
 ```
+
+## Common Troubleshooting
+
+- **Backend cannot start:** verify PostgreSQL is running and the configured
+  database, user, and password exist.
+- **Flyway reports schema permission errors:** grant the application role
+  permission on the `public` schema. See
+  [Troubleshooting](docs/TROUBLESHOOTING.md).
+- **Routing returns `502`:** start OSRM and verify the configured dataset covers
+  the coordinates being requested.
+- **Frontend cannot reach the API:** confirm `frontend/.env` points to
+  `http://localhost:8080` and restart Vite after changing it.
+- **Browser shows method not allowed:** `/api/routes`, `/api/nearest`, and catch
+  submission are POST endpoints, not browser-tab GET pages.
+- **A port is busy:** find and stop the process using ports `5000`, `8080`,
+  `5173`, or `5432`.
+
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for commands and detailed
+fixes.
+
+## Current Limitations
+
+- No authentication or users.
+- No multiplayer or shared realtime game state.
+- Live spawning, movement, catch radius checks, and progression remain
+  frontend-controlled.
+- Backend catalog validation prevents client-supplied score values, but broader
+  anti-cheat validation is not implemented.
 
 ## Roadmap
 
-- JWT authentication
-- User profiles and avatar upload
-- PostgreSQL persistence for users
+- JWT authentication and persisted user profiles
+- Avatar upload
 - PostGIS-backed spatial features
-- Multiplayer WebSocket support
+- Multiplayer WebSocket sessions
 - Valhalla isochrone integration
-- Leaderboard
-- Deployment
+- Stronger server-authoritative gameplay validation
+- Deployment and production observability
