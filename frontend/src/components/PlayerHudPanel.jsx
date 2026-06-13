@@ -1,7 +1,5 @@
-import { mockUserProfile } from '../data/mockUserProfile'
-
 function getInitial(displayName) {
-  return displayName.trim().charAt(0).toUpperCase()
+  return displayName.trim().charAt(0).toUpperCase() || 'G'
 }
 
 function PlayerHudPanel({
@@ -13,8 +11,9 @@ function PlayerHudPanel({
   gameState,
   remainingSeconds,
   selectedRoundSeconds,
+  playerName,
 }) {
-  const profile = mockUserProfile
+  const displayName = playerName?.trim() || 'Guest'
   const sessionTime =
     gameState === 'running' ? remainingSeconds : selectedRoundSeconds
 
@@ -22,14 +21,10 @@ function PlayerHudPanel({
     <section className="player-hud-panel" aria-label="Player HUD">
       <div className="player-hud-profile">
         <div className="player-hud-avatar" aria-hidden="true">
-          {profile.avatarUrl ? (
-            <img src={profile.avatarUrl} alt="" />
-          ) : (
-            <span>{getInitial(profile.displayName)}</span>
-          )}
+          <span>{getInitial(displayName)}</span>
         </div>
         <div>
-          <p>{profile.displayName}</p>
+          <p>{displayName}</p>
           <span>{gameState}</span>
         </div>
       </div>

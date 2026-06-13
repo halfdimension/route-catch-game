@@ -94,15 +94,15 @@ function LeaderboardPanel({ refreshVersion }) {
               const sessionId = String(entry?.sessionId ?? '')
               const rank = entry?.rank ?? index + 1
               const endedTime = formatEndedTime(entry?.endedAt)
+              const playerName = entry?.playerName?.trim() || 'Guest'
 
               return (
                 <li key={sessionId || `leaderboard-${index}`}>
                   <strong className="leaderboard-rank">{rank}</strong>
                   <div>
-                    <strong title={sessionId}>
-                      {sessionId.slice(0, 8) || 'Unknown'}
-                    </strong>
+                    <strong title={sessionId}>{playerName}</strong>
                     <span>
+                      {sessionId.slice(0, 8) || 'Unknown'} ·{' '}
                       {entry?.score ?? 0} pts · {entry?.caughtCount ?? 0} caught
                     </span>
                   </div>

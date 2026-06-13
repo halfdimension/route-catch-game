@@ -13,7 +13,8 @@ public record GameSessionResponse(
 	Instant endedAt,
 	int durationSeconds,
 	int score,
-	int caughtCount
+	int caughtCount,
+	String playerName
 ) {
 
 	public static GameSessionResponse from(GameSession session) {
@@ -25,7 +26,8 @@ public record GameSessionResponse(
 			session.endedAt(),
 			session.durationSeconds(),
 			session.score(),
-			session.caughtCount()
+			session.caughtCount(),
+			session.playerName()
 		);
 	}
 }

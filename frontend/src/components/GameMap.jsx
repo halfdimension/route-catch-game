@@ -36,6 +36,7 @@ function GameMap({
   caughtTarget,
   chasedTargetId,
   routingTargetId,
+  playerName,
   onMapClick,
   onTargetClick,
 }) {
@@ -63,7 +64,7 @@ function GameMap({
         routingTargetId={routingTargetId}
       />
       <CatchMapEffect caughtTarget={caughtTarget} />
-      <PlayerMarker position={playerPosition} />
+      <PlayerMarker position={playerPosition} playerName={playerName} />
 
       {pendingDestination && (
         <PlayerMarker position={pendingDestination} variant="destination" />

@@ -11,6 +11,7 @@ public record GameSession(
 	Instant endedAt,
 	int durationSeconds,
 	int score,
-	int caughtCount
+	int caughtCount,
+	String playerName
 ) {
 }

@@ -29,13 +29,16 @@ export function useBackendGameSession() {
   }, [])
 
   const beginSession = useCallback(
-    async (durationSeconds) => {
+    async (durationSeconds, playerName) => {
       setIsSessionPending(true)
       setSessionNotice(null)
       setCatchSubmissionWarning('')
 
       try {
-        const createdSession = await createGameSession(durationSeconds)
+        const createdSession = await createGameSession(
+          durationSeconds,
+          playerName,
+        )
         setBackendSession(createdSession)
 
         const runningSession = await startGameSession(createdSession.sessionId)
@@ -85,7 +88,7 @@ export function useBackendGameSession() {
   )
 
   const replaceSession = useCallback(
-    async (durationSeconds) => {
+    async (durationSeconds, playerName) => {
       setIsSessionPending(true)
       setSessionNotice(null)
       setCatchSubmissionWarning('')
@@ -107,7 +110,10 @@ export function useBackendGameSession() {
       }
 
       try {
-        const createdSession = await createGameSession(durationSeconds)
+        const createdSession = await createGameSession(
+          durationSeconds,
+          playerName,
+        )
         setBackendSession(createdSession)
 
         const runningSession = await startGameSession(createdSession.sessionId)

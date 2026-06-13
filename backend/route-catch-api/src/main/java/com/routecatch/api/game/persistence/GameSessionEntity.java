@@ -42,14 +42,26 @@ public class GameSessionEntity {
 	@Column(name = "caught_count", nullable = false)
 	private int caughtCount;
 
+	@Column(name = "player_name", length = 80, nullable = false)
+	private String playerName;
+
 	protected GameSessionEntity() {
 	}
 
 	public GameSessionEntity(UUID sessionId, int durationSeconds) {
+		this(sessionId, durationSeconds, "Guest");
+	}
+
+	public GameSessionEntity(
+		UUID sessionId,
+		int durationSeconds,
+		String playerName
+	) {
 		this.sessionId = sessionId;
 		this.status = GameSessionStatus.CREATED;
 		this.createdAt = Instant.now();
 		this.durationSeconds = durationSeconds;
+		this.playerName = playerName;
 	}
 
 	public void start(Instant startTime) {
@@ -112,5 +124,9 @@ public class GameSessionEntity {
 
 	public int getCaughtCount() {
 		return caughtCount;
+	}
+
+	public String getPlayerName() {
+		return playerName;
 	}
 }

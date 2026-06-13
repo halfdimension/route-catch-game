@@ -19,13 +19,13 @@ async function requestGameSession(path, options = {}) {
   return response.json()
 }
 
-export function createGameSession(durationSeconds) {
+export function createGameSession(durationSeconds, playerName) {
   return requestGameSession('/api/game/sessions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ durationSeconds }),
+    body: JSON.stringify({ durationSeconds, playerName }),
   })
 }
 

@@ -49,7 +49,10 @@ class GameLeaderboardApiTests {
 		GameSession created = gameSessionService.createSession(60);
 		GameSession running = gameSessionService.createSession(60);
 		gameSessionService.startSession(running.sessionId());
-		GameSession ended = createEndedSession("sparkbit");
+		GameSession ended = createEndedSessionForPlayer(
+			"Harsh",
+			"sparkbit"
+		);
 
 		mockMvc.perform(get("/api/game/leaderboard"))
 			.andExpect(status().isOk())
@@ -61,6 +64,7 @@ class GameLeaderboardApiTests {
 			.andExpect(jsonPath("$[0].score").value(10))
 			.andExpect(jsonPath("$[0].caughtCount").value(1))
 			.andExpect(jsonPath("$[0].durationSeconds").value(60))
+			.andExpect(jsonPath("$[0].playerName").value("Harsh"))
 			.andExpect(jsonPath("$[0].startedAt").isNotEmpty())
 			.andExpect(jsonPath("$[0].endedAt").isNotEmpty());
 
@@ -182,7 +186,14 @@ class GameLeaderboardApiTests {
 	}
 
 	private GameSession createEndedSession(String... creatureIds) {
-		GameSession session = gameSessionService.createSession(60);
+		return createEndedSessionForPlayer("Guest", creatureIds);
+	}
+
+	private GameSession createEndedSessionForPlayer(
+		String playerName,
+		String... creatureIds
+	) {
+		GameSession session = gameSessionService.createSession(60, playerName);
 		gameSessionService.startSession(session.sessionId());
 
 		for (String creatureId : creatureIds) {

@@ -39,6 +39,7 @@ function SessionListItem({ session, isSelected, onSelect }) {
   const sessionTime = formatHistoryTime(
     session?.startedAt ?? session?.createdAt,
   )
+  const playerName = session?.playerName?.trim() || 'Guest'
 
   return (
     <li>
@@ -49,12 +50,13 @@ function SessionListItem({ session, isSelected, onSelect }) {
         disabled={!sessionId}
       >
         <span className="game-history-session-heading">
-          <strong title={sessionId}>{sessionId.slice(0, 8) || 'Unknown'}</strong>
+          <strong title={`${playerName} · ${sessionId}`}>{playerName}</strong>
           <small className={`game-history-status ${getStatusClass(status)}`}>
             {status}
           </small>
         </span>
         <span className="game-history-session-stats">
+          <span>{sessionId.slice(0, 8) || 'Unknown'}</span>
           <span>{session?.score ?? 0} pts</span>
           <span>{session?.caughtCount ?? 0} caught</span>
         </span>

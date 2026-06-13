@@ -101,6 +101,7 @@ Flyway migration `V1__create_game_tables.sql` creates:
 - created, started, and ended timestamps
 - round duration
 - accumulated score and caught count
+- player display name, defaulting to `Guest`
 
 ### `caught_creatures`
 

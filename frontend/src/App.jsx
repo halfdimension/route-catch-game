@@ -15,6 +15,7 @@ import { useBackendGameSession } from './hooks/useBackendGameSession'
 import { useCatchDetection } from './hooks/useCatchDetection'
 import { useGameSession } from './hooks/useGameSession'
 import { usePlayerProgression } from './hooks/usePlayerProgression'
+import { usePlayerName } from './hooks/usePlayerName'
 import { usePlayerState } from './hooks/usePlayerState'
 import { useTargetSpawner } from './hooks/useTargetSpawner'
 import { playCatchSound } from './utils/soundEffects'
@@ -70,6 +71,7 @@ function App() {
     addXp,
     resetProgression,
   } = usePlayerProgression()
+  const { playerName, setPlayerName } = usePlayerName()
   const [chasedTargetId, setChasedTargetId] = useState(null)
   const [routingTargetId, setRoutingTargetId] = useState(null)
   const chasedTargetIdRef = useRef(null)
@@ -225,7 +227,10 @@ function App() {
   }
 
   async function handleStartGame() {
-    const didStartBackendSession = await beginSession(selectedRoundSeconds)
+    const didStartBackendSession = await beginSession(
+      selectedRoundSeconds,
+      playerName,
+    )
 
     if (didStartBackendSession) {
       startGame()
@@ -243,7 +248,10 @@ function App() {
   }
 
   async function restartGame() {
-    const didStartBackendSession = await replaceSession(selectedRoundSeconds)
+    const didStartBackendSession = await replaceSession(
+      selectedRoundSeconds,
+      playerName,
+    )
 
     if (!didStartBackendSession) {
       return
@@ -346,6 +354,7 @@ function App() {
         caughtTarget={catchToastTarget}
         chasedTargetId={chasedTargetId}
         routingTargetId={routingTargetId}
+        playerName={playerName}
         onMapClick={handleMapClick}
         onTargetClick={handleTargetClick}
       />
@@ -365,6 +374,7 @@ function App() {
         gameState={gameState}
         remainingSeconds={remainingSeconds}
         selectedRoundSeconds={selectedRoundSeconds}
+        playerName={playerName}
       />
       <CatchToast caughtTarget={catchToastTarget} />
       <GameSessionPanel
@@ -372,6 +382,8 @@ function App() {
         selectedRoundSeconds={selectedRoundSeconds}
         roundDurationOptions={roundDurationOptions}
         onRoundDurationChange={setSelectedRoundSeconds}
+        playerName={playerName}
+        onPlayerNameChange={setPlayerName}
         onStartGame={handleStartGame}
         onEndGame={handleEndGame}
         backendSession={backendSession}

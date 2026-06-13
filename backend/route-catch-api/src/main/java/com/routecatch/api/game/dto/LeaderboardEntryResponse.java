@@ -11,7 +11,8 @@ public record LeaderboardEntryResponse(
 	int caughtCount,
 	int durationSeconds,
 	Instant startedAt,
-	Instant endedAt
+	Instant endedAt,
+	String playerName
 ) {
 
 	public static LeaderboardEntryResponse from(
@@ -25,7 +26,8 @@ public record LeaderboardEntryResponse(
 			session.getCaughtCount(),
 			session.getDurationSeconds(),
 			session.getStartedAt(),
-			session.getEndedAt()
+			session.getEndedAt(),
+			session.getPlayerName()
 		);
 	}
 }

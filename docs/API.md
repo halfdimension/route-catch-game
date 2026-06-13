@@ -81,11 +81,13 @@ Each item contains `creatureId`, `creatureName`, `rarity`, and `scoreValue`.
 curl --fail \
   --request POST \
   --header "Content-Type: application/json" \
-  --data '{"durationSeconds":60}' \
+  --data '{"durationSeconds":60,"playerName":"Harsh"}' \
   "$API_URL/api/game/sessions"
 ```
 
-Duration must be between 30 and 600 seconds. The response uses this shape:
+Duration must be between 30 and 600 seconds. `playerName` is optional, trimmed,
+limited to 80 characters, and defaults to `Guest`. The response uses this
+shape:
 
 ```json
 {
@@ -96,7 +98,8 @@ Duration must be between 30 and 600 seconds. The response uses this shape:
   "endedAt": null,
   "durationSeconds": 60,
   "score": 0,
-  "caughtCount": 0
+  "caughtCount": 0,
+  "playerName": "Harsh"
 }
 ```
 
@@ -215,7 +218,8 @@ appear.
     "caughtCount": 3,
     "durationSeconds": 60,
     "startedAt": "2026-06-13T12:00:00Z",
-    "endedAt": "2026-06-13T12:01:00Z"
+    "endedAt": "2026-06-13T12:01:00Z",
+    "playerName": "Harsh"
   }
 ]
 ```

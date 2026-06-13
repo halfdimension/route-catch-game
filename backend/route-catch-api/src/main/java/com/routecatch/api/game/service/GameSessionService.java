@@ -43,9 +43,15 @@ public class GameSessionService {
 
 	@Transactional
 	public GameSession createSession(int durationSeconds) {
+		return createSession(durationSeconds, "Guest");
+	}
+
+	@Transactional
+	public GameSession createSession(int durationSeconds, String playerName) {
 		GameSessionEntity session = new GameSessionEntity(
 			UUID.randomUUID(),
-			durationSeconds
+			durationSeconds,
+			normalizePlayerName(playerName)
 		);
 
 		return toModel(gameSessionRepository.save(session));
@@ -223,7 +229,16 @@ public class GameSessionService {
 			entity.getEndedAt(),
 			entity.getDurationSeconds(),
 			entity.getScore(),
-			entity.getCaughtCount()
+			entity.getCaughtCount(),
+			entity.getPlayerName()
 		);
+	}
+
+	private String normalizePlayerName(String playerName) {
+		if (playerName == null || playerName.isBlank()) {
+			return "Guest";
+		}
+
+		return playerName.trim();
 	}
 }

@@ -3,25 +3,39 @@ import { CircleMarker, Marker, Tooltip } from 'react-leaflet'
 import { mockUserProfile } from '../data/mockUserProfile'
 
 function getInitial(displayName) {
-  return displayName.trim().charAt(0).toUpperCase()
+  return displayName.trim().charAt(0).toUpperCase() || 'G'
 }
 
-function getAvatarHtml(profile) {
-  if (profile.avatarUrl) {
-    return `<img src="${profile.avatarUrl}" alt="${profile.displayName}" />`
+function escapeHtml(value) {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;',
+      })[character],
+  )
+}
+
+function getAvatarHtml(displayName, avatarUrl) {
+  if (avatarUrl) {
+    return `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(displayName)}" />`
   }
 
-  return `<span>${getInitial(profile.displayName)}</span>`
+  return `<span>${escapeHtml(getInitial(displayName))}</span>`
 }
 
-function PlayerMarker({ position, variant = 'player' }) {
+function PlayerMarker({ position, variant = 'player', playerName = 'Guest' }) {
   const isDestination = variant === 'destination'
+  const displayName = playerName.trim() || 'Guest'
 
   if (!isDestination) {
-    const profile = mockUserProfile
     const icon = divIcon({
       className: 'player-avatar-marker',
-      html: getAvatarHtml(profile),
+      html: getAvatarHtml(displayName, mockUserProfile.avatarUrl),
       iconAnchor: [18, 18],
       iconSize: [36, 36],
     })
@@ -29,7 +43,7 @@ function PlayerMarker({ position, variant = 'player' }) {
     return (
       <Marker position={[position.lat, position.lon]} icon={icon}>
         <Tooltip direction="top" offset={[0, -16]} opacity={0.95}>
-          {profile.displayName} @{profile.username}
+          {displayName}
         </Tooltip>
       </Marker>
     )

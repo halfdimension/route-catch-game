@@ -35,7 +35,10 @@ public class GameSessionController {
 		@Valid @RequestBody CreateGameSessionRequest request
 	) {
 		return GameSessionResponse.from(
-			gameSessionService.createSession(request.durationSeconds())
+			gameSessionService.createSession(
+				request.durationSeconds(),
+				request.playerName()
+			)
 		);
 	}
 

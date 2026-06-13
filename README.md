@@ -226,6 +226,7 @@ On backend startup, Flyway applies:
 
 - `V1__create_game_tables.sql`
 - `V2__seed_creature_catalog.sql`
+- `V3__add_player_name_to_game_sessions.sql`
 
 JPA uses `ddl-auto=validate`, so Flyway remains responsible for schema changes.
 

@@ -3,6 +3,8 @@ function GameSessionPanel({
   selectedRoundSeconds,
   roundDurationOptions,
   onRoundDurationChange,
+  playerName,
+  onPlayerNameChange,
   onStartGame,
   onEndGame,
   backendSession,
@@ -16,25 +18,41 @@ function GameSessionPanel({
     onRoundDurationChange(Number(event.target.value))
   }
 
+  function handlePlayerNameChange(event) {
+    onPlayerNameChange(event.target.value)
+  }
+
   const canChooseDuration = gameState !== 'running'
 
   return (
     <section className="game-session-panel" aria-label="Game session">
       {canChooseDuration && (
-        <label className="round-duration-control">
-          <span>Duration</span>
-          <select
-            value={selectedRoundSeconds}
-            onChange={handleDurationChange}
-            disabled={isSessionPending}
-          >
-            {roundDurationOptions.map((durationSeconds) => (
-              <option key={durationSeconds} value={durationSeconds}>
-                {durationSeconds}s
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="game-session-setup-fields">
+          <label className="player-name-control">
+            <span>Player name</span>
+            <input
+              type="text"
+              value={playerName}
+              onChange={handlePlayerNameChange}
+              maxLength={80}
+              disabled={isSessionPending}
+            />
+          </label>
+          <label className="round-duration-control">
+            <span>Duration</span>
+            <select
+              value={selectedRoundSeconds}
+              onChange={handleDurationChange}
+              disabled={isSessionPending}
+            >
+              {roundDurationOptions.map((durationSeconds) => (
+                <option key={durationSeconds} value={durationSeconds}>
+                  {durationSeconds}s
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       )}
 
       {gameState === 'ready' && (

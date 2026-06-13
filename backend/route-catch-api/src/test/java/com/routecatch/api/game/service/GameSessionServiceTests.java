@@ -47,7 +47,7 @@ class GameSessionServiceTests {
 
 	@Test
 	void createSessionPersistsCreatedSession() {
-		GameSession session = service.createSession(60);
+		GameSession session = service.createSession(60, "  Harsh  ");
 		flushAndClear();
 
 		GameSessionEntity persisted = gameSessionRepository
@@ -58,7 +58,15 @@ class GameSessionServiceTests {
 		assertEquals(60, persisted.getDurationSeconds());
 		assertEquals(0, persisted.getScore());
 		assertEquals(0, persisted.getCaughtCount());
+		assertEquals("Harsh", persisted.getPlayerName());
 		assertNotNull(persisted.getCreatedAt());
+	}
+
+	@Test
+	void blankPlayerNameFallsBackToGuest() {
+		GameSession session = service.createSession(60, "   ");
+
+		assertEquals("Guest", session.playerName());
 	}
 
 	@Test

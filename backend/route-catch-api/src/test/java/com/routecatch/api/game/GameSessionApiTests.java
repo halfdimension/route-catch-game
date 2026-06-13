@@ -60,7 +60,55 @@ class GameSessionApiTests {
 			.andExpect(jsonPath("$.status").value("CREATED"))
 			.andExpect(jsonPath("$.durationSeconds").value(60))
 			.andExpect(jsonPath("$.score").value(0))
-			.andExpect(jsonPath("$.caughtCount").value(0));
+			.andExpect(jsonPath("$.caughtCount").value(0))
+			.andExpect(jsonPath("$.playerName").value("Guest"));
+	}
+
+	@Test
+	void createSessionTrimsAndReturnsPlayerName() throws Exception {
+		mockMvc.perform(post("/api/game/sessions")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 60,
+						"playerName": "  Harsh  "
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.playerName").value("Harsh"));
+	}
+
+	@Test
+	void blankPlayerNameFallsBackToGuest() throws Exception {
+		mockMvc.perform(post("/api/game/sessions")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 60,
+						"playerName": "   "
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.playerName").value("Guest"));
+	}
+
+	@Test
+	void tooLongPlayerNameReturnsValidationError() throws Exception {
+		String playerName = "a".repeat(81);
+
+		mockMvc.perform(post("/api/game/sessions")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 60,
+						"playerName": "%s"
+					}
+					""".formatted(playerName)))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"))
+			.andExpect(jsonPath("$.message").value(
+				"playerName must be at most 80 characters"
+			));
 	}
 
 	@Test
@@ -179,7 +227,7 @@ class GameSessionApiTests {
 	void listSessionsReturnsMostRecentFirst() throws Exception {
 		GameSession older = gameSessionService.createSession(60);
 		Thread.sleep(2);
-		GameSession newer = gameSessionService.createSession(120);
+		GameSession newer = gameSessionService.createSession(120, "Harsh");
 
 		mockMvc.perform(get("/api/game/sessions"))
 			.andExpect(status().isOk())
@@ -188,9 +236,11 @@ class GameSessionApiTests {
 				newer.sessionId().toString()
 			))
 			.andExpect(jsonPath("$[0].durationSeconds").value(120))
+			.andExpect(jsonPath("$[0].playerName").value("Harsh"))
 			.andExpect(jsonPath("$[1].sessionId").value(
 				older.sessionId().toString()
-			));
+			))
+			.andExpect(jsonPath("$[1].playerName").value("Guest"));
 	}
 
 	@Test
