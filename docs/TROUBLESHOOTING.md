@@ -1,5 +1,83 @@
 # Troubleshooting
 
+## PostgreSQL Container Does Not Start
+
+Inspect its state and logs:
+
+```bash
+docker compose ps
+docker compose logs postgres
+```
+
+Validate the Compose configuration:
+
+```bash
+docker compose config
+```
+
+Common causes are an occupied host port, an old volume initialized with
+different credentials, or Docker not running.
+
+## Port 5432 Is Already in Use
+
+Check the listener:
+
+```bash
+ss -ltnp | grep ':5432'
+```
+
+A locally installed PostgreSQL service may already own the port:
+
+```bash
+systemctl status postgresql
+```
+
+Choose one PostgreSQL instance. Stop the local service before starting the
+container, or stop the Compose container and use the local installation. The
+backend expects PostgreSQL on `localhost:5432` by default.
+
+## Reset the Docker Database Volume
+
+First stop Compose without deleting data:
+
+```bash
+docker compose down
+```
+
+Only when a complete reset is intended:
+
+```bash
+docker compose down -v
+docker compose up -d postgres
+```
+
+The `-v` option permanently deletes the named PostgreSQL volume, including all
+persisted sessions and catches. Flyway recreates and seeds the schema when the
+backend next starts.
+
+## PostgreSQL Password or Authentication Mismatch
+
+The default credentials are:
+
+```text
+Database: route_catch_game
+User:     route_catch_user
+Password: route_catch_pass
+```
+
+PostgreSQL initialization variables are applied only when the data volume is
+created. Changing `POSTGRES_PASSWORD` later does not update the existing role.
+Either restore the original value, change the password inside PostgreSQL, or
+reset the volume if deleting local data is acceptable.
+
+Test the Compose database from inside the container:
+
+```bash
+docker compose exec postgres \
+  psql -U route_catch_user -d route_catch_game \
+  -c "select current_database(), current_user;"
+```
+
 ## Backend Cannot Connect to PostgreSQL
 
 Check PostgreSQL:

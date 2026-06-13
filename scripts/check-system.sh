@@ -20,6 +20,17 @@ check_command() {
   fi
 }
 
+check_optional_command() {
+  local label="$1"
+  local command_name="$2"
+
+  if command -v "$command_name" >/dev/null 2>&1; then
+    printf 'OK   %s\n' "$label"
+  else
+    printf 'WARN %s (%s not found; optional)\n' "$label" "$command_name"
+  fi
+}
+
 check_executable() {
   local label="$1"
   local path="$2"
@@ -45,14 +56,16 @@ check_file() {
 }
 
 check_postgres() {
-  if ! command -v pg_isready >/dev/null 2>&1; then
-    printf 'FAIL PostgreSQL readiness (pg_isready not found)\n'
-    FAILURES=$((FAILURES + 1))
-    return
-  fi
-
-  if pg_isready --host localhost --port 5432 >/dev/null 2>&1; then
+  if command -v pg_isready >/dev/null 2>&1 &&
+    pg_isready --host localhost --port 5432 >/dev/null 2>&1; then
     printf 'OK   PostgreSQL readiness (localhost:5432)\n'
+  elif command -v docker >/dev/null 2>&1 &&
+    docker inspect --format '{{.State.Running}}' route-catch-postgres \
+      2>/dev/null | grep --quiet '^true$' &&
+    docker exec route-catch-postgres \
+      sh -c 'pg_isready --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"' \
+      >/dev/null 2>&1; then
+    printf 'OK   PostgreSQL readiness (route-catch-postgres)\n'
   else
     printf 'FAIL PostgreSQL readiness (localhost:5432)\n'
     FAILURES=$((FAILURES + 1))
@@ -96,7 +109,8 @@ check_executable \
   "$ROOT_DIR/backend/route-catch-api/mvnw"
 check_command "Node.js" "node"
 check_command "npm" "npm"
-check_command "psql client" "psql"
+check_optional_command "psql client" "psql"
+check_optional_command "Docker" "docker"
 check_postgres
 check_executable "OSRM executable" "$OSRM_BINARY"
 check_file "OSRM MLD edge data" "${OSRM_DATA}.ebg"

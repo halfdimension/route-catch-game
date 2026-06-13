@@ -72,8 +72,9 @@ Spring Boot REST API
 - Bash and `curl`
 - Java 21
 - Node.js `20.19+` or `22.12+` and npm
-- PostgreSQL running on port `5432`
-- `psql` for database setup and inspection
+- Docker with Docker Compose for the recommended PostgreSQL setup, or a local
+  PostgreSQL installation
+- `psql` for manual database setup and inspection
 - A built OSRM server and prepared MLD dataset
 
 The checked-in OSRM scripts currently use these machine-specific paths:
@@ -101,6 +102,18 @@ Default value:
 VITE_API_BASE_URL=http://localhost:8080
 ```
 
+The root `.env.example` contains the matching Docker Compose database defaults:
+
+```env
+POSTGRES_DB=route_catch_game
+POSTGRES_USER=route_catch_user
+POSTGRES_PASSWORD=route_catch_pass
+```
+
+The Compose file uses these values as defaults, so copying the root file is not
+required. If you customize them through a root `.env`, update the backend
+datasource settings to match.
+
 The backend defaults are in
 `backend/route-catch-api/src/main/resources/application.properties`:
 
@@ -111,9 +124,44 @@ spring.datasource.password=route_catch_pass
 osrm.base-url=http://localhost:5000
 ```
 
-## PostgreSQL Setup
+## PostgreSQL Setup with Docker Compose
 
-Create the local role and database once:
+This is the recommended setup for local development:
+
+```bash
+docker compose up -d postgres
+```
+
+Check container status and readiness:
+
+```bash
+docker compose ps
+docker compose logs postgres
+```
+
+The `route-catch-postgres` container exposes PostgreSQL on
+`localhost:5432` and stores data in the named
+`route-catch-postgres-data` volume.
+
+Stop the container while preserving data:
+
+```bash
+docker compose down
+```
+
+To fully reset the local database:
+
+```bash
+docker compose down -v
+docker compose up -d postgres
+```
+
+`docker compose down -v` permanently deletes the named database volume and all
+local sessions and catches. Use it only when a clean database is intended.
+
+## Manual PostgreSQL Setup
+
+As an alternative to Docker, create the local role and database once:
 
 ```bash
 sudo -u postgres psql
@@ -134,9 +182,11 @@ JPA uses `ddl-auto=validate`, so Flyway remains responsible for schema changes.
 
 ## Quick Start
 
-PostgreSQL must already be running. From the project root:
+PostgreSQL must already be running, either through Docker Compose or a local
+installation. From the project root:
 
 ```bash
+docker compose up -d postgres
 ./scripts/run-all.sh
 ```
 
@@ -251,12 +301,15 @@ backend/route-catch-api/
   src/main/resources/db/migration/
 docs/
 scripts/
+docker-compose.yml
 ```
 
 ## Common Troubleshooting
 
 - **Backend cannot start:** verify PostgreSQL is running and the configured
   database, user, and password exist.
+- **PostgreSQL container cannot start:** inspect `docker compose logs postgres`
+  and check whether host port `5432` is already occupied.
 - **Flyway reports schema permission errors:** grant the application role
   permission on the `public` schema. See
   [Troubleshooting](docs/TROUBLESHOOTING.md).

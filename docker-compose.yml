@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: route-catch-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-route_catch_game}
+      POSTGRES_USER: ${POSTGRES_USER:-route_catch_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-route_catch_pass}
+    ports:
+      - "5432:5432"
+    volumes:
+      - route-catch-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  route-catch-postgres-data:

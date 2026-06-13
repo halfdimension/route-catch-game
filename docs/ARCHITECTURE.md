@@ -30,6 +30,10 @@ OSRM              http://localhost:5000
 PostgreSQL        localhost:5432
 ```
 
+For reproducible local setup, `docker-compose.yml` runs only PostgreSQL in the
+`route-catch-postgres` container. Frontend, backend, and OSRM remain native
+local processes.
+
 ## Frontend
 
 The frontend is a React application under `frontend/`.
@@ -158,7 +162,11 @@ GET /api/game/leaderboard?limit=10
 `scripts/run-all.sh` starts OSRM, waits for it, starts Spring Boot, waits for
 health, prepares `frontend/.env` and dependencies when needed, then starts
 Vite. PostgreSQL is intentionally not started by this script and must already
-be available.
+be available. The recommended database command is:
+
+```bash
+docker compose up -d postgres
+```
 
 Individual scripts are retained for separate logs:
 
