@@ -2,7 +2,7 @@
 
 Route Catch Game is a map-based creature-catching game built with React, Leaflet, and Spring Boot. Players follow real road routes, chase timed creatures, and build score and progression during configurable game rounds.
 
-The current version is a frontend gameplay prototype backed by Spring Boot. The backend wraps OSRM routing, owns an in-memory game session lifecycle, and accepts catch submissions while the frontend continues to run the live game simulation.
+The current version is a frontend gameplay prototype backed by Spring Boot. The backend wraps OSRM routing, owns the PostgreSQL-backed creature catalog, tracks game sessions in memory, and accepts validated catch submissions while the frontend continues to run the live game simulation.
 
 For a concise technical overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -24,6 +24,7 @@ For a concise technical overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.m
 - React and Vite
 - Leaflet and React Leaflet
 - Spring Boot and Maven
+- PostgreSQL, JPA, and Flyway
 - OSRM
 - ESLint
 
@@ -37,7 +38,7 @@ Start OSRM, Spring Boot, and Vite together from the project root:
 ./scripts/run-all.sh
 ```
 
-The script waits for OSRM and the backend to become reachable before starting the frontend. Press Ctrl+C to stop the managed OSRM and backend processes.
+PostgreSQL must already be running with the local database and user described below. The script waits for OSRM and the backend to become reachable before starting the frontend. Press Ctrl+C to stop the managed OSRM and backend processes.
 
 ### Manual Debug Mode
 
@@ -98,6 +99,20 @@ npm run lint
 
 ## Run the Backend
 
+Create the local PostgreSQL database and application user once:
+
+```bash
+sudo -u postgres psql
+```
+
+```sql
+CREATE USER route_catch_user WITH PASSWORD 'route_catch_pass';
+CREATE DATABASE route_catch_game OWNER route_catch_user;
+\q
+```
+
+Flyway creates the game tables and seeds the creature catalog automatically when the backend starts.
+
 ```bash
 cd backend/route-catch-api
 ./mvnw spring-boot:run
@@ -113,8 +128,9 @@ The API runs at `http://localhost:8080` and exposes:
 - `POST /api/game/sessions/{sessionId}/start`
 - `POST /api/game/sessions/{sessionId}/end`
 - `POST /api/game/sessions/{sessionId}/catches`
+- `GET /api/game/creatures`
 
-Game sessions, scores, and caught counts are currently stored in memory and are cleared whenever the backend restarts.
+The creature catalog is stored in PostgreSQL. Game sessions, scores, and caught counts are still stored in memory and are cleared whenever the backend restarts.
 
 ## Run the OSRM Dependency
 
@@ -167,7 +183,10 @@ backend/
       controller/ REST endpoints
       dto/        API request and response models
       service/    OSRM integration
-      game/       In-memory session lifecycle and catch submission
+      game/       DB-backed catalog, in-memory sessions, and catch submission
+    src/main/resources/db/migration/
+      V1__create_game_tables.sql
+      V2__seed_creature_catalog.sql
 docs/
   ARCHITECTURE.md
 scripts/
@@ -182,7 +201,8 @@ scripts/
 
 - JWT authentication
 - User profiles and avatar upload
-- PostgreSQL/PostGIS persistence for sessions, catches, and users
+- PostgreSQL persistence for sessions, catches, and users
+- PostGIS-backed spatial features
 - Multiplayer WebSocket support
 - Valhalla isochrone integration
 - Leaderboard

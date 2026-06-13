@@ -3,11 +3,19 @@ package com.routecatch.api.game.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.routecatch.api.game.creature.CreatureCatalogEntity;
+import com.routecatch.api.game.creature.CreatureCatalogRepository;
 import com.routecatch.api.game.creature.CreatureCatalogService;
 import com.routecatch.api.game.dto.SubmitCatchRequest;
 import com.routecatch.api.game.dto.SubmitCatchResponse;
@@ -19,9 +27,26 @@ import com.routecatch.api.game.model.GameSessionStatus;
 
 class GameSessionServiceTests {
 
-	private final GameSessionService service = new GameSessionService(
-		new CreatureCatalogService()
+	private static final Map<String, CreatureCatalogEntity> CREATURES = Map.of(
+		"sparkbit",
+		new CreatureCatalogEntity("sparkbit", "Sparkbit", "common", 10),
+		"voltfox",
+		new CreatureCatalogEntity("voltfox", "Voltfox", "rare", 30)
 	);
+
+	private final CreatureCatalogRepository creatureCatalogRepository =
+		mock(CreatureCatalogRepository.class);
+	private final GameSessionService service = new GameSessionService(
+		new CreatureCatalogService(creatureCatalogRepository)
+	);
+
+	@BeforeEach
+	void setUpCreatureCatalog() {
+		when(creatureCatalogRepository.findById(anyString()))
+			.thenAnswer(invocation -> Optional.ofNullable(
+				CREATURES.get(invocation.getArgument(0))
+			));
+	}
 
 	@Test
 	void createSessionReturnsCreatedSession() {
