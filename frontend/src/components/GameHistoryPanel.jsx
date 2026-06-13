@@ -80,7 +80,6 @@ function CatchHistoryItem({ caughtCreature }) {
 }
 
 function GameHistoryPanel({ activeSessionId, refreshVersion }) {
-  const [isCollapsed, setIsCollapsed] = useState(false)
   const [selectedSessionId, setSelectedSessionId] = useState(null)
   const [localRefreshVersion, setLocalRefreshVersion] = useState(0)
   const sessionRequestKey =
@@ -198,87 +197,71 @@ function GameHistoryPanel({ activeSessionId, refreshVersion }) {
   }, [catchRequestKey, selectedSessionId])
 
   return (
-    <section
-      className={`game-history-panel${isCollapsed ? ' is-collapsed' : ''}`}
-      aria-label="Game history"
-    >
+    <section className="game-history-panel" aria-label="Game history">
       <div className="game-history-header">
         <div>
           <p>Game History</p>
           <span>{sessions.length} sessions</span>
         </div>
         <div className="game-history-header-actions">
-          {!isCollapsed && (
-            <button
-              type="button"
-              onClick={() => setLocalRefreshVersion((version) => version + 1)}
-              disabled={isSessionsLoading}
-            >
-              {isSessionsLoading ? 'Loading...' : 'Refresh'}
-            </button>
-          )}
           <button
             type="button"
-            onClick={() => setIsCollapsed((currentValue) => !currentValue)}
-            aria-expanded={!isCollapsed}
+            onClick={() => setLocalRefreshVersion((version) => version + 1)}
+            disabled={isSessionsLoading}
           >
-            {isCollapsed ? 'Show' : 'Hide'}
+            {isSessionsLoading ? 'Loading...' : 'Refresh'}
           </button>
         </div>
       </div>
 
-      {!isCollapsed && (
-        <div className="game-history-content">
-          {sessionsError && (
-            <p className="game-history-error" role="status">
-              {sessionsError}
-            </p>
-          )}
+      <div className="game-history-content">
+        {sessionsError && (
+          <p className="game-history-error" role="status">
+            {sessionsError}
+          </p>
+        )}
 
-          {isSessionsLoading && sessions.length === 0 ? (
-            <span className="game-history-empty">Loading sessions...</span>
-          ) : sessions.length === 0 ? (
-            <span className="game-history-empty">No sessions yet.</span>
-          ) : (
-            <div className="game-history-layout">
-              <ul className="game-history-sessions">
-                {sessions.map((session, index) => (
-                  <SessionListItem
-                    key={session?.sessionId ?? `session-${index}`}
-                    session={session}
-                    isSelected={selectedSessionId === session?.sessionId}
-                    onSelect={setSelectedSessionId}
-                  />
-                ))}
-              </ul>
+        {isSessionsLoading && sessions.length === 0 ? (
+          <span className="game-history-empty">Loading sessions...</span>
+        ) : sessions.length === 0 ? (
+          <span className="game-history-empty">No sessions yet.</span>
+        ) : (
+          <div className="game-history-layout">
+            <ul className="game-history-sessions">
+              {sessions.map((session, index) => (
+                <SessionListItem
+                  key={session?.sessionId ?? `session-${index}`}
+                  session={session}
+                  isSelected={selectedSessionId === session?.sessionId}
+                  onSelect={setSelectedSessionId}
+                />
+              ))}
+            </ul>
 
-              <div className="game-history-catches">
-                <p>Catches</p>
-                {catchesError ? (
-                  <span className="game-history-error">{catchesError}</span>
-                ) : isCatchesLoading ? (
-                  <span className="game-history-empty">
-                    Loading catches...
-                  </span>
-                ) : catches.length === 0 ? (
-                  <span className="game-history-empty">
-                    No catches for this session yet.
-                  </span>
-                ) : (
-                  <ul>
-                    {catches.map((caughtCreature, index) => (
-                      <CatchHistoryItem
-                        key={caughtCreature?.catchId ?? `catch-${index}`}
-                        caughtCreature={caughtCreature}
-                      />
-                    ))}
-                  </ul>
-                )}
-              </div>
+            <div className="game-history-catches">
+              <p>Catches</p>
+              {catchesError ? (
+                <span className="game-history-error">{catchesError}</span>
+              ) : isCatchesLoading ? (
+                <span className="game-history-empty">Loading catches...</span>
+              ) : catches.length === 0 ? (
+                <span className="game-history-empty">
+                  No catches for this session yet.
+                </span>
+              ) : (
+                <ul>
+                  {catches.map((caughtCreature, index) => (
+                    <CatchHistoryItem
+                      key={caughtCreature?.catchId ?? `catch-${index}`}
+                      caughtCreature={caughtCreature}
+                    />
+                  ))}
+                </ul>
+              )}
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </section>
   )
 }

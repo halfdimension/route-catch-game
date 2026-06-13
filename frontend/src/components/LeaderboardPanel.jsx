@@ -21,7 +21,6 @@ function formatEndedTime(timestamp) {
 }
 
 function LeaderboardPanel({ refreshVersion }) {
-  const [isCollapsed, setIsCollapsed] = useState(true)
   const [localRefreshVersion, setLocalRefreshVersion] = useState(0)
   const requestKey = `${refreshVersion}:${localRefreshVersion}`
   const [result, setResult] = useState({
@@ -63,77 +62,60 @@ function LeaderboardPanel({ refreshVersion }) {
   }, [requestKey])
 
   return (
-    <section
-      className={`leaderboard-panel${isCollapsed ? ' is-collapsed' : ''}`}
-      aria-label="Leaderboard"
-    >
+    <section className="leaderboard-panel" aria-label="Leaderboard">
       <div className="leaderboard-header">
         <div>
           <p>Leaderboard</p>
           <span>Top {result.entries.length}</span>
         </div>
         <div className="leaderboard-header-actions">
-          {!isCollapsed && (
-            <button
-              type="button"
-              onClick={() => setLocalRefreshVersion((version) => version + 1)}
-              disabled={isLoading}
-            >
-              {isLoading ? 'Loading...' : 'Refresh'}
-            </button>
-          )}
           <button
             type="button"
-            onClick={() => setIsCollapsed((currentValue) => !currentValue)}
-            aria-expanded={!isCollapsed}
+            onClick={() => setLocalRefreshVersion((version) => version + 1)}
+            disabled={isLoading}
           >
-            {isCollapsed ? 'Show' : 'Hide'}
+            {isLoading ? 'Loading...' : 'Refresh'}
           </button>
         </div>
       </div>
 
-      {!isCollapsed && (
-        <div className="leaderboard-content">
-          {error ? (
-            <span className="leaderboard-error" role="status">
-              {error}
-            </span>
-          ) : isLoading && result.entries.length === 0 ? (
-            <span className="leaderboard-empty">Loading leaderboard...</span>
-          ) : result.entries.length === 0 ? (
-            <span className="leaderboard-empty">
-              No completed sessions yet.
-            </span>
-          ) : (
-            <ol className="leaderboard-list">
-              {result.entries.map((entry, index) => {
-                const sessionId = String(entry?.sessionId ?? '')
-                const rank = entry?.rank ?? index + 1
-                const endedTime = formatEndedTime(entry?.endedAt)
+      <div className="leaderboard-content">
+        {error ? (
+          <span className="leaderboard-error" role="status">
+            {error}
+          </span>
+        ) : isLoading && result.entries.length === 0 ? (
+          <span className="leaderboard-empty">Loading leaderboard...</span>
+        ) : result.entries.length === 0 ? (
+          <span className="leaderboard-empty">No completed sessions yet.</span>
+        ) : (
+          <ol className="leaderboard-list">
+            {result.entries.map((entry, index) => {
+              const sessionId = String(entry?.sessionId ?? '')
+              const rank = entry?.rank ?? index + 1
+              const endedTime = formatEndedTime(entry?.endedAt)
 
-                return (
-                  <li key={sessionId || `leaderboard-${index}`}>
-                    <strong className="leaderboard-rank">{rank}</strong>
-                    <div>
-                      <strong title={sessionId}>
-                        {sessionId.slice(0, 8) || 'Unknown'}
-                      </strong>
-                      <span>
-                        {entry?.score ?? 0} pts · {entry?.caughtCount ?? 0}{' '}
-                        caught
-                      </span>
-                    </div>
-                    <div className="leaderboard-meta">
-                      <span>{entry?.durationSeconds ?? 0}s</span>
-                      {endedTime && <time>{endedTime}</time>}
-                    </div>
-                  </li>
-                )
-              })}
-            </ol>
-          )}
-        </div>
-      )}
+              return (
+                <li key={sessionId || `leaderboard-${index}`}>
+                  <strong className="leaderboard-rank">{rank}</strong>
+                  <div>
+                    <strong title={sessionId}>
+                      {sessionId.slice(0, 8) || 'Unknown'}
+                    </strong>
+                    <span>
+                      {entry?.score ?? 0} pts · {entry?.caughtCount ?? 0} caught
+                    </span>
+                  </div>
+                  <div className="leaderboard-meta">
+                    <span>{entry?.durationSeconds ?? 0}s</span>
+                    {endedTime && <time>{endedTime}</time>}
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+        )}
+      </div>
     </section>
   )
 }

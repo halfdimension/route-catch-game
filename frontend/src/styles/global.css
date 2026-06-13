@@ -680,24 +680,107 @@ button:focus-visible {
   text-transform: none;
 }
 
-.game-history-panel {
+.stats-drawer {
   position: absolute;
   left: 252px;
   bottom: 16px;
   z-index: 1000;
-  width: min(420px, calc(100vw - 488px));
-  max-height: min(292px, calc(100vh - 32px));
+  width: min(132px, calc(100vw - 488px));
   overflow: hidden;
-  padding: 9px;
   border: 1px solid rgba(23, 32, 51, 0.15);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
 }
 
-.game-history-panel.is-collapsed {
-  width: min(260px, calc(100vw - 488px));
-  padding: 7px 9px;
+.stats-drawer.is-open {
+  width: min(440px, calc(100vw - 488px));
+  max-height: min(430px, calc(100vh - 32px));
+  padding: 9px;
+}
+
+.stats-drawer-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  color: #172033;
+  font-size: 12px;
+  font-weight: 800;
+  background: transparent;
+}
+
+.stats-drawer-trigger span:last-child {
+  color: #2563eb;
+  font-size: 10px;
+}
+
+.stats-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stats-drawer-header p {
+  margin: 0;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.stats-drawer-header button {
+  padding: 4px 7px;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.stats-drawer-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 3px;
+  border-radius: 6px;
+  background: #eef2f6;
+}
+
+.stats-drawer-tabs button {
+  padding: 5px 8px;
+  border-color: transparent;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  background: transparent;
+}
+
+.stats-drawer-tabs button.is-active {
+  color: #1d4ed8;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(23, 32, 51, 0.12);
+}
+
+.stats-drawer-content {
+  max-height: min(357px, calc(100vh - 105px));
+  margin-top: 8px;
+  overflow: auto;
+}
+
+.game-history-panel,
+.leaderboard-panel {
+  position: static;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .game-history-header {
@@ -887,26 +970,6 @@ button:focus-visible {
   background: #fef2f2;
 }
 
-.leaderboard-panel {
-  position: absolute;
-  left: 252px;
-  bottom: 316px;
-  z-index: 1000;
-  width: min(420px, calc(100vw - 488px));
-  max-height: min(220px, calc(100vh - 332px));
-  overflow: hidden;
-  padding: 9px;
-  border: 1px solid rgba(23, 32, 51, 0.15);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
-}
-
-.leaderboard-panel.is-collapsed {
-  width: min(260px, calc(100vw - 488px));
-  padding: 7px 9px;
-}
-
 .leaderboard-header {
   display: flex;
   align-items: center;
@@ -1024,15 +1087,19 @@ button:focus-visible {
 }
 
 @media (max-width: 820px) {
-  .game-history-panel {
+  .stats-drawer {
     left: 16px;
     bottom: 72px;
-    width: min(420px, calc(100vw - 32px));
-    max-height: 220px;
+    width: 132px;
   }
 
-  .game-history-panel.is-collapsed {
-    width: min(260px, calc(100vw - 32px));
+  .stats-drawer.is-open {
+    width: min(440px, calc(100vw - 32px));
+    max-height: min(430px, calc(100vh - 144px));
+  }
+
+  .stats-drawer-content {
+    max-height: min(357px, calc(100vh - 217px));
   }
 
   .game-history-layout {
@@ -1045,17 +1112,6 @@ button:focus-visible {
 
   .game-history-catches ul {
     max-height: 140px;
-  }
-
-  .leaderboard-panel {
-    left: 16px;
-    bottom: 300px;
-    width: min(420px, calc(100vw - 32px));
-    max-height: min(180px, calc(100vh - 316px));
-  }
-
-  .leaderboard-panel.is-collapsed {
-    width: min(260px, calc(100vw - 32px));
   }
 
   .leaderboard-list {

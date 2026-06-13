@@ -2,14 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import CatchToast from './components/CatchToast'
 import CaughtInventoryPanel from './components/CaughtInventoryPanel'
 import GameControlsPanel from './components/GameControlsPanel'
-import GameHistoryPanel from './components/GameHistoryPanel'
 import GameSessionPanel from './components/GameSessionPanel'
 import GameMap from './components/GameMap'
-import LeaderboardPanel from './components/LeaderboardPanel'
 import MovementStatusPanel from './components/MovementStatusPanel'
 import MoveConfirmPanel from './components/MoveConfirmPanel'
 import PlayerHudPanel from './components/PlayerHudPanel'
 import RoundSummaryPanel from './components/RoundSummaryPanel'
+import StatsDrawer from './components/StatsDrawer'
 import TargetInfoPanel from './components/TargetInfoPanel'
 import { MAX_SIMULATION_SPEED } from './config/gameConfig'
 import { useBackendGameSession } from './hooks/useBackendGameSession'
@@ -294,8 +293,7 @@ function App() {
       />
       <TargetInfoPanel targets={targets} onTargetClick={handleTargetClick} />
       <CaughtInventoryPanel caughtTargets={caughtTargets} />
-      <LeaderboardPanel refreshVersion={historyRefreshVersion} />
-      <GameHistoryPanel
+      <StatsDrawer
         activeSessionId={backendSession?.sessionId}
         refreshVersion={historyRefreshVersion}
       />
