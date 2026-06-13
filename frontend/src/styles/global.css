@@ -686,8 +686,8 @@ button:focus-visible {
   bottom: 16px;
   z-index: 1000;
   width: min(420px, calc(100vw - 488px));
-  max-height: min(286px, calc(100vh - 32px));
-  overflow: auto;
+  max-height: min(292px, calc(100vh - 32px));
+  overflow: hidden;
   padding: 9px;
   border: 1px solid rgba(23, 32, 51, 0.15);
   border-radius: 8px;
@@ -695,12 +695,23 @@ button:focus-visible {
   box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
 }
 
+.game-history-panel.is-collapsed {
+  width: min(260px, calc(100vw - 488px));
+  padding: 7px 9px;
+}
+
 .game-history-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 7px;
+}
+
+.game-history-header > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
 }
 
 .game-history-header p,
@@ -711,11 +722,28 @@ button:focus-visible {
   font-weight: 800;
 }
 
-.game-history-header button {
+.game-history-header > div:first-child > span {
+  color: #64748b;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.game-history-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.game-history-header-actions button {
   padding: 4px 7px;
   color: #2563eb;
   font-size: 11px;
   font-weight: 700;
+}
+
+.game-history-content {
+  margin-top: 7px;
+  overflow: hidden;
 }
 
 .game-history-layout {
@@ -734,30 +762,44 @@ button:focus-visible {
 }
 
 .game-history-sessions {
-  max-height: 226px;
+  max-height: 224px;
   overflow: auto;
+  padding-right: 2px;
 }
 
 .game-history-sessions button {
   display: grid;
   gap: 2px;
   width: 100%;
-  padding: 6px;
+  min-height: 57px;
+  padding: 6px 7px;
   border-color: transparent;
   text-align: left;
   background: #f3f6f8;
 }
 
 .game-history-sessions button.is-selected {
-  border-color: #93c5fd;
+  border-color: #60a5fa;
   background: #eff6ff;
+  box-shadow: inset 3px 0 0 #2563eb;
 }
 
-.game-history-sessions button > span:first-child {
+.game-history-session-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+}
+
+.game-history-session-stats {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.game-history-session-stats span + span::before {
+  margin-right: 5px;
+  content: '·';
 }
 
 .game-history-sessions strong,
@@ -767,7 +809,7 @@ button:focus-visible {
 }
 
 .game-history-sessions small,
-.game-history-sessions button > span:nth-child(2),
+.game-history-session-stats,
 .game-history-sessions time,
 .game-history-catches span,
 .game-history-catches time,
@@ -777,8 +819,31 @@ button:focus-visible {
   font-size: 10px;
 }
 
-.game-history-sessions small {
-  font-weight: 700;
+.game-history-status {
+  padding: 2px 5px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.game-history-status.is-running {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.game-history-status.is-ended {
+  color: #64748b;
+  background: #e2e8f0;
+}
+
+.game-history-status.is-created {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.game-history-status.is-unknown {
+  color: #475569;
+  background: #f1f5f9;
 }
 
 .game-history-catches {
@@ -790,14 +855,16 @@ button:focus-visible {
 }
 
 .game-history-catches ul {
-  max-height: 205px;
+  max-height: 201px;
   overflow: auto;
+  padding-right: 2px;
 }
 
 .game-history-catches li {
   display: grid;
   gap: 1px;
-  padding: 6px;
+  min-height: 48px;
+  padding: 6px 7px;
   border-radius: 6px;
   background: #f3f6f8;
 }
@@ -809,10 +876,15 @@ button:focus-visible {
 .game-history-empty,
 .game-history-error {
   display: block;
+  padding: 7px;
+  border-radius: 6px;
+  background: #f3f6f8;
+  line-height: 1.35;
 }
 
 .game-history-error {
   color: #991b1b;
+  background: #fef2f2;
 }
 
 @media (max-width: 820px) {
@@ -821,6 +893,14 @@ button:focus-visible {
     bottom: 72px;
     width: min(420px, calc(100vw - 32px));
     max-height: 220px;
+  }
+
+  .game-history-panel.is-collapsed {
+    width: min(260px, calc(100vw - 32px));
+  }
+
+  .game-history-layout {
+    grid-template-columns: minmax(130px, 0.95fr) minmax(145px, 1.05fr);
   }
 
   .game-history-sessions {
