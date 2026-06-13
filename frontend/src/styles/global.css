@@ -680,6 +680,158 @@ button:focus-visible {
   text-transform: none;
 }
 
+.game-history-panel {
+  position: absolute;
+  left: 252px;
+  bottom: 16px;
+  z-index: 1000;
+  width: min(420px, calc(100vw - 488px));
+  max-height: min(286px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 9px;
+  border: 1px solid rgba(23, 32, 51, 0.15);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
+}
+
+.game-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.game-history-header p,
+.game-history-catches > p {
+  margin: 0;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.game-history-header button {
+  padding: 4px 7px;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.game-history-layout {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.95fr) minmax(160px, 1.05fr);
+  gap: 8px;
+}
+
+.game-history-sessions,
+.game-history-catches ul {
+  display: grid;
+  gap: 5px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.game-history-sessions {
+  max-height: 226px;
+  overflow: auto;
+}
+
+.game-history-sessions button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 6px;
+  border-color: transparent;
+  text-align: left;
+  background: #f3f6f8;
+}
+
+.game-history-sessions button.is-selected {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.game-history-sessions button > span:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.game-history-sessions strong,
+.game-history-catches strong {
+  color: #172033;
+  font-size: 12px;
+}
+
+.game-history-sessions small,
+.game-history-sessions button > span:nth-child(2),
+.game-history-sessions time,
+.game-history-catches span,
+.game-history-catches time,
+.game-history-empty,
+.game-history-error {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.game-history-sessions small {
+  font-weight: 700;
+}
+
+.game-history-catches {
+  min-width: 0;
+}
+
+.game-history-catches > p {
+  margin-bottom: 5px;
+}
+
+.game-history-catches ul {
+  max-height: 205px;
+  overflow: auto;
+}
+
+.game-history-catches li {
+  display: grid;
+  gap: 1px;
+  padding: 6px;
+  border-radius: 6px;
+  background: #f3f6f8;
+}
+
+.game-history-catches li span {
+  text-transform: capitalize;
+}
+
+.game-history-empty,
+.game-history-error {
+  display: block;
+}
+
+.game-history-error {
+  color: #991b1b;
+}
+
+@media (max-width: 820px) {
+  .game-history-panel {
+    left: 16px;
+    bottom: 72px;
+    width: min(420px, calc(100vw - 32px));
+    max-height: 220px;
+  }
+
+  .game-history-sessions {
+    max-height: 160px;
+  }
+
+  .game-history-catches ul {
+    max-height: 140px;
+  }
+}
+
 .target-creature-marker {
   background: transparent;
   border: 0;

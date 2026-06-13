@@ -33,6 +33,15 @@ export function getGameSession(sessionId) {
   return requestGameSession(`/api/game/sessions/${sessionId}`)
 }
 
+export function listGameSessions(limit = 20) {
+  const query = new URLSearchParams({ limit: String(limit) })
+  return requestGameSession(`/api/game/sessions?${query}`)
+}
+
+export function listSessionCatches(sessionId) {
+  return requestGameSession(`/api/game/sessions/${sessionId}/catches`)
+}
+
 export function startGameSession(sessionId) {
   return requestGameSession(`/api/game/sessions/${sessionId}/start`, {
     method: 'POST',

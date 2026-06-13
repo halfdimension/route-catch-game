@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import CatchToast from './components/CatchToast'
 import CaughtInventoryPanel from './components/CaughtInventoryPanel'
 import GameControlsPanel from './components/GameControlsPanel'
+import GameHistoryPanel from './components/GameHistoryPanel'
 import GameSessionPanel from './components/GameSessionPanel'
 import GameMap from './components/GameMap'
 import MovementStatusPanel from './components/MovementStatusPanel'
@@ -84,6 +85,7 @@ function App() {
   const [caughtTargets, setCaughtTargets] = useState([])
   const [score, setScore] = useState(0)
   const [catchToastTarget, setCatchToastTarget] = useState(null)
+  const [historyRefreshVersion, setHistoryRefreshVersion] = useState(0)
   const previousGameStateRef = useRef(gameState)
   const targetsRef = useRef(targets)
 
@@ -103,7 +105,11 @@ function App() {
       setCatchToastTarget(target)
       playCatchSound(target.rarity)
 
-      void submitBackendCatch(target.creatureId)
+      void submitBackendCatch(target.creatureId).then((response) => {
+        if (response) {
+          setHistoryRefreshVersion((version) => version + 1)
+        }
+      })
     },
     [addXp, removeTarget, submitBackendCatch],
   )
@@ -139,7 +145,11 @@ function App() {
     stopPlayerMovement()
     void finishSession(
       'Round ended locally, but the backend session could not be closed.',
-    )
+    ).then((didEndSession) => {
+      if (didEndSession) {
+        setHistoryRefreshVersion((version) => version + 1)
+      }
+    })
   }, [clearTargets, finishSession, gameState, stopPlayerMovement])
 
   function resetScore() {
@@ -166,12 +176,17 @@ function App() {
 
     if (didStartBackendSession) {
       startGame()
+      setHistoryRefreshVersion((version) => version + 1)
     }
   }
 
   async function handleEndGame() {
-    await finishSession()
+    const didEndBackendSession = await finishSession()
     endGame()
+
+    if (didEndBackendSession) {
+      setHistoryRefreshVersion((version) => version + 1)
+    }
   }
 
   async function restartGame() {
@@ -186,6 +201,7 @@ function App() {
     resetScore()
     resetProgression()
     restartGameSession()
+    setHistoryRefreshVersion((version) => version + 1)
   }
 
   function handleMapClick(destination) {
@@ -277,6 +293,10 @@ function App() {
       />
       <TargetInfoPanel targets={targets} onTargetClick={handleTargetClick} />
       <CaughtInventoryPanel caughtTargets={caughtTargets} />
+      <GameHistoryPanel
+        activeSessionId={backendSession?.sessionId}
+        refreshVersion={historyRefreshVersion}
+      />
 
       {gameState === 'ended' && (
         <RoundSummaryPanel
