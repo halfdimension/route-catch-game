@@ -543,14 +543,36 @@ button:focus-visible {
   gap: 2px;
   width: 100%;
   padding: 7px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 6px;
   text-align: left;
   background: rgba(243, 246, 248, 0.9);
+  box-shadow: inset 3px 0 0 transparent;
 }
 
 .target-info-panel li button:hover {
   background: rgba(229, 235, 242, 0.95);
+}
+
+.target-info-panel li button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.target-info-row.rarity-common {
+  box-shadow: inset 3px 0 0 #5fa99d;
+}
+
+.target-info-row.rarity-rare {
+  border-color: rgba(37, 99, 235, 0.2);
+  background: rgba(239, 246, 255, 0.94);
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.target-info-row.rarity-legendary {
+  border-color: rgba(124, 58, 237, 0.24);
+  background: rgba(250, 245, 255, 0.96);
+  box-shadow: inset 3px 0 0 #7c3aed;
 }
 
 .target-info-panel strong {
@@ -561,10 +583,56 @@ button:focus-visible {
   font-size: 13px;
 }
 
-.target-info-panel li span {
+.target-info-panel li span,
+.target-difficulty {
   color: #4b5563;
   font-size: 12px;
   text-transform: capitalize;
+}
+
+.target-info-meta,
+.caught-inventory-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.rarity-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.rarity-badge.rarity-common {
+  border-color: #99c9c1;
+  color: #0f6258;
+  background: #e6f4f1;
+}
+
+.rarity-badge.rarity-rare {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.rarity-badge.rarity-legendary {
+  border-color: #d8b4fe;
+  color: #6d28d9;
+  background: #f3e8ff;
+}
+
+.rarity-badge.rarity-unknown {
+  border-color: #cbd5e1;
+  color: #475569;
+  background: #f1f5f9;
 }
 
 .creature-symbol {
@@ -655,8 +723,19 @@ button:focus-visible {
   display: grid;
   gap: 2px;
   padding: 7px;
+  border: 1px solid transparent;
   border-radius: 6px;
   background: rgba(243, 246, 248, 0.9);
+}
+
+.caught-inventory-panel li.rarity-rare {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: rgba(239, 246, 255, 0.9);
+}
+
+.caught-inventory-panel li.rarity-legendary {
+  border-color: rgba(124, 58, 237, 0.2);
+  background: rgba(250, 245, 255, 0.92);
 }
 
 .caught-inventory-panel strong {
@@ -678,6 +757,15 @@ button:focus-visible {
   color: #172033;
   font-size: 13px;
   text-transform: none;
+}
+
+.caught-inventory-meta > span:first-child {
+  color: #334155;
+  font-weight: 700;
+}
+
+.caught-inventory-meta .rarity-badge {
+  font-size: 9px;
 }
 
 .stats-drawer {
@@ -1120,22 +1208,97 @@ button:focus-visible {
 }
 
 .target-creature-marker {
+  position: relative;
   background: transparent;
   border: 0;
 }
 
-.target-creature-marker span {
+.target-creature-marker::before {
+  position: absolute;
+  inset: 2px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  content: '';
+  pointer-events: none;
+}
+
+.target-creature-marker-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border: 3px solid #ffffff;
   border-radius: 50%;
   color: #ffffff;
-  font-size: 16px;
-  font-weight: 800;
+  background: #3f7f76;
+  transform: translate(-50%, -50%);
   line-height: 1;
   box-shadow: 0 8px 16px rgba(23, 32, 51, 0.22);
+}
+
+.target-creature-marker-symbol {
+  color: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.target-creature-marker.rarity-rare::before {
+  border-color: rgba(37, 99, 235, 0.48);
+  animation: target-marker-pulse 2.4s ease-out infinite;
+}
+
+.target-creature-marker.rarity-rare .target-creature-marker-core {
+  width: 33px;
+  height: 33px;
+  background: #2563eb;
+  box-shadow:
+    0 8px 18px rgba(23, 32, 51, 0.24),
+    0 0 0 4px rgba(37, 99, 235, 0.14);
+}
+
+.target-creature-marker.rarity-legendary::before {
+  inset: 0;
+  border-color: rgba(245, 158, 11, 0.75);
+  animation: target-marker-pulse 1.9s ease-out infinite;
+}
+
+.target-creature-marker.rarity-legendary .target-creature-marker-core {
+  width: 36px;
+  height: 36px;
+  border-color: #fff7d6;
+  background: #7c3aed;
+  box-shadow:
+    0 10px 22px rgba(23, 32, 51, 0.28),
+    0 0 0 4px rgba(124, 58, 237, 0.17),
+    0 0 14px rgba(245, 158, 11, 0.42);
+}
+
+.target-creature-marker.rarity-legendary
+  .target-creature-marker-symbol {
+  font-size: 17px;
+}
+
+@keyframes target-marker-pulse {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.82);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.16);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .target-creature-marker::before {
+    animation: none;
+  }
 }
 
 .player-avatar-marker {

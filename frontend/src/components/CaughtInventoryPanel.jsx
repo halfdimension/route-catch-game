@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { getRarityClassName } from '../utils/rarityStyles'
 
 function CaughtInventoryPanel({ caughtTargets }) {
   const [isCollapsed, setIsCollapsed] = useState(caughtTargets.length === 0)
@@ -26,17 +27,27 @@ function CaughtInventoryPanel({ caughtTargets }) {
             <span>No catches yet</span>
           ) : (
             <ul>
-              {recentCaughtTargets.map((target) => (
-                <li key={`${target.id}-${target.caughtAt}`}>
-                  <strong>
-                    <span className="creature-symbol">{target.symbol}</span>
-                    {target.name}
-                  </strong>
-                  <span>
-                    +{target.score} · {target.rarity}
-                  </span>
-                </li>
-              ))}
+              {recentCaughtTargets.map((target) => {
+                const rarityClassName = getRarityClassName(target.rarity)
+
+                return (
+                  <li
+                    key={`${target.id}-${target.caughtAt}`}
+                    className={rarityClassName}
+                  >
+                    <strong>
+                      <span className="creature-symbol">{target.symbol}</span>
+                      {target.name}
+                    </strong>
+                    <span className="caught-inventory-meta">
+                      <span>+{target.score}</span>
+                      <span className={`rarity-badge ${rarityClassName}`}>
+                        {target.rarity}
+                      </span>
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </div>
