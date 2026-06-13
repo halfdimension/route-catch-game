@@ -130,4 +130,27 @@ class GameSessionApiTests {
 				"Creature not found: unknown-creature"
 			));
 	}
+
+	@Test
+	void endedSessionCatchReturnsConflict() throws Exception {
+		GameSession session = gameSessionService.createSession(60);
+		gameSessionService.startSession(session.sessionId());
+		gameSessionService.endSession(session.sessionId());
+
+		mockMvc.perform(post(
+				"/api/game/sessions/{sessionId}/catches",
+				session.sessionId()
+			)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"creatureId": "sparkbit"}
+					"""))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.errorCode").value(
+				"INVALID_GAME_SESSION_STATE"
+			))
+			.andExpect(jsonPath("$.path").value(
+				"/api/game/sessions/" + session.sessionId() + "/catches"
+			));
+	}
 }

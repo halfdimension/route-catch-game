@@ -1,15 +1,13 @@
 # Architecture
 
-Route Catch Game uses a React frontend for live map gameplay and a Spring Boot API for routing, a PostgreSQL-backed creature catalog, and in-memory game session tracking. The browser still owns movement, spawning, catch detection, progression, and presentation.
+Route Catch Game uses a React frontend for live map gameplay and a Spring Boot API for routing and PostgreSQL-backed creature, session, score, and catch records. The browser still owns movement, spawning, catch detection, progression, and presentation.
 
 ## Current Architecture
 
 ```text
 React UI -> frontend API clients -> Spring Boot API -> OSRM server
                                       |
-                                      -> in-memory game sessions
-                                      |
-                                      -> PostgreSQL creature catalog
+                                      -> PostgreSQL catalog/sessions/catches
 ```
 
 - React and Vite render the application, HUD, controls, and gameplay state.
@@ -17,8 +15,8 @@ React UI -> frontend API clients -> Spring Boot API -> OSRM server
 - Frontend API clients call Spring Boot for routing, session lifecycle, and catch submission.
 - Spring Boot validates requests, calls OSRM, and returns frontend-friendly coordinate objects.
 - Flyway creates the database schema and seeds the backend-owned creature catalog.
-- Spring Boot creates, starts, ends, and retrieves in-memory game sessions.
-- Valid catches are resolved against the backend catalog before updating backend score and caught count atomically.
+- Spring Boot creates, starts, ends, and retrieves persisted game sessions.
+- Valid catches are resolved against the backend catalog, then the catch snapshot and session totals are committed in one transaction.
 - Route animation, target spawning, catch detection, local progression, and the local game timer remain frontend-controlled.
 - Catch submission is non-blocking; backend failures do not undo local catch feedback or scoring.
 
@@ -43,14 +41,13 @@ The Vite browser client sends API requests to Spring Boot. Spring Boot validates
 - `frontend/src/api`: Spring Boot API adapters used by frontend gameplay hooks.
 - `frontend/src/data`: Original creature catalog and mock player profile.
 - `frontend/src/utils`: Browser-generated sound effects and small helpers.
-- `backend/route-catch-api`: Spring Boot routing adapters, API error handling, Flyway migrations, the creature repository, and in-memory game session/catch services.
+- `backend/route-catch-api`: Spring Boot routing adapters, API error handling, Flyway migrations, and JPA repositories for creatures, sessions, and catches.
 
 ## Current Limitations
 
 - No authentication.
 - Most gameplay decisions and validation are still controlled by the frontend.
-- Backend sessions, scores, and caught counts are in memory and disappear on restart.
-- PostgreSQL currently persists only the creature catalog; users, scores, catches, and sessions are not persisted.
+- PostgreSQL persistence does not yet include users or authentication state.
 - No multiplayer or shared realtime state.
 - Catch submissions validate creature IDs and scoring against the backend catalog, but broader anti-cheat validation is not implemented.
 
@@ -62,4 +59,4 @@ Spring Boot -> PostgreSQL/PostGIS
 Spring Boot -> WebSocket clients
 ```
 
-Future backend work will persist the current session/catch model, add trusted game validation, authentication, isochrone support, and realtime multiplayer while retaining the existing routing wrapper.
+Future backend work will add broader trusted game validation, authentication, isochrone support, and realtime multiplayer while retaining the existing routing wrapper.

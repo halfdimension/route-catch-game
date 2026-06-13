@@ -2,7 +2,7 @@
 
 Route Catch Game is a map-based creature-catching game built with React, Leaflet, and Spring Boot. Players follow real road routes, chase timed creatures, and build score and progression during configurable game rounds.
 
-The current version is a frontend gameplay prototype backed by Spring Boot. The backend wraps OSRM routing, owns the PostgreSQL-backed creature catalog, tracks game sessions in memory, and accepts validated catch submissions while the frontend continues to run the live game simulation.
+The current version is a frontend gameplay prototype backed by Spring Boot. The backend wraps OSRM routing and persists its creature catalog, game sessions, scores, and caught-creature snapshots in PostgreSQL while the frontend continues to run the live game simulation.
 
 For a concise technical overview, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -130,7 +130,7 @@ The API runs at `http://localhost:8080` and exposes:
 - `POST /api/game/sessions/{sessionId}/catches`
 - `GET /api/game/creatures`
 
-The creature catalog is stored in PostgreSQL. Game sessions, scores, and caught counts are still stored in memory and are cleared whenever the backend restarts.
+The creature catalog, game sessions, scores, caught counts, and caught-creature snapshots are stored in PostgreSQL and survive backend restarts.
 
 ## Run the OSRM Dependency
 
@@ -183,7 +183,7 @@ backend/
       controller/ REST endpoints
       dto/        API request and response models
       service/    OSRM integration
-      game/       DB-backed catalog, in-memory sessions, and catch submission
+      game/       DB-backed catalog, sessions, and catch submission
     src/main/resources/db/migration/
       V1__create_game_tables.sql
       V2__seed_creature_catalog.sql
@@ -201,7 +201,7 @@ scripts/
 
 - JWT authentication
 - User profiles and avatar upload
-- PostgreSQL persistence for sessions, catches, and users
+- PostgreSQL persistence for users
 - PostGIS-backed spatial features
 - Multiplayer WebSocket support
 - Valhalla isochrone integration
