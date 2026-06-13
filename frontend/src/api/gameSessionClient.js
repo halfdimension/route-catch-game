@@ -42,6 +42,11 @@ export function listSessionCatches(sessionId) {
   return requestGameSession(`/api/game/sessions/${sessionId}/catches`)
 }
 
+export function getLeaderboard(limit = 10) {
+  const query = new URLSearchParams({ limit: String(limit) })
+  return requestGameSession(`/api/game/leaderboard?${query}`)
+}
+
 export function startGameSession(sessionId) {
   return requestGameSession(`/api/game/sessions/${sessionId}/start`, {
     method: 'POST',

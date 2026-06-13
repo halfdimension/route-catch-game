@@ -5,6 +5,7 @@ import GameControlsPanel from './components/GameControlsPanel'
 import GameHistoryPanel from './components/GameHistoryPanel'
 import GameSessionPanel from './components/GameSessionPanel'
 import GameMap from './components/GameMap'
+import LeaderboardPanel from './components/LeaderboardPanel'
 import MovementStatusPanel from './components/MovementStatusPanel'
 import MoveConfirmPanel from './components/MoveConfirmPanel'
 import PlayerHudPanel from './components/PlayerHudPanel'
@@ -293,6 +294,7 @@ function App() {
       />
       <TargetInfoPanel targets={targets} onTargetClick={handleTargetClick} />
       <CaughtInventoryPanel caughtTargets={caughtTargets} />
+      <LeaderboardPanel refreshVersion={historyRefreshVersion} />
       <GameHistoryPanel
         activeSessionId={backendSession?.sessionId}
         refreshVersion={historyRefreshVersion}
