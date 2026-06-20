@@ -19,12 +19,18 @@ async function requestGameSession(path, options = {}) {
   return response.json()
 }
 
-export function createGameSession(durationSeconds, playerName) {
+export function createGameSession(durationSeconds, playerName, token) {
+  const headers = {
+    'Content-Type': 'application/json',
+  }
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
   return requestGameSession('/api/game/sessions', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({ durationSeconds, playerName }),
   })
 }

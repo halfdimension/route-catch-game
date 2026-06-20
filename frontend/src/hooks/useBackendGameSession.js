@@ -6,7 +6,7 @@ import {
   submitCatch,
 } from '../api/gameSessionClient'
 
-export function useBackendGameSession() {
+export function useBackendGameSession(token) {
   const [backendSession, setBackendSessionState] = useState(null)
   const [sessionNotice, setSessionNotice] = useState(null)
   const [catchSubmissionWarning, setCatchSubmissionWarning] = useState('')
@@ -38,6 +38,7 @@ export function useBackendGameSession() {
         const createdSession = await createGameSession(
           durationSeconds,
           playerName,
+          token,
         )
         setBackendSession(createdSession)
 
@@ -54,7 +55,7 @@ export function useBackendGameSession() {
         setIsSessionPending(false)
       }
     },
-    [setBackendSession],
+    [setBackendSession, token],
   )
 
   const finishSession = useCallback(
@@ -113,6 +114,7 @@ export function useBackendGameSession() {
         const createdSession = await createGameSession(
           durationSeconds,
           playerName,
+          token,
         )
         setBackendSession(createdSession)
 
@@ -137,7 +139,7 @@ export function useBackendGameSession() {
         setIsSessionPending(false)
       }
     },
-    [setBackendSession],
+    [setBackendSession, token],
   )
 
   const submitBackendCatch = useCallback(async (creatureId) => {

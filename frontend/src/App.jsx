@@ -11,6 +11,7 @@ import RoundSummaryPanel from './components/RoundSummaryPanel'
 import StatsDrawer from './components/StatsDrawer'
 import TargetInfoPanel from './components/TargetInfoPanel'
 import { MAX_SIMULATION_SPEED } from './config/gameConfig'
+import { useAuth } from './context/authContextCore'
 import { useBackendGameSession } from './hooks/useBackendGameSession'
 import { useCatchDetection } from './hooks/useCatchDetection'
 import { useGameSession } from './hooks/useGameSession'
@@ -23,6 +24,11 @@ import { playCatchSound } from './utils/soundEffects'
 const TARGET_EXPIRED_MESSAGE = 'Target expired'
 
 function App() {
+  const {
+    currentUser,
+    token,
+    isAuthenticated,
+  } = useAuth()
   const {
     playerPosition,
     pendingDestination,
@@ -62,7 +68,7 @@ function App() {
     finishSession,
     replaceSession,
     submitBackendCatch,
-  } = useBackendGameSession()
+  } = useBackendGameSession(token)
   const {
     xp,
     level,
@@ -72,6 +78,10 @@ function App() {
     resetProgression,
   } = usePlayerProgression()
   const { playerName, setPlayerName } = usePlayerName()
+  const effectivePlayerName =
+    isAuthenticated && currentUser?.displayName
+      ? currentUser.displayName
+      : playerName
   const [chasedTargetId, setChasedTargetId] = useState(null)
   const [routingTargetId, setRoutingTargetId] = useState(null)
   const chasedTargetIdRef = useRef(null)
@@ -229,7 +239,7 @@ function App() {
   async function handleStartGame() {
     const didStartBackendSession = await beginSession(
       selectedRoundSeconds,
-      playerName,
+      effectivePlayerName,
     )
 
     if (didStartBackendSession) {
@@ -250,7 +260,7 @@ function App() {
   async function restartGame() {
     const didStartBackendSession = await replaceSession(
       selectedRoundSeconds,
-      playerName,
+      effectivePlayerName,
     )
 
     if (!didStartBackendSession) {
@@ -354,7 +364,7 @@ function App() {
         caughtTarget={catchToastTarget}
         chasedTargetId={chasedTargetId}
         routingTargetId={routingTargetId}
-        playerName={playerName}
+        playerName={effectivePlayerName}
         onMapClick={handleMapClick}
         onTargetClick={handleTargetClick}
       />
@@ -374,7 +384,7 @@ function App() {
         gameState={gameState}
         remainingSeconds={remainingSeconds}
         selectedRoundSeconds={selectedRoundSeconds}
-        playerName={playerName}
+        playerName={effectivePlayerName}
       />
       <CatchToast caughtTarget={catchToastTarget} />
       <GameSessionPanel
@@ -392,6 +402,8 @@ function App() {
         sessionNotice={sessionNotice}
         catchSubmissionWarning={catchSubmissionWarning}
         isSessionPending={isSessionPending}
+        isAuthenticated={isAuthenticated}
+        authenticatedDisplayName={currentUser?.displayName}
       />
       <GameControlsPanel
         gameState={gameState}
@@ -415,7 +427,7 @@ function App() {
       <CaughtInventoryPanel caughtTargets={caughtTargets} />
       <StatsDrawer
         activeSessionId={backendSession?.sessionId}
-        playerName={playerName}
+        playerName={effectivePlayerName}
         refreshVersion={historyRefreshVersion}
       />
 

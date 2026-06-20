@@ -13,6 +13,8 @@ function GameSessionPanel({
   sessionNotice,
   catchSubmissionWarning,
   isSessionPending,
+  isAuthenticated,
+  authenticatedDisplayName,
 }) {
   function handleDurationChange(event) {
     onRoundDurationChange(Number(event.target.value))
@@ -29,13 +31,13 @@ function GameSessionPanel({
       {canChooseDuration && (
         <div className="game-session-setup-fields">
           <label className="player-name-control">
-            <span>Player name</span>
+            <span>Guest player name</span>
             <input
               type="text"
               value={playerName}
               onChange={handlePlayerNameChange}
               maxLength={80}
-              disabled={isSessionPending}
+              disabled={isSessionPending || isAuthenticated}
             />
           </label>
           <label className="round-duration-control">
@@ -53,6 +55,12 @@ function GameSessionPanel({
             </select>
           </label>
         </div>
+      )}
+
+      {isAuthenticated && (
+        <p className="authenticated-session-note">
+          Sessions use {authenticatedDisplayName}.
+        </p>
       )}
 
       {gameState === 'ready' && (
