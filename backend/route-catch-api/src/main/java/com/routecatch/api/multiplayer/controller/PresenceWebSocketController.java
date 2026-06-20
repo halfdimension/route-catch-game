@@ -8,6 +8,7 @@ import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Controller;
 
 import com.routecatch.api.auth.persistence.UserEntity;
@@ -50,7 +51,18 @@ public class PresenceWebSocketController {
 	}
 
 	private UserEntity authenticatedUser(Principal principal) {
-		Authentication authentication = (Authentication) principal;
-		return (UserEntity) authentication.getPrincipal();
+		if (!(principal instanceof Authentication authentication)) {
+			throw new AccessDeniedException(
+				"Authenticated WebSocket user is required"
+			);
+		}
+
+		if (authentication.getPrincipal() instanceof UserEntity user) {
+			return user;
+		}
+
+		throw new AccessDeniedException(
+			"Authenticated WebSocket user is required"
+		);
 	}
 }

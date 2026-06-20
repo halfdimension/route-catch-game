@@ -5,6 +5,7 @@ import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import { INITIAL_MAP_CENTER, INITIAL_MAP_ZOOM } from '../config/mapConfig'
 import CatchMapEffect from './CatchMapEffect'
+import OtherPlayerMarkers from './OtherPlayerMarkers'
 import PlayerMarker from './PlayerMarker'
 import RouteLine from './RouteLine'
 import TargetLayer from './TargetLayer'
@@ -37,6 +38,7 @@ function GameMap({
   chasedTargetId,
   routingTargetId,
   playerName,
+  otherPlayers = [],
   onMapClick,
   onTargetClick,
 }) {
@@ -64,6 +66,7 @@ function GameMap({
         routingTargetId={routingTargetId}
       />
       <CatchMapEffect caughtTarget={caughtTarget} />
+      <OtherPlayerMarkers players={otherPlayers} />
       <PlayerMarker position={playerPosition} playerName={playerName} />
 
       {pendingDestination && (

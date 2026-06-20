@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AuthPanel from './components/AuthPanel'
 import CatchToast from './components/CatchToast'
 import CaughtInventoryPanel from './components/CaughtInventoryPanel'
@@ -7,6 +7,7 @@ import GameSessionPanel from './components/GameSessionPanel'
 import GameMap from './components/GameMap'
 import MovementStatusPanel from './components/MovementStatusPanel'
 import MoveConfirmPanel from './components/MoveConfirmPanel'
+import MultiplayerPanel from './components/MultiplayerPanel'
 import PlayerHudPanel from './components/PlayerHudPanel'
 import RoundSummaryPanel from './components/RoundSummaryPanel'
 import StatsDrawer from './components/StatsDrawer'
@@ -16,6 +17,7 @@ import { useAuth } from './context/authContextCore'
 import { useBackendGameSession } from './hooks/useBackendGameSession'
 import { useCatchDetection } from './hooks/useCatchDetection'
 import { useGameSession } from './hooks/useGameSession'
+import { useMultiplayerPresence } from './hooks/useMultiplayerPresence'
 import { usePlayerProgression } from './hooks/usePlayerProgression'
 import { usePlayerName } from './hooks/usePlayerName'
 import { usePlayerState } from './hooks/usePlayerState'
@@ -87,6 +89,29 @@ function App() {
   const [routingTargetId, setRoutingTargetId] = useState(null)
   const chasedTargetIdRef = useRef(null)
   const routingTargetIdRef = useRef(null)
+  const multiplayerPresenceStatus = chasedTargetId
+    ? 'CHASING'
+    : isMoving
+      ? 'MOVING'
+      : 'IDLE'
+  const {
+    roomId,
+    connectionStatus: multiplayerConnectionStatus,
+    onlinePlayers,
+    errorMessage: multiplayerErrorMessage,
+    setRoomId,
+    connectPresence,
+    disconnectPresence,
+  } = useMultiplayerPresence({
+    token,
+    currentUser,
+    playerPosition,
+    status: multiplayerPresenceStatus,
+  })
+  const otherOnlinePlayers = useMemo(
+    () => onlinePlayers.filter((player) => player.userId !== currentUser?.userId),
+    [currentUser?.userId, onlinePlayers],
+  )
 
   const updateChasedTargetId = useCallback((targetId) => {
     chasedTargetIdRef.current = targetId
@@ -366,6 +391,7 @@ function App() {
         chasedTargetId={chasedTargetId}
         routingTargetId={routingTargetId}
         playerName={effectivePlayerName}
+        otherPlayers={otherOnlinePlayers}
         onMapClick={handleMapClick}
         onTargetClick={handleTargetClick}
       />
@@ -418,6 +444,16 @@ function App() {
           onResetGame={resetGame}
           onSimulationSpeedChange={setSimulationSpeed}
           maxSimulationSpeed={MAX_SIMULATION_SPEED + speedBonus}
+        />
+        <MultiplayerPanel
+          isAuthenticated={isAuthenticated}
+          roomId={roomId}
+          connectionStatus={multiplayerConnectionStatus}
+          onlinePlayerCount={onlinePlayers.length}
+          errorMessage={multiplayerErrorMessage}
+          onRoomIdChange={setRoomId}
+          onJoinRoom={connectPresence}
+          onLeaveRoom={disconnectPresence}
         />
       </div>
       <TargetInfoPanel

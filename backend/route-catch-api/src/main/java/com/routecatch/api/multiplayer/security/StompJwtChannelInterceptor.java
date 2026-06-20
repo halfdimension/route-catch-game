@@ -9,6 +9,8 @@ import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
+import org.springframework.messaging.support.MessageHeaderAccessor;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.stereotype.Component;
@@ -21,6 +23,10 @@ import com.routecatch.api.auth.service.JwtTokenService;
 public class StompJwtChannelInterceptor implements ChannelInterceptor {
 
 	private static final String BEARER_PREFIX = "Bearer ";
+	private static final String AUTHENTICATION_SESSION_ATTRIBUTE = "authentication";
+	private static final String USER_ID_SESSION_ATTRIBUTE = "userId";
+	private static final String USERNAME_SESSION_ATTRIBUTE = "username";
+	private static final String DISPLAY_NAME_SESSION_ATTRIBUTE = "displayName";
 
 	private final JwtTokenService jwtTokenService;
 	private final UserRepository userRepository;
@@ -35,9 +41,17 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
 
 	@Override
 	public Message<?> preSend(Message<?> message, MessageChannel channel) {
-		StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+		StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(
+			message,
+			StompHeaderAccessor.class
+		);
+
+		if (accessor == null) {
+			return message;
+		}
 
 		if (accessor.getCommand() != StompCommand.CONNECT) {
+			reattachAuthentication(accessor);
 			return message;
 		}
 
@@ -53,13 +67,53 @@ public class StompJwtChannelInterceptor implements ChannelInterceptor {
 				new BadCredentialsException("Invalid WebSocket token")
 			);
 
-		accessor.setUser(new UsernamePasswordAuthenticationToken(
+		Authentication authentication = new UsernamePasswordAuthenticationToken(
 			user,
 			token,
 			Collections.emptyList()
-		));
+		);
+
+		accessor.setUser(authentication);
+		storeAuthentication(accessor, authentication, user);
 
 		return message;
+	}
+
+	private void reattachAuthentication(StompHeaderAccessor accessor) {
+		if (accessor.getUser() != null || accessor.getSessionAttributes() == null) {
+			return;
+		}
+
+		Object authentication = accessor
+			.getSessionAttributes()
+			.get(AUTHENTICATION_SESSION_ATTRIBUTE);
+
+		if (authentication instanceof Authentication stompAuthentication) {
+			accessor.setUser(stompAuthentication);
+		}
+	}
+
+	private void storeAuthentication(
+		StompHeaderAccessor accessor,
+		Authentication authentication,
+		UserEntity user
+	) {
+		if (accessor.getSessionAttributes() == null) {
+			return;
+		}
+
+		accessor
+			.getSessionAttributes()
+			.put(AUTHENTICATION_SESSION_ATTRIBUTE, authentication);
+		accessor
+			.getSessionAttributes()
+			.put(USER_ID_SESSION_ATTRIBUTE, user.getUserId().toString());
+		accessor
+			.getSessionAttributes()
+			.put(USERNAME_SESSION_ATTRIBUTE, user.getUsername());
+		accessor
+			.getSessionAttributes()
+			.put(DISPLAY_NAME_SESSION_ATTRIBUTE, user.getDisplayName());
 	}
 
 	private String bearerToken(StompHeaderAccessor accessor) {
