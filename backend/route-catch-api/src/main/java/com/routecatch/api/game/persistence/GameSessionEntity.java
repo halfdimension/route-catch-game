@@ -45,6 +45,9 @@ public class GameSessionEntity {
 	@Column(name = "player_name", length = 80, nullable = false)
 	private String playerName;
 
+	@Column(name = "user_id")
+	private UUID userId;
+
 	protected GameSessionEntity() {
 	}
 
@@ -62,6 +65,10 @@ public class GameSessionEntity {
 		this.createdAt = Instant.now();
 		this.durationSeconds = durationSeconds;
 		this.playerName = playerName;
+	}
+
+	public void assignUser(UUID userId) {
+		this.userId = userId;
 	}
 
 	public void start(Instant startTime) {
@@ -128,5 +135,9 @@ public class GameSessionEntity {
 
 	public String getPlayerName() {
 		return playerName;
+	}
+
+	public UUID getUserId() {
+		return userId;
 	}
 }
