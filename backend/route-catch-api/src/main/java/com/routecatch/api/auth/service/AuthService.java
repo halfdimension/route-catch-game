@@ -20,13 +20,16 @@ public class AuthService {
 
 	private final UserRepository userRepository;
 	private final PasswordEncoder passwordEncoder;
+	private final JwtTokenService jwtTokenService;
 
 	public AuthService(
 		UserRepository userRepository,
-		PasswordEncoder passwordEncoder
+		PasswordEncoder passwordEncoder,
+		JwtTokenService jwtTokenService
 	) {
 		this.userRepository = userRepository;
 		this.passwordEncoder = passwordEncoder;
+		this.jwtTokenService = jwtTokenService;
 	}
 
 	@Transactional
@@ -47,7 +50,7 @@ public class AuthService {
 			passwordEncoder.encode(request.password())
 		);
 
-		return new AuthResponse(UserResponse.from(userRepository.save(user)));
+		return authResponse(userRepository.save(user));
 	}
 
 	@Transactional(readOnly = true)
@@ -60,6 +63,13 @@ public class AuthService {
 			throw new InvalidCredentialsException();
 		}
 
-		return new AuthResponse(UserResponse.from(user));
+		return authResponse(user);
+	}
+
+	private AuthResponse authResponse(UserEntity user) {
+		return AuthResponse.bearer(
+			jwtTokenService.generateToken(user),
+			UserResponse.from(user)
+		);
 	}
 }

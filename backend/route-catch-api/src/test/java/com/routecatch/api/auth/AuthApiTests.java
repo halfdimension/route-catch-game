@@ -59,6 +59,8 @@ class AuthApiTests {
 					}
 					"""))
 			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.token").isNotEmpty())
+			.andExpect(jsonPath("$.tokenType").value("Bearer"))
 			.andExpect(jsonPath("$.user.userId").isNotEmpty())
 			.andExpect(jsonPath("$.user.username").value("harsh_1"))
 			.andExpect(jsonPath("$.user.email").value("harsh@example.com"))
@@ -83,6 +85,8 @@ class AuthApiTests {
 					}
 					"""))
 			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.token").isNotEmpty())
+			.andExpect(jsonPath("$.tokenType").value("Bearer"))
 			.andExpect(jsonPath("$.user.username").value("harsh"))
 			.andExpect(jsonPath("$.user.email").isEmpty());
 	}
@@ -139,6 +143,8 @@ class AuthApiTests {
 					}
 					"""))
 			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.token").isNotEmpty())
+			.andExpect(jsonPath("$.tokenType").value("Bearer"))
 			.andExpect(jsonPath("$.user.username").value("harsh"))
 			.andExpect(jsonPath("$.user.email").value("harsh@example.com"));
 	}
@@ -156,6 +162,8 @@ class AuthApiTests {
 					}
 					"""))
 			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.token").isNotEmpty())
+			.andExpect(jsonPath("$.tokenType").value("Bearer"))
 			.andExpect(jsonPath("$.user.username").value("harsh"));
 	}
 
