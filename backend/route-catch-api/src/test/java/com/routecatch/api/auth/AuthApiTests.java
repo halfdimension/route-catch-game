@@ -2,6 +2,7 @@ package com.routecatch.api.auth;
 
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -215,8 +216,59 @@ class AuthApiTests {
 			.andExpect(jsonPath("$.path").value("/api/auth/register"));
 	}
 
+	@Test
+	void meWithValidTokenReturnsCurrentUser() throws Exception {
+		String token = registerUserAndReturnToken("harsh", "harsh@example.com");
+
+		mockMvc.perform(get("/api/auth/me")
+				.header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.username").value("harsh"))
+			.andExpect(jsonPath("$.email").value("harsh@example.com"))
+			.andExpect(jsonPath("$.displayName").value("Harsh"))
+			.andExpect(jsonPath("$.createdAt").isNotEmpty());
+	}
+
+	@Test
+	void meWithoutTokenReturnsUnauthorizedJson() throws Exception {
+		mockMvc.perform(get("/api/auth/me"))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"))
+			.andExpect(jsonPath("$.message").value("Authentication is required"))
+			.andExpect(jsonPath("$.path").value("/api/auth/me"));
+	}
+
+	@Test
+	void meWithInvalidTokenReturnsUnauthorizedJson() throws Exception {
+		mockMvc.perform(get("/api/auth/me")
+				.header("Authorization", "Bearer not-a-valid-token"))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"))
+			.andExpect(jsonPath("$.path").value("/api/auth/me"));
+	}
+
+	@Test
+	void gameSessionCreationStillWorksWithoutAuth() throws Exception {
+		mockMvc.perform(post("/api/game/sessions")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 60,
+						"playerName": "Guest Player"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("CREATED"))
+			.andExpect(jsonPath("$.playerName").value("Guest Player"));
+	}
+
 	private void registerUser(String username, String email) throws Exception {
-		mockMvc.perform(post("/api/auth/register")
+		registerUserAndReturnToken(username, email);
+	}
+
+	private String registerUserAndReturnToken(String username, String email)
+		throws Exception {
+		String response = mockMvc.perform(post("/api/auth/register")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
 					{
@@ -226,6 +278,11 @@ class AuthApiTests {
 						"password": "password123"
 					}
 					""".formatted(username, email)))
-			.andExpect(status().isOk());
+			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+
+		return com.jayway.jsonpath.JsonPath.read(response, "$.token");
 	}
 }

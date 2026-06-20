@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 
 import com.routecatch.api.auth.persistence.UserEntity;
 
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 
@@ -44,5 +46,30 @@ public class JwtTokenService {
 			.expiration(Date.from(expiresAt))
 			.signWith(signingKey)
 			.compact();
+	}
+
+	public boolean validateToken(String token) {
+		try {
+			parseClaims(token);
+			return true;
+		} catch (JwtException | IllegalArgumentException exception) {
+			return false;
+		}
+	}
+
+	public String getUserId(String token) {
+		return parseClaims(token).get("userId", String.class);
+	}
+
+	public String getUsername(String token) {
+		return parseClaims(token).get("username", String.class);
+	}
+
+	private Claims parseClaims(String token) {
+		return Jwts.parser()
+			.verifyWith(signingKey)
+			.build()
+			.parseSignedClaims(token)
+			.getPayload();
 	}
 }
