@@ -16,6 +16,7 @@ import com.routecatch.api.dto.ApiErrorResponse;
 import com.routecatch.api.game.exception.CreatureNotFoundException;
 import com.routecatch.api.game.exception.GameSessionNotFoundException;
 import com.routecatch.api.game.exception.InvalidGameSessionStateException;
+import com.routecatch.api.game.exception.InvalidPlayerNameException;
 import com.routecatch.api.game.exception.InvalidSessionHistoryLimitException;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -65,6 +66,19 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(InvalidSessionHistoryLimitException.class)
 	public ResponseEntity<ApiErrorResponse> handleInvalidSessionHistoryLimit(
 		InvalidSessionHistoryLimitException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.BAD_REQUEST,
+			"VALIDATION_ERROR",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(InvalidPlayerNameException.class)
+	public ResponseEntity<ApiErrorResponse> handleInvalidPlayerName(
+		InvalidPlayerNameException exception,
 		HttpServletRequest request
 	) {
 		return errorResponse(

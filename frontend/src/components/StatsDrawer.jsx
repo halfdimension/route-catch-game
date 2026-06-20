@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import GameHistoryPanel from './GameHistoryPanel'
 import LeaderboardPanel from './LeaderboardPanel'
+import PlayerStatsPanel from './PlayerStatsPanel'
 
-function StatsDrawer({ activeSessionId, refreshVersion }) {
+function StatsDrawer({ activeSessionId, playerName, refreshVersion }) {
   const [isOpen, setIsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('leaderboard')
 
@@ -53,6 +54,15 @@ function StatsDrawer({ activeSessionId, refreshVersion }) {
             >
               History
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'my-stats'}
+              className={activeTab === 'my-stats' ? 'is-active' : undefined}
+              onClick={() => setActiveTab('my-stats')}
+            >
+              My Stats
+            </button>
           </div>
 
           <div className="stats-drawer-content">
@@ -62,6 +72,12 @@ function StatsDrawer({ activeSessionId, refreshVersion }) {
             <div hidden={activeTab !== 'history'}>
               <GameHistoryPanel
                 activeSessionId={activeSessionId}
+                refreshVersion={refreshVersion}
+              />
+            </div>
+            <div hidden={activeTab !== 'my-stats'}>
+              <PlayerStatsPanel
+                playerName={playerName}
                 refreshVersion={refreshVersion}
               />
             </div>

@@ -21,6 +21,8 @@ public interface GameSessionRepository
 
 	List<GameSessionEntity> findAllByStatus(GameSessionStatus status);
 
+	List<GameSessionEntity> findByPlayerName(String playerName);
+
 	List<GameSessionEntity>
 		findAllByStatusOrderByScoreDescCaughtCountDescEndedAtAscCreatedAtDesc(
 			GameSessionStatus status,

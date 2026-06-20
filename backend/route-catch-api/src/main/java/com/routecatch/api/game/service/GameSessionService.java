@@ -1,6 +1,7 @@
 package com.routecatch.api.game.service;
 
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -12,13 +13,16 @@ import com.routecatch.api.game.creature.CreatureCatalogService;
 import com.routecatch.api.game.creature.CreatureDefinition;
 import com.routecatch.api.game.dto.CaughtCreatureResponse;
 import com.routecatch.api.game.dto.LeaderboardEntryResponse;
+import com.routecatch.api.game.dto.PlayerStatsResponse;
 import com.routecatch.api.game.dto.SubmitCatchRequest;
 import com.routecatch.api.game.dto.SubmitCatchResponse;
 import com.routecatch.api.game.exception.GameSessionNotFoundException;
 import com.routecatch.api.game.exception.InvalidGameSessionStateException;
+import com.routecatch.api.game.exception.InvalidPlayerNameException;
 import com.routecatch.api.game.exception.InvalidSessionHistoryLimitException;
 import com.routecatch.api.game.model.GameSession;
 import com.routecatch.api.game.model.GameSessionStatus;
+import com.routecatch.api.game.model.PlayerNames;
 import com.routecatch.api.game.persistence.CaughtCreatureEntity;
 import com.routecatch.api.game.persistence.CaughtCreatureRepository;
 import com.routecatch.api.game.persistence.GameSessionEntity;
@@ -51,7 +55,7 @@ public class GameSessionService {
 		GameSessionEntity session = new GameSessionEntity(
 			UUID.randomUUID(),
 			durationSeconds,
-			normalizePlayerName(playerName)
+			PlayerNames.normalize(playerName)
 		);
 
 		return toModel(gameSessionRepository.save(session));
@@ -115,6 +119,58 @@ public class GameSessionService {
 				LeaderboardEntryResponse.from(index + 1, sessions.get(index))
 			)
 			.toList();
+	}
+
+	@Transactional
+	public PlayerStatsResponse getPlayerStats(String playerName) {
+		if (PlayerNames.isTooLong(playerName)) {
+			throw new InvalidPlayerNameException();
+		}
+
+		String normalizedPlayerName = PlayerNames.normalize(playerName);
+		expireStaleRunningSessions(Instant.now());
+		gameSessionRepository.flush();
+
+		List<GameSessionEntity> sessions =
+			gameSessionRepository.findByPlayerName(normalizedPlayerName);
+		List<GameSessionEntity> completedSessions = sessions.stream()
+			.filter((session) -> session.getStatus() == GameSessionStatus.ENDED)
+			.toList();
+
+		int totalScore = completedSessions.stream()
+			.mapToInt(GameSessionEntity::getScore)
+			.sum();
+		int totalCatches = completedSessions.stream()
+			.mapToInt(GameSessionEntity::getCaughtCount)
+			.sum();
+		int bestScore = completedSessions.stream()
+			.mapToInt(GameSessionEntity::getScore)
+			.max()
+			.orElse(0);
+		int bestCaughtCount = completedSessions.stream()
+			.mapToInt(GameSessionEntity::getCaughtCount)
+			.max()
+			.orElse(0);
+		double averageScore = completedSessions.stream()
+			.mapToInt(GameSessionEntity::getScore)
+			.average()
+			.orElse(0);
+		Instant latestSessionAt = sessions.stream()
+			.map(GameSessionEntity::getCreatedAt)
+			.max(Comparator.naturalOrder())
+			.orElse(null);
+
+		return new PlayerStatsResponse(
+			normalizedPlayerName,
+			sessions.size(),
+			completedSessions.size(),
+			totalScore,
+			totalCatches,
+			bestScore,
+			bestCaughtCount,
+			averageScore,
+			latestSessionAt
+		);
 	}
 
 	@Transactional(noRollbackFor = InvalidGameSessionStateException.class)
@@ -234,11 +290,4 @@ public class GameSessionService {
 		);
 	}
 
-	private String normalizePlayerName(String playerName) {
-		if (playerName == null || playerName.isBlank()) {
-			return "Guest";
-		}
-
-		return playerName.trim();
-	}
 }

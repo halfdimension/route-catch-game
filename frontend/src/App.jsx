@@ -415,6 +415,7 @@ function App() {
       <CaughtInventoryPanel caughtTargets={caughtTargets} />
       <StatsDrawer
         activeSessionId={backendSession?.sessionId}
+        playerName={playerName}
         refreshVersion={historyRefreshVersion}
       />
 

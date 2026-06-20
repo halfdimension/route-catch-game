@@ -978,7 +978,7 @@ button:focus-visible {
 
 .stats-drawer-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 3px;
   margin-top: 8px;
   padding: 3px;
@@ -1008,7 +1008,8 @@ button:focus-visible {
 }
 
 .game-history-panel,
-.leaderboard-panel {
+.leaderboard-panel,
+.player-stats-panel {
   position: static;
   width: auto;
   max-height: none;
@@ -1326,6 +1327,123 @@ button:focus-visible {
 }
 
 .leaderboard-error {
+  color: #991b1b;
+  background: #fef2f2;
+}
+
+.player-stats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.player-stats-header > div:first-child {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.player-stats-header p {
+  margin: 0;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.player-stats-header span {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-stats-header button {
+  padding: 4px 7px;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.player-stats-content {
+  display: grid;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.player-stats-summary {
+  display: grid;
+  gap: 1px;
+  padding: 9px 10px;
+  border-radius: 6px;
+  color: #172033;
+  background: #eff6ff;
+}
+
+.player-stats-summary strong {
+  color: #1d4ed8;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.player-stats-summary span,
+.player-stats-latest span,
+.player-stats-empty,
+.player-stats-error {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.player-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  margin: 0;
+}
+
+.player-stats-grid div,
+.player-stats-latest {
+  display: grid;
+  gap: 2px;
+  padding: 7px;
+  border-radius: 6px;
+  background: #f3f6f8;
+}
+
+.player-stats-grid dt {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.player-stats-grid dd {
+  margin: 0;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.player-stats-latest {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.player-stats-latest time,
+.player-stats-latest strong {
+  color: #172033;
+  font-size: 11px;
+}
+
+.player-stats-empty,
+.player-stats-error {
+  display: block;
+  padding: 7px;
+  border-radius: 6px;
+  background: #f3f6f8;
+  line-height: 1.35;
+}
+
+.player-stats-error {
   color: #991b1b;
   background: #fef2f2;
 }

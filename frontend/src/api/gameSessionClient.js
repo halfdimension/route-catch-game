@@ -47,6 +47,13 @@ export function getLeaderboard(limit = 10) {
   return requestGameSession(`/api/game/leaderboard?${query}`)
 }
 
+export function getPlayerStats(playerName) {
+  const normalizedPlayerName = playerName?.trim() || 'Guest'
+  return requestGameSession(
+    `/api/game/players/${encodeURIComponent(normalizedPlayerName)}/stats`,
+  )
+}
+
 export function startGameSession(sessionId) {
   return requestGameSession(`/api/game/sessions/${sessionId}/start`, {
     method: 'POST',
