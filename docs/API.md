@@ -22,6 +22,65 @@ curl --fail "$API_URL/api/health"
 }
 ```
 
+## Authentication
+
+Register:
+
+```bash
+curl --fail \
+  --request POST \
+  --header "Content-Type: application/json" \
+  --data '{
+    "username": "harsh",
+    "email": "harsh@example.com",
+    "displayName": "Harsh",
+    "password": "password123"
+  }' \
+  "$API_URL/api/auth/register"
+```
+
+Login:
+
+```bash
+curl --fail \
+  --request POST \
+  --header "Content-Type: application/json" \
+  --data '{"usernameOrEmail":"harsh","password":"password123"}' \
+  "$API_URL/api/auth/login"
+```
+
+Both return:
+
+```json
+{
+  "token": "JWT",
+  "tokenType": "Bearer",
+  "user": {
+    "userId": "UUID",
+    "username": "harsh",
+    "email": "harsh@example.com",
+    "displayName": "Harsh",
+    "createdAt": "2026-06-13T12:00:00Z"
+  }
+}
+```
+
+Store the token for protected examples:
+
+```bash
+TOKEN=replace-with-jwt
+```
+
+Current user:
+
+```bash
+curl --fail \
+  --header "Authorization: Bearer $TOKEN" \
+  "$API_URL/api/auth/me"
+```
+
+`GET /api/auth/me` returns the `user` object shape shown above.
+
 ## Route
 
 ```bash
@@ -99,9 +158,14 @@ shape:
   "durationSeconds": 60,
   "score": 0,
   "caughtCount": 0,
-  "playerName": "Harsh"
+  "playerName": "Harsh",
+  "userId": null
 }
 ```
+
+When a valid `Authorization: Bearer $TOKEN` header is provided, the session is
+linked to the authenticated user, `userId` is populated, and the backend uses
+the user's `displayName` as `playerName`.
 
 Set the returned ID for the following examples:
 
@@ -199,6 +263,65 @@ Results are ordered by catch time ascending:
 ]
 ```
 
+## Current User Stats and History
+
+These endpoints require `Authorization: Bearer $TOKEN` and use
+`game_sessions.user_id`, not player-name matching. Guest sessions are excluded.
+
+Current user stats:
+
+```bash
+curl --fail \
+  --header "Authorization: Bearer $TOKEN" \
+  "$API_URL/api/game/me/stats"
+```
+
+```json
+{
+  "playerName": "Harsh",
+  "totalSessions": 3,
+  "completedSessions": 2,
+  "totalScore": 160,
+  "totalCatches": 5,
+  "bestScore": 100,
+  "bestCaughtCount": 3,
+  "averageScore": 80.0,
+  "latestSessionAt": "2026-06-13T12:00:00Z"
+}
+```
+
+Current user sessions:
+
+```bash
+curl --fail \
+  --header "Authorization: Bearer $TOKEN" \
+  "$API_URL/api/game/me/sessions?limit=20"
+```
+
+Results use the session response shape and are ordered by creation time
+descending. Valid limits are 1 through 100.
+
+Current user session catches:
+
+```bash
+curl --fail \
+  --header "Authorization: Bearer $TOKEN" \
+  "$API_URL/api/game/me/sessions/$SESSION_ID/catches"
+```
+
+The session must belong to the authenticated user. Results use the catch
+response shape.
+
+## Public Player Stats
+
+The name-based stats endpoint remains public for guest/demo flows:
+
+```bash
+curl --fail "$API_URL/api/game/players/Harsh/stats"
+```
+
+It returns the same stats shape but matches sessions by `player_name`.
+
 ## Leaderboard
 
 ```bash
@@ -227,6 +350,61 @@ appear.
 Ordering is score descending, caught count descending, ended time ascending,
 then creation time descending.
 
+## WebSocket Multiplayer Presence
+
+Endpoint:
+
+```text
+ws://localhost:8080/ws
+```
+
+STOMP `CONNECT` must include:
+
+```text
+Authorization: Bearer <JWT>
+```
+
+Publish presence updates:
+
+```text
+/app/rooms/{roomId}/presence
+```
+
+Payload:
+
+```json
+{
+  "lat": 28.6,
+  "lon": 77.2,
+  "status": "IDLE"
+}
+```
+
+Subscribe to room presence:
+
+```text
+/topic/rooms/{roomId}/presence
+```
+
+Broadcast payload:
+
+```json
+[
+  {
+    "userId": "UUID",
+    "username": "harsh",
+    "displayName": "Harsh",
+    "lat": 28.6,
+    "lon": 77.2,
+    "status": "IDLE",
+    "lastSeenAt": "2026-06-13T12:00:00Z"
+  }
+]
+```
+
+Presence is stored in memory for local/demo use. It does not synchronize shared
+targets, catches, scoring, or routes.
+
 ## Error Responses
 
 Errors use a consistent shape:
@@ -243,6 +421,7 @@ Errors use a consistent shape:
 Common statuses:
 
 - `400`: validation, malformed JSON, invalid UUID, or invalid limit
+- `401`: missing or invalid authentication token
 - `404`: session or creature not found
 - `405`: unsupported HTTP method
 - `409`: invalid session state

@@ -12,7 +12,7 @@ Browser
   v
 React + Vite + Leaflet
   |
-  | JSON over HTTP
+  | JSON over HTTP + STOMP over WebSocket
   v
 Spring Boot API
   |                    |
@@ -38,12 +38,14 @@ local processes.
 
 The frontend is a React application under `frontend/`.
 
-- `components/` renders the Leaflet map, player and creature markers, routes,
-  compact HUD, target and catch panels, round summary, and Stats drawer.
+- `components/` renders the Leaflet map, player, creature, and online-player
+  markers, routes, compact HUD, target and catch panels, round summary, auth
+  UI, multiplayer controls, and Stats drawer.
 - `hooks/` owns route animation, player state, target spawning, catch
-  detection, local sessions, backend session synchronization, and progression.
+  detection, local sessions, backend session synchronization, progression, and
+  multiplayer presence.
 - `api/` calls Spring Boot for routes, nearest-road snapping, backend sessions,
-  catch submission, history, and leaderboard data.
+  catch submission, auth, current-user data, history, and leaderboard data.
 - `config/` centralizes API, game, map, routing, and progression values.
 - `data/` contains frontend creature presentation data and the mock profile.
 - `utils/` contains browser-generated sound and rarity styling helpers.
@@ -57,10 +59,25 @@ Live gameplay remains frontend-controlled:
 - Catch detection updates local score, XP, inventory, and feedback immediately.
 - Catch submission to the backend is non-blocking; a sync failure does not
   roll back the local catch.
+- Authenticated users can join a presence room and see other online users on
+  the map. Presence does not affect target spawning, catches, or scoring.
 
 ## Backend
 
 The Spring Boot application is under `backend/route-catch-api/`.
+
+### Authentication APIs
+
+- `POST /api/auth/register` creates a user with BCrypt password hashing.
+- `POST /api/auth/login` validates credentials and returns a JWT.
+- `GET /api/auth/me` validates `Authorization: Bearer <token>` and returns the
+  current user.
+- JWT validation is handled by Spring Security for protected REST endpoints and
+  by the STOMP channel interceptor for WebSocket connections.
+
+```text
+register/login -> JWT -> /api/auth/me
+```
 
 ### Routing APIs
 
@@ -73,11 +90,36 @@ The Spring Boot application is under `backend/route-catch-api/`.
 
 - `GET /api/game/creatures` reads the backend-owned creature catalog.
 - Session endpoints create, start, retrieve, end, and list sessions.
+- Authenticated session creation stores `game_sessions.user_id` and uses the
+  user's display name. Guest sessions remain valid with `user_id = null`.
 - Catch submission accepts a creature ID and resolves name, rarity, and score
   from the backend catalog.
 - Catch insertion and session score/count updates run in one transaction.
 - History endpoints return persisted sessions and their catch snapshots.
+- `GET /api/game/me/stats` and `GET /api/game/me/sessions` return
+  authenticated current-user data by `user_id`.
 - The leaderboard returns completed sessions only.
+
+### Multiplayer Presence
+
+- The STOMP endpoint is `/ws`.
+- Clients publish presence to `/app/rooms/{roomId}/presence`.
+- Clients subscribe to `/topic/rooms/{roomId}/presence`.
+- STOMP `CONNECT` requires `Authorization: Bearer <token>`.
+- The server associates each presence update with the authenticated user and
+  broadcasts the full room presence list after updates.
+- Disconnect cleanup removes the user's presence from tracked rooms and
+  broadcasts updated lists.
+
+Presence is intentionally in memory for local/demo use:
+
+```text
+roomId -> userId -> presence
+websocket sessionId -> userId + joined rooms
+```
+
+It is not persisted and does not implement shared targets, shared catches,
+multiplayer scoring, or route synchronization.
 
 Controllers remain thin and delegate to `OsrmRoutingService`,
 `CreatureCatalogService`, and `GameSessionService`. `GlobalExceptionHandler`
@@ -86,7 +128,7 @@ missing records, invalid states, and unexpected errors to `ApiErrorResponse`.
 
 ## PostgreSQL
 
-Flyway migration `V1__create_game_tables.sql` creates:
+Flyway migrations create the database schema:
 
 ### `creature_catalog`
 
@@ -102,6 +144,16 @@ Flyway migration `V1__create_game_tables.sql` creates:
 - round duration
 - accumulated score and caught count
 - player display name, defaulting to `Guest`
+- nullable `user_id` for authenticated sessions
+
+### `users`
+
+- UUID user ID
+- unique username
+- optional unique email
+- display name
+- BCrypt password hash
+- creation timestamp
 
 ### `caught_creatures`
 
@@ -110,8 +162,13 @@ Flyway migration `V1__create_game_tables.sql` creates:
 - snapshot of creature name, rarity, and score
 - caught timestamp
 
-`V2__seed_creature_catalog.sql` inserts the nine original creatures. Hibernate
-uses schema validation; it does not create or update tables.
+- `V1__create_game_tables.sql` creates game tables.
+- `V2__seed_creature_catalog.sql` inserts the nine original creatures.
+- `V3__add_player_name_to_game_sessions.sql` adds display-name support.
+- `V4__create_users_and_link_sessions.sql` creates users and nullable session
+  user links.
+
+Hibernate uses schema validation; it does not create or update tables.
 
 ## Session Lifecycle
 
@@ -149,6 +206,8 @@ The Stats drawer uses:
 GET /api/game/sessions?limit=20
 GET /api/game/sessions/{sessionId}/catches
 GET /api/game/leaderboard?limit=10
+GET /api/game/me/stats
+GET /api/game/me/sessions?limit=20
 ```
 
 - Session history is ordered by `createdAt` descending.
@@ -156,7 +215,8 @@ GET /api/game/leaderboard?limit=10
 - Leaderboard entries include only ended sessions and are ordered by score
   descending, caught count descending, ended time ascending, then creation time
   descending.
-- History and leaderboard refreshes are non-blocking and do not interrupt play.
+- History, leaderboard, and current-user stats refreshes are non-blocking and
+  do not interrupt play.
 
 ## Local Startup
 
@@ -179,8 +239,12 @@ scripts/run-frontend.sh
 
 ## Security and Trust Boundaries
 
-- There is no authentication or user ownership yet.
+- JWT authentication exists for current-user REST endpoints and WebSocket
+  presence. Gameplay remains playable as a guest.
+- Existing global history and leaderboard endpoints remain public.
 - CORS currently allows the local Vite origin.
 - The backend owns catalog score values and ignores legacy client score fields.
 - The browser still controls spawn timing, movement, and catch detection.
+- Multiplayer presence is local-process memory and is not authoritative game
+  state.
 - Broader anti-cheat and fully server-authoritative rounds are future work.

@@ -7,10 +7,13 @@
 Route Catch Game combines interactive Leaflet gameplay with OSRM routing,
 Spring Boot APIs, and PostgreSQL persistence. Players start timed rounds, chase
 rarity-based creatures, follow animated road routes, and build persisted
-session history and leaderboard scores.
+session history and leaderboard scores. Signed-in players can also keep
+user-specific stats and join a live presence room to see other online players
+on the map.
 
 `React 19` · `Vite 8` · `Leaflet` · `Java 21` · `Spring Boot 4` ·
-`PostgreSQL` · `Flyway` · `OSRM` · `Docker Compose`
+`Spring Security` · `JWT` · `WebSocket/STOMP` · `PostgreSQL` · `Flyway` ·
+`OSRM` · `Docker Compose`
 
 ## Highlights
 
@@ -21,6 +24,9 @@ session history and leaderboard scores.
 - Timed rounds, score, XP, levels, catch effects, and round summaries.
 - Backend-owned creature scoring and persisted game sessions and catches.
 - Stats drawer with session history, catch history, and leaderboard.
+- JWT authentication with protected current-user APIs.
+- Authenticated game sessions linked to users for user-specific stats/history.
+- WebSocket/STOMP multiplayer presence for signed-in room members.
 - Automatic stale-session expiry and consistent JSON API errors.
 - Reproducible PostgreSQL setup and local service scripts.
 
@@ -62,6 +68,7 @@ flowchart LR
     flyway["Flyway Migrations"]
 
     frontend -->|REST/JSON| backend
+    frontend -->|STOMP over WebSocket /ws| backend
     backend -->|Route + nearest requests| osrm
     backend -->|JPA transactions| postgres
     flyway -->|Schema + seed data| postgres
@@ -69,15 +76,35 @@ flowchart LR
 
 - The frontend owns live map rendering, route animation, target spawning,
   catch detection, progression, and game presentation.
-- Spring Boot owns routing adapters, backend session lifecycle, catalog-backed
-  catch scoring, history, and leaderboard APIs.
+- Spring Boot owns routing adapters, JWT auth, backend session lifecycle,
+  catalog-backed catch scoring, user-specific history/stats, leaderboard APIs,
+  and in-memory multiplayer presence.
 - OSRM provides nearest-road snapping and driving routes.
-- PostgreSQL stores the creature catalog, game sessions, and caught-creature
-  snapshots. Flyway creates and seeds the schema.
+- PostgreSQL stores users, the creature catalog, game sessions, and
+  caught-creature snapshots. Flyway creates and seeds the schema.
 
 The browser never calls OSRM or PostgreSQL directly. Spring Boot provides the
-application boundary for routing, validation, persistence, history, and
-leaderboard operations.
+application boundary for auth, routing, validation, persistence, history,
+leaderboard operations, and multiplayer presence.
+
+Authentication flow:
+
+```text
+register/login -> JWT -> Authorization: Bearer token -> /api/auth/me
+```
+
+Authenticated session creation stores `game_sessions.user_id` and uses the
+user's display name. Guest sessions remain supported with `user_id = null`.
+
+Multiplayer presence flow:
+
+```text
+React STOMP client -> /ws -> /app/rooms/{roomId}/presence
+                         -> /topic/rooms/{roomId}/presence
+```
+
+Presence is in memory for local/demo use. It shows room members on the map but
+does not synchronize targets, catches, scoring, or routes.
 
 ## Tech Stack
 
@@ -85,6 +112,7 @@ leaderboard operations.
 
 - React 19 and Vite 8
 - Leaflet and React Leaflet
+- `@stomp/stompjs`
 - JavaScript, CSS, and ESLint
 
 **Backend**
@@ -92,6 +120,7 @@ leaderboard operations.
 - Java 21
 - Spring Boot 4
 - Spring Web MVC, Validation, Data JPA, and Maven
+- Spring Security, JWT, WebSocket/STOMP
 - Flyway
 
 **Infrastructure**
@@ -105,8 +134,9 @@ leaderboard operations.
   OSRM workflows.
 - **Routing engine integration:** nearest-road snapping, route geometry,
   distance, duration, and frontend animation.
-- **REST API design:** layered controllers and services, DTO validation, stable
-  response contracts, and history queries.
+- **REST and realtime API design:** layered controllers and services, DTO
+  validation, stable response contracts, history queries, and STOMP presence
+  messaging.
 - **Persistence and migrations:** JPA transactions, relational game records,
   deterministic Flyway schema creation, and catalog seed data.
 - **Frontend state management:** concurrent local gameplay, backend session
@@ -249,6 +279,10 @@ This starts:
 Open `http://localhost:5173`. Press Ctrl+C in the script terminal to stop the
 managed OSRM and backend processes along with the frontend.
 
+Frontend and backend are enough to test authentication and multiplayer
+presence. OSRM is required for route movement, nearest-road snapping, and target
+chasing.
+
 Check prerequisites and live services with:
 
 ```bash
@@ -320,14 +354,19 @@ bash -n scripts/check-system.sh
 ## Gameplay Flow
 
 1. Choose a round duration and start the game.
-2. The frontend creates and starts a persisted backend session.
-3. Targets spawn, snap to nearby roads, and receive route-based difficulty.
-4. Click a target marker or Targets row to fetch a route and begin chasing.
-5. Catch creatures to receive immediate local score, XP, and visual feedback.
-6. The frontend submits each creature ID to the backend without blocking play.
-7. The backend validates catalog score, stores the catch, and updates the
+2. Optionally register or sign in. Authenticated sessions are linked to the
+   user; guests still play without an account.
+3. The frontend creates and starts a persisted backend session.
+4. Targets spawn, snap to nearby roads, and receive route-based difficulty.
+5. Click a target marker or Targets row to fetch a route and begin chasing.
+6. Catch creatures to receive immediate local score, XP, and visual feedback.
+7. The frontend submits each creature ID to the backend without blocking play.
+8. The backend validates catalog score, stores the catch, and updates the
    persisted session totals.
-8. End the round and open Stats to inspect History and Leaderboard data.
+9. End the round and open Stats to inspect My Stats, History, and Leaderboard
+   data.
+10. Signed-in players can join a multiplayer room such as `delhi` and see other
+    online room members on the map.
 
 ## Project Structure
 
@@ -338,15 +377,17 @@ frontend/
     components/   Map, HUD, targets, feedback, Stats, history, leaderboard
     config/       API, game, map, routing, and progression settings
     data/         Frontend creature presentation and mock player profile
-    hooks/        Movement, spawning, sessions, catches, and progression
+    hooks/        Movement, spawning, sessions, catches, progression, presence
     styles/       Global application styles
     utils/        Rarity and browser sound helpers
 backend/route-catch-api/
   src/main/java/com/routecatch/api/
+    auth/         Registration, login, JWT, current user, security config
     controller/   Health, route, and nearest endpoints
     dto/          Shared routing and error DTOs
     exception/    Global JSON error handling
     game/         Catalog, sessions, catches, history, and leaderboard
+    multiplayer/  WebSocket/STOMP room presence
     service/      OSRM routing integration
   src/main/resources/db/migration/
 docs/
@@ -365,7 +406,7 @@ docker-compose.yml
   [Troubleshooting](docs/TROUBLESHOOTING.md).
 - **Routing returns `502`:** start OSRM and verify the configured dataset covers
   the coordinates being requested.
-- **Frontend cannot reach the API:** confirm `frontend/.env` points to
+- **Frontend cannot reach the API or WebSocket:** confirm `frontend/.env` points to
   `http://localhost:8080` and restart Vite after changing it.
 - **Browser shows method not allowed:** `/api/routes`, `/api/nearest`, and catch
   submission are POST endpoints, not browser-tab GET pages.
@@ -377,16 +418,17 @@ fixes.
 
 ## Current Limitations
 
-- No authentication or user accounts yet.
 - OSRM binary and dataset paths in `scripts/run-osrm.sh` are local-machine
   dependent.
 - The frontend and runtime scripts are currently focused on local demos.
-- No hosted deployment or CI/CD pipeline is configured.
+- No hosted deployment pipeline is configured.
 - Live spawning, movement, and catch detection remain frontend-controlled.
+- Multiplayer currently covers presence only; shared targets, catches, scoring,
+  and route synchronization are future work.
 
 ## Roadmap
 
-- User profiles, JWT authentication, and avatar storage
+- User profile editing and avatar storage
 - Hosted frontend, backend, database, and routing deployment
 - Richer creature catalog, abilities, and collection views
 - Route challenges, objectives, and location-based events

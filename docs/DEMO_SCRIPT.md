@@ -34,7 +34,9 @@ Target length: 5 to 7 minutes.
    ```
 
 4. Open `http://localhost:5173`.
-5. Keep the application, README architecture diagram, and API documentation
+5. For the multiplayer segment, prepare a second browser profile or private
+   window at the same URL.
+6. Keep the application, README architecture diagram, and API documentation
    available in separate tabs.
 
 ## 1. Product Overview
@@ -48,12 +50,14 @@ Show the live map first.
 Point out the compact player HUD, targets area, recent catches, and hidden
 Stats control.
 
-## 2. Start a Persisted Round
+## 2. Sign In and Start a Persisted Round
 
-1. Select a short round duration.
-2. Click **Start Game**.
-3. Show the backend session ID and `RUNNING` status.
-4. Explain that the frontend created and started a PostgreSQL-backed session.
+1. Register or log in as the first user.
+2. Select a short round duration.
+3. Click **Start Game**.
+4. Show the backend session ID and `RUNNING` status.
+5. Explain that the frontend created and started a PostgreSQL-backed session
+   linked to the authenticated user's `user_id`.
 
 ## 3. Demonstrate Routing and Chase
 
@@ -83,18 +87,42 @@ non-blocking, so a temporary sync failure does not freeze or roll back play.
 
 1. End the round.
 2. Show the round summary.
-3. Open **Stats** and select **History**.
-4. Select the completed session and show its persisted catches.
-5. Switch to **Leaderboard** and show completed-session ranking.
-6. Explain stale `RUNNING` session auto-expiry.
+3. Open **Stats** and select **My Stats**.
+4. Show authenticated totals loaded by `user_id`, not player-name matching.
+5. Select **History**, choose the completed session, and show its persisted
+   catches.
+6. Switch to **Leaderboard** and show completed-session ranking.
+7. Explain stale `RUNNING` session auto-expiry.
 
-## 6. Show Engineering Depth
+## 6. Demonstrate Multiplayer Presence
+
+1. In the first browser, join room `delhi` from the Multiplayer panel.
+2. Open the second browser/private window.
+3. Register or log in as a second user.
+4. Join the same room, `delhi`.
+5. Move either player on the map.
+6. Show that each signed-in user sees the other user's marker and display name.
+
+Clarify the current boundary:
+
+```text
+STOMP client -> /ws -> /app/rooms/delhi/presence
+                     -> /topic/rooms/delhi/presence
+```
+
+Presence is in memory for local/demo use. It does not share targets, catches,
+scores, or routes yet.
+
+## 7. Show Engineering Depth
 
 Open the README architecture diagram or `docs/ARCHITECTURE.md`.
 
 Call out:
 
 - Spring Boot route and nearest wrappers isolate OSRM from the browser.
+- JWT auth supports register/login, `/api/auth/me`, authenticated sessions, and
+  current-user stats/history.
+- WebSocket/STOMP presence uses JWT on `CONNECT` and broadcasts room presence.
 - Flyway owns schema creation and creature seed data.
 - Catch insertion and session score updates share a transaction.
 - DTO validation and global exception handling produce stable JSON errors.
@@ -103,7 +131,7 @@ Call out:
 
 Use `docs/API.md` to show one route request and one catch-submission contract.
 
-## 7. Optional Persistence Proof
+## 8. Optional Persistence Proof
 
 Use manual debug mode when a backend-only restart is part of the demo:
 
@@ -121,13 +149,15 @@ Run each command in a separate terminal.
 4. Refresh History and Leaderboard.
 5. Show that PostgreSQL retained the session and catches.
 
-## 8. Close
+## 9. Close
 
 Summarize the current boundary clearly:
 
 - The backend owns catalog scoring, persistence, session state, history, and
-  leaderboard data.
+- leaderboard data.
+- JWT authentication links signed-in sessions and current-user stats/history.
+- WebSocket presence shows online room members on the map.
 - OSRM provides road-aware routing.
 - The frontend owns realtime animation, spawning, and catch detection.
-- Authentication, hosted deployment, richer creatures, route challenges, and
-  analytics are the next planned steps.
+- Hosted deployment, richer creatures, shared multiplayer gameplay, route
+  challenges, and analytics are the next planned steps.
