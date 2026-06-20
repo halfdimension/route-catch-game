@@ -2,87 +2,104 @@ import { useState } from 'react'
 import GameHistoryPanel from './GameHistoryPanel'
 import LeaderboardPanel from './LeaderboardPanel'
 import PlayerStatsPanel from './PlayerStatsPanel'
+import { useAuth } from '../context/authContextCore'
 
 function StatsDrawer({ activeSessionId, playerName, refreshVersion }) {
   const [isOpen, setIsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('leaderboard')
+  const {
+    currentUser,
+    token,
+    isAuthenticated,
+    logout,
+  } = useAuth()
 
   return (
     <section
-      className={`stats-drawer${isOpen ? ' is-open' : ''}`}
+      className="stats-drawer"
       aria-label="Game statistics"
     >
-      {!isOpen ? (
-        <button
-          type="button"
-          className="stats-drawer-trigger"
-          onClick={() => setIsOpen(true)}
-          aria-expanded={false}
-        >
-          <span>Stats</span>
-          <span>Show</span>
-        </button>
-      ) : (
-        <>
-          <div className="stats-drawer-header">
-            <p>Stats</p>
-            <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              aria-expanded={true}
-            >
-              Hide
-            </button>
-          </div>
+      <button
+        type="button"
+        className="stats-drawer-trigger"
+        onClick={() => setIsOpen(true)}
+        aria-expanded={isOpen}
+      >
+        <span>Stats</span>
+      </button>
 
-          <div className="stats-drawer-tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'leaderboard'}
-              className={activeTab === 'leaderboard' ? 'is-active' : undefined}
-              onClick={() => setActiveTab('leaderboard')}
-            >
-              Leaderboard
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'history'}
-              className={activeTab === 'history' ? 'is-active' : undefined}
-              onClick={() => setActiveTab('history')}
-            >
-              History
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'my-stats'}
-              className={activeTab === 'my-stats' ? 'is-active' : undefined}
-              onClick={() => setActiveTab('my-stats')}
-            >
-              My Stats
-            </button>
-          </div>
+      {isOpen && (
+        <div className="stats-overlay" role="presentation">
+          <div className="stats-overlay-panel" role="dialog" aria-modal="true">
+            <div className="stats-drawer-header">
+              <p>Stats</p>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+              >
+                Close
+              </button>
+            </div>
 
-          <div className="stats-drawer-content">
-            <div hidden={activeTab !== 'leaderboard'}>
-              <LeaderboardPanel refreshVersion={refreshVersion} />
+            <div className="stats-drawer-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'leaderboard'}
+                className={
+                  activeTab === 'leaderboard' ? 'is-active' : undefined
+                }
+                onClick={() => setActiveTab('leaderboard')}
+              >
+                Leaderboard
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'history'}
+                className={activeTab === 'history' ? 'is-active' : undefined}
+                onClick={() => setActiveTab('history')}
+              >
+                History
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'my-stats'}
+                className={activeTab === 'my-stats' ? 'is-active' : undefined}
+                onClick={() => setActiveTab('my-stats')}
+              >
+                My Stats
+              </button>
             </div>
-            <div hidden={activeTab !== 'history'}>
-              <GameHistoryPanel
-                activeSessionId={activeSessionId}
-                refreshVersion={refreshVersion}
-              />
-            </div>
-            <div hidden={activeTab !== 'my-stats'}>
-              <PlayerStatsPanel
-                playerName={playerName}
-                refreshVersion={refreshVersion}
-              />
+
+            <div className="stats-drawer-content">
+              <div hidden={activeTab !== 'leaderboard'}>
+                <LeaderboardPanel refreshVersion={refreshVersion} />
+              </div>
+              <div hidden={activeTab !== 'history'}>
+                <GameHistoryPanel
+                  activeSessionId={activeSessionId}
+                  currentUser={currentUser}
+                  isAuthenticated={isAuthenticated}
+                  onAuthExpired={logout}
+                  refreshVersion={refreshVersion}
+                  token={token}
+                />
+              </div>
+              <div hidden={activeTab !== 'my-stats'}>
+                <PlayerStatsPanel
+                  currentUser={currentUser}
+                  isAuthenticated={isAuthenticated}
+                  onAuthExpired={logout}
+                  playerName={playerName}
+                  refreshVersion={refreshVersion}
+                  token={token}
+                />
+              </div>
             </div>
           </div>
-        </>
+        </div>
       )}
     </section>
   )

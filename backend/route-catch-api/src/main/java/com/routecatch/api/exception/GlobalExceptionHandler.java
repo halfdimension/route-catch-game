@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import com.routecatch.api.auth.exception.InvalidCredentialsException;
+import com.routecatch.api.auth.exception.UserAlreadyExistsException;
 import com.routecatch.api.dto.ApiErrorResponse;
 import com.routecatch.api.game.exception.CreatureNotFoundException;
 import com.routecatch.api.game.exception.GameSessionNotFoundException;
@@ -84,6 +86,32 @@ public class GlobalExceptionHandler {
 		return errorResponse(
 			HttpStatus.BAD_REQUEST,
 			"VALIDATION_ERROR",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(UserAlreadyExistsException.class)
+	public ResponseEntity<ApiErrorResponse> handleUserAlreadyExists(
+		UserAlreadyExistsException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.CONFLICT,
+			"USER_ALREADY_EXISTS",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(InvalidCredentialsException.class)
+	public ResponseEntity<ApiErrorResponse> handleInvalidCredentials(
+		InvalidCredentialsException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.UNAUTHORIZED,
+			"INVALID_CREDENTIALS",
 			exception.getMessage(),
 			request
 		);

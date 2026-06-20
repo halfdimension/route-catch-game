@@ -13,18 +13,32 @@ async function requestGameSession(path, options = {}) {
       // Keep the safe fallback when the response does not contain JSON.
     }
 
-    throw new Error(message)
+    const requestError = new Error(message)
+    requestError.status = response.status
+    throw requestError
   }
 
   return response.json()
 }
 
-export function createGameSession(durationSeconds, playerName) {
+function getAuthHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+  }
+}
+
+export function createGameSession(durationSeconds, playerName, token) {
+  const headers = {
+    'Content-Type': 'application/json',
+  }
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
   return requestGameSession('/api/game/sessions', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({ durationSeconds, playerName }),
   })
 }
@@ -40,6 +54,28 @@ export function listGameSessions(limit = 20) {
 
 export function listSessionCatches(sessionId) {
   return requestGameSession(`/api/game/sessions/${sessionId}/catches`)
+}
+
+export function getMyStats(token) {
+  return requestGameSession('/api/game/me/stats', {
+    headers: getAuthHeaders(token),
+  })
+}
+
+export function getMySessions(token, limit = 20) {
+  const query = new URLSearchParams({ limit: String(limit) })
+  return requestGameSession(`/api/game/me/sessions?${query}`, {
+    headers: getAuthHeaders(token),
+  })
+}
+
+export function getMySessionCatches(token, sessionId) {
+  return requestGameSession(
+    `/api/game/me/sessions/${sessionId}/catches`,
+    {
+      headers: getAuthHeaders(token),
+    },
+  )
 }
 
 export function getLeaderboard(limit = 10) {

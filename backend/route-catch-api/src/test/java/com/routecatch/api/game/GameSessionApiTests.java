@@ -1,6 +1,7 @@
 package com.routecatch.api.game;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -18,6 +19,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.routecatch.api.auth.persistence.UserEntity;
+import com.routecatch.api.auth.persistence.UserRepository;
 import com.routecatch.api.game.dto.SubmitCatchRequest;
 import com.routecatch.api.game.model.GameSession;
 import com.routecatch.api.game.model.GameSessionStatus;
@@ -42,15 +45,19 @@ class GameSessionApiTests {
 	@Autowired
 	private CaughtCreatureRepository caughtCreatureRepository;
 
+	@Autowired
+	private UserRepository userRepository;
+
 	@BeforeEach
 	void clearSessionHistory() {
 		caughtCreatureRepository.deleteAll();
 		gameSessionRepository.deleteAll();
+		userRepository.deleteAll();
 	}
 
 	@Test
 	void createSessionReturnsCreatedStatus() throws Exception {
-		mockMvc.perform(post("/api/game/sessions")
+		String response = mockMvc.perform(post("/api/game/sessions")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
 					{"durationSeconds": 60}
@@ -61,7 +68,18 @@ class GameSessionApiTests {
 			.andExpect(jsonPath("$.durationSeconds").value(60))
 			.andExpect(jsonPath("$.score").value(0))
 			.andExpect(jsonPath("$.caughtCount").value(0))
-			.andExpect(jsonPath("$.playerName").value("Guest"));
+			.andExpect(jsonPath("$.playerName").value("Guest"))
+			.andExpect(jsonPath("$.userId").doesNotExist())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+
+		String sessionId = com.jayway.jsonpath.JsonPath.read(response, "$.sessionId");
+		GameSessionEntity persistedSession = gameSessionRepository
+			.findById(UUID.fromString(sessionId))
+			.orElseThrow();
+
+		assertNull(persistedSession.getUserId());
 	}
 
 	@Test
@@ -76,6 +94,41 @@ class GameSessionApiTests {
 					"""))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.playerName").value("Harsh"));
+	}
+
+	@Test
+	void createSessionWithValidTokenLinksAuthenticatedUser() throws Exception {
+		String token = registerUserAndReturnToken(
+			"route_user",
+			"route@example.com",
+			"Route Runner"
+		);
+		UserEntity user = userRepository.findByUsername("route_user").orElseThrow();
+
+		String response = mockMvc.perform(post("/api/game/sessions")
+				.header("Authorization", "Bearer " + token)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 60,
+						"playerName": "Fake Name"
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("CREATED"))
+			.andExpect(jsonPath("$.playerName").value("Route Runner"))
+			.andExpect(jsonPath("$.userId").value(user.getUserId().toString()))
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+
+		String sessionId = com.jayway.jsonpath.JsonPath.read(response, "$.sessionId");
+		GameSessionEntity persistedSession = gameSessionRepository
+			.findById(UUID.fromString(sessionId))
+			.orElseThrow();
+
+		assertEquals(user.getUserId(), persistedSession.getUserId());
+		assertEquals("Route Runner", persistedSession.getPlayerName());
 	}
 
 	@Test
@@ -363,7 +416,30 @@ class GameSessionApiTests {
 		assertTrue(
 			caughtCreatureRepository
 				.findBySessionIdOrderByCaughtAtAsc(session.sessionId())
-				.isEmpty()
+			.isEmpty()
 		);
+	}
+
+	private String registerUserAndReturnToken(
+		String username,
+		String email,
+		String displayName
+	) throws Exception {
+		String response = mockMvc.perform(post("/api/auth/register")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"username": "%s",
+						"email": "%s",
+						"displayName": "%s",
+						"password": "password123"
+					}
+					""".formatted(username, email, displayName)))
+			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+
+		return com.jayway.jsonpath.JsonPath.read(response, "$.token");
 	}
 }
