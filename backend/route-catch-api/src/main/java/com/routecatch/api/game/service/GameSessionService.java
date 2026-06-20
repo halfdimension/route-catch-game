@@ -62,6 +62,22 @@ public class GameSessionService {
 	}
 
 	@Transactional
+	public GameSession createSessionForUser(
+		int durationSeconds,
+		UUID userId,
+		String displayName
+	) {
+		GameSessionEntity session = new GameSessionEntity(
+			UUID.randomUUID(),
+			durationSeconds,
+			PlayerNames.normalize(displayName)
+		);
+		session.assignUser(userId);
+
+		return toModel(gameSessionRepository.save(session));
+	}
+
+	@Transactional
 	public GameSession getSession(UUID sessionId) {
 		return toModel(findSessionWithExpiry(sessionId, Instant.now()));
 	}
@@ -286,7 +302,8 @@ public class GameSessionService {
 			entity.getDurationSeconds(),
 			entity.getScore(),
 			entity.getCaughtCount(),
-			entity.getPlayerName()
+			entity.getPlayerName(),
+			entity.getUserId()
 		);
 	}
 

@@ -14,7 +14,8 @@ public record GameSessionResponse(
 	int durationSeconds,
 	int score,
 	int caughtCount,
-	String playerName
+	String playerName,
+	String userId
 ) {
 
 	public static GameSessionResponse from(GameSession session) {
@@ -27,7 +28,8 @@ public record GameSessionResponse(
 			session.durationSeconds(),
 			session.score(),
 			session.caughtCount(),
-			session.playerName()
+			session.playerName(),
+			session.userId() == null ? null : session.userId().toString()
 		);
 	}
 }

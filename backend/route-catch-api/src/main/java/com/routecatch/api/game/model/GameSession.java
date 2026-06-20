@@ -12,6 +12,7 @@ public record GameSession(
 	int durationSeconds,
 	int score,
 	int caughtCount,
-	String playerName
+	String playerName,
+	UUID userId
 ) {
 }

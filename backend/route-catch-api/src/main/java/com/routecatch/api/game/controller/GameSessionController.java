@@ -3,6 +3,7 @@ package com.routecatch.api.game.controller;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.game.dto.CaughtCreatureResponse;
 import com.routecatch.api.game.dto.CreateGameSessionRequest;
 import com.routecatch.api.game.dto.GameSessionResponse;
@@ -32,8 +34,21 @@ public class GameSessionController {
 
 	@PostMapping
 	public GameSessionResponse createSession(
-		@Valid @RequestBody CreateGameSessionRequest request
+		@Valid @RequestBody CreateGameSessionRequest request,
+		Authentication authentication
 	) {
+		UserEntity authenticatedUser = authenticatedUser(authentication);
+
+		if (authenticatedUser != null) {
+			return GameSessionResponse.from(
+				gameSessionService.createSessionForUser(
+					request.durationSeconds(),
+					authenticatedUser.getUserId(),
+					authenticatedUser.getDisplayName()
+				)
+			);
+		}
+
 		return GameSessionResponse.from(
 			gameSessionService.createSession(
 				request.durationSeconds(),
@@ -80,5 +95,17 @@ public class GameSessionController {
 		@Valid @RequestBody SubmitCatchRequest request
 	) {
 		return gameSessionService.submitCatch(sessionId, request);
+	}
+
+	private UserEntity authenticatedUser(Authentication authentication) {
+		if (authentication == null) {
+			return null;
+		}
+
+		if (authentication.getPrincipal() instanceof UserEntity user) {
+			return user;
+		}
+
+		return null;
 	}
 }
