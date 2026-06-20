@@ -48,6 +48,7 @@ public class SecurityConfig {
 				.requestMatchers("/api/auth/login").permitAll()
 				.requestMatchers(HttpMethod.GET, "/api/auth/me").authenticated()
 				.requestMatchers(HttpMethod.GET, "/api/game/creatures").permitAll()
+				.requestMatchers("/api/game/me/**").authenticated()
 				.requestMatchers("/api/game/sessions/**").permitAll()
 				.requestMatchers("/api/game/leaderboard").permitAll()
 				.requestMatchers("/api/game/players/*/stats").permitAll()

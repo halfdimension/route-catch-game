@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
-import { getPlayerStats } from '../api/gameSessionClient'
+import {
+  getMyStats,
+  getPlayerStats,
+} from '../api/gameSessionClient'
 
 function formatStatsTime(timestamp) {
   if (!timestamp) {
@@ -30,11 +33,20 @@ function formatAverageScore(value) {
   return Number.isInteger(score) ? String(score) : score.toFixed(1)
 }
 
-function PlayerStatsPanel({ playerName, refreshVersion }) {
+function PlayerStatsPanel({
+  currentUser,
+  isAuthenticated,
+  onAuthExpired,
+  playerName,
+  refreshVersion,
+  token,
+}) {
   const [localRefreshVersion, setLocalRefreshVersion] = useState(0)
   const normalizedPlayerName = playerName?.trim() || 'Guest'
+  const authStatsName = currentUser?.displayName?.trim() || normalizedPlayerName
+  const statsMode = isAuthenticated && token ? 'auth' : 'guest'
   const requestKey =
-    `${refreshVersion}:${localRefreshVersion}:${normalizedPlayerName}`
+    `${refreshVersion}:${localRefreshVersion}:${statsMode}:${currentUser?.userId ?? normalizedPlayerName}`
   const [result, setResult] = useState({
     key: null,
     stats: null,
@@ -47,8 +59,12 @@ function PlayerStatsPanel({ playerName, refreshVersion }) {
 
   useEffect(() => {
     let isCurrentRequest = true
+    const statsRequest =
+      statsMode === 'auth'
+        ? getMyStats(token)
+        : getPlayerStats(normalizedPlayerName)
 
-    getPlayerStats(normalizedPlayerName)
+    statsRequest
       .then((playerStats) => {
         if (isCurrentRequest) {
           setResult({
@@ -60,12 +76,18 @@ function PlayerStatsPanel({ playerName, refreshVersion }) {
           })
         }
       })
-      .catch(() => {
+      .catch((errorResponse) => {
+        if (errorResponse?.status === 401) {
+          onAuthExpired?.()
+        }
+
         if (isCurrentRequest) {
           setResult((currentResult) => ({
             key: requestKey,
             stats: currentResult.stats,
-            error: 'Player stats are unavailable.',
+            error: statsMode === 'auth'
+              ? 'Authenticated stats are unavailable.'
+              : 'Player stats are unavailable.',
           }))
         }
       })
@@ -73,14 +95,24 @@ function PlayerStatsPanel({ playerName, refreshVersion }) {
     return () => {
       isCurrentRequest = false
     }
-  }, [normalizedPlayerName, requestKey])
+  }, [
+    normalizedPlayerName,
+    onAuthExpired,
+    requestKey,
+    statsMode,
+    token,
+  ])
 
   return (
     <section className="player-stats-panel" aria-label="My stats">
       <div className="player-stats-header">
         <div>
           <p>My Stats</p>
-          <span>{stats?.playerName || normalizedPlayerName}</span>
+          <span>
+            {statsMode === 'auth'
+              ? `Authenticated stats · ${stats?.playerName || authStatsName}`
+              : `Guest/name-based stats · ${stats?.playerName || normalizedPlayerName}`}
+          </span>
         </div>
         <button
           type="button"

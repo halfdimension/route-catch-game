@@ -9,6 +9,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.game.creature.CreatureCatalogService;
 import com.routecatch.api.game.creature.CreatureDefinition;
 import com.routecatch.api.game.dto.CaughtCreatureResponse;
@@ -93,16 +94,7 @@ public class GameSessionService {
 		return gameSessionRepository
 			.findAllByOrderByCreatedAtDesc(PageRequest.of(0, limit))
 			.stream()
-			.map((session) -> {
-				if (session.getStatus() != GameSessionStatus.RUNNING) {
-					return session;
-				}
-
-				GameSessionEntity lockedSession =
-					findSessionForUpdate(session.getSessionId());
-				lockedSession.expireIfStale(currentTime);
-				return lockedSession;
-			})
+			.map((session) -> expireSessionIfRunning(session, currentTime))
 			.map(this::toModel)
 			.toList();
 	}
@@ -149,44 +141,50 @@ public class GameSessionService {
 
 		List<GameSessionEntity> sessions =
 			gameSessionRepository.findByPlayerName(normalizedPlayerName);
-		List<GameSessionEntity> completedSessions = sessions.stream()
-			.filter((session) -> session.getStatus() == GameSessionStatus.ENDED)
-			.toList();
+		return buildPlayerStats(normalizedPlayerName, sessions);
+	}
 
-		int totalScore = completedSessions.stream()
-			.mapToInt(GameSessionEntity::getScore)
-			.sum();
-		int totalCatches = completedSessions.stream()
-			.mapToInt(GameSessionEntity::getCaughtCount)
-			.sum();
-		int bestScore = completedSessions.stream()
-			.mapToInt(GameSessionEntity::getScore)
-			.max()
-			.orElse(0);
-		int bestCaughtCount = completedSessions.stream()
-			.mapToInt(GameSessionEntity::getCaughtCount)
-			.max()
-			.orElse(0);
-		double averageScore = completedSessions.stream()
-			.mapToInt(GameSessionEntity::getScore)
-			.average()
-			.orElse(0);
-		Instant latestSessionAt = sessions.stream()
-			.map(GameSessionEntity::getCreatedAt)
-			.max(Comparator.naturalOrder())
-			.orElse(null);
+	@Transactional
+	public PlayerStatsResponse getCurrentUserStats(UserEntity user) {
+		expireStaleRunningSessions(Instant.now());
+		gameSessionRepository.flush();
 
-		return new PlayerStatsResponse(
-			normalizedPlayerName,
-			sessions.size(),
-			completedSessions.size(),
-			totalScore,
-			totalCatches,
-			bestScore,
-			bestCaughtCount,
-			averageScore,
-			latestSessionAt
+		return buildPlayerStats(
+			user.getDisplayName(),
+			gameSessionRepository.findByUserId(user.getUserId())
 		);
+	}
+
+	@Transactional
+	public List<GameSession> listCurrentUserSessions(UserEntity user, int limit) {
+		validateLimit(limit);
+		Instant currentTime = Instant.now();
+
+		return gameSessionRepository
+			.findByUserIdOrderByCreatedAtDesc(
+				user.getUserId(),
+				PageRequest.of(0, limit)
+			)
+			.stream()
+			.map((session) -> expireSessionIfRunning(session, currentTime))
+			.map(this::toModel)
+			.toList();
+	}
+
+	@Transactional(readOnly = true)
+	public List<CaughtCreatureResponse> listCatchesForCurrentUserSession(
+		UserEntity user,
+		UUID sessionId
+	) {
+		gameSessionRepository
+			.findBySessionIdAndUserId(sessionId, user.getUserId())
+			.orElseThrow(() -> new GameSessionNotFoundException(sessionId));
+
+		return caughtCreatureRepository
+			.findBySessionIdOrderByCaughtAtAsc(sessionId)
+			.stream()
+			.map(CaughtCreatureResponse::from)
+			.toList();
 	}
 
 	@Transactional(noRollbackFor = InvalidGameSessionStateException.class)
@@ -290,6 +288,63 @@ public class GameSessionService {
 		if (limit < 1 || limit > 100) {
 			throw new InvalidSessionHistoryLimitException();
 		}
+	}
+
+	private GameSessionEntity expireSessionIfRunning(
+		GameSessionEntity session,
+		Instant currentTime
+	) {
+		if (session.getStatus() != GameSessionStatus.RUNNING) {
+			return session;
+		}
+
+		GameSessionEntity lockedSession = findSessionForUpdate(session.getSessionId());
+		lockedSession.expireIfStale(currentTime);
+		return lockedSession;
+	}
+
+	private PlayerStatsResponse buildPlayerStats(
+		String playerName,
+		List<GameSessionEntity> sessions
+	) {
+		List<GameSessionEntity> completedSessions = sessions.stream()
+			.filter((session) -> session.getStatus() == GameSessionStatus.ENDED)
+			.toList();
+
+		int totalScore = completedSessions.stream()
+			.mapToInt(GameSessionEntity::getScore)
+			.sum();
+		int totalCatches = completedSessions.stream()
+			.mapToInt(GameSessionEntity::getCaughtCount)
+			.sum();
+		int bestScore = completedSessions.stream()
+			.mapToInt(GameSessionEntity::getScore)
+			.max()
+			.orElse(0);
+		int bestCaughtCount = completedSessions.stream()
+			.mapToInt(GameSessionEntity::getCaughtCount)
+			.max()
+			.orElse(0);
+		double averageScore = completedSessions.stream()
+			.mapToInt(GameSessionEntity::getScore)
+			.average()
+			.orElse(0);
+		Instant latestSessionAt = sessions.stream()
+			.map(GameSessionEntity::getCreatedAt)
+			.max(Comparator.naturalOrder())
+			.orElse(null);
+
+		return new PlayerStatsResponse(
+			playerName,
+			sessions.size(),
+			completedSessions.size(),
+			totalScore,
+			totalCatches,
+			bestScore,
+			bestCaughtCount,
+			averageScore,
+			latestSessionAt
+		);
 	}
 
 	private GameSession toModel(GameSessionEntity entity) {

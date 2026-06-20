@@ -10,6 +10,10 @@ import com.routecatch.api.auth.persistence.UserEntity;
 public class CurrentUserService {
 
 	public UserResponse getCurrentUser(Authentication authentication) {
-		return UserResponse.from((UserEntity) authentication.getPrincipal());
+		return UserResponse.from(getCurrentUserEntity(authentication));
+	}
+
+	public UserEntity getCurrentUserEntity(Authentication authentication) {
+		return (UserEntity) authentication.getPrincipal();
 	}
 }

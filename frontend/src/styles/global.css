@@ -157,18 +157,11 @@ button:focus-visible {
   box-shadow: 0 10px 24px rgba(23, 32, 51, 0.14);
 }
 
-.player-hud-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 8px;
-  margin-bottom: 9px;
-}
-
 .player-hud-profile {
   display: flex;
   align-items: center;
   gap: 9px;
+  margin-bottom: 9px;
   min-width: 0;
 }
 
@@ -249,12 +242,17 @@ button:focus-visible {
   font-size: 12px;
 }
 
-.game-session-panel {
+.gameplay-setup-stack {
   position: absolute;
   top: 166px;
   left: 16px;
   z-index: 1000;
+  display: grid;
+  gap: 8px;
   width: min(220px, calc(100vw - 32px));
+}
+
+.game-session-panel {
   padding: 9px;
   border: 1px solid rgba(23, 32, 51, 0.15);
   border-radius: 8px;
@@ -272,6 +270,10 @@ button:focus-visible {
   grid-template-columns: minmax(0, 1fr) 72px;
   gap: 6px;
   margin-bottom: 7px;
+}
+
+.game-session-setup-fields.is-authenticated {
+  grid-template-columns: 1fr;
 }
 
 .round-duration-control,
@@ -344,17 +346,33 @@ button:focus-visible {
 }
 
 .auth-panel {
-  position: relative;
-  z-index: 1300;
-  width: auto;
+  position: absolute;
+  top: 16px;
+  left: 244px;
+  z-index: 1000;
 }
 
-.auth-sign-in-button {
+.auth-sign-in-button,
+.auth-account-button {
   width: auto;
   min-height: 28px;
   padding: 5px 9px;
+  border-color: rgba(23, 32, 51, 0.15);
   border-radius: 999px;
+  color: #172033;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.14);
   white-space: nowrap;
+}
+
+.auth-account-button {
+  max-width: 128px;
+}
+
+.auth-account-button span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .auth-overlay {
@@ -378,6 +396,67 @@ button:focus-visible {
   box-shadow: 0 18px 42px rgba(23, 32, 51, 0.25);
 }
 
+.account-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: grid;
+  place-items: start center;
+  padding: 56px 16px 16px;
+  background: rgba(23, 32, 51, 0.16);
+}
+
+.account-dialog {
+  width: min(280px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid rgba(23, 32, 51, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 42px rgba(23, 32, 51, 0.25);
+}
+
+.account-dialog-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.account-dialog-header div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.account-dialog-header strong,
+.account-dialog-header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-dialog-header strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.account-dialog-header span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.account-dialog-header button {
+  padding: 4px 7px;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.account-logout-button {
+  width: 100%;
+  margin-top: 10px;
+}
+
 .auth-panel-header {
   display: flex;
   align-items: center;
@@ -394,8 +473,7 @@ button:focus-visible {
 }
 
 .auth-panel-header button,
-.auth-panel > button,
-.auth-compact-user button {
+.auth-panel > button {
   padding: 4px 7px;
   color: #2563eb;
   font-size: 11px;
@@ -408,47 +486,8 @@ button:focus-visible {
   gap: 5px;
 }
 
-.auth-compact-user {
-  display: grid;
-  grid-template-columns: minmax(0, 72px) auto;
-  align-items: center;
-  gap: 5px;
-  min-height: 28px;
-  padding: 3px;
-  border: 1px solid rgba(23, 32, 51, 0.12);
-  border-radius: 999px;
-  background: rgba(248, 250, 252, 0.94);
-}
-
-.auth-compact-user div {
-  display: grid;
-  min-width: 0;
-}
-
-.auth-compact-user strong,
-.auth-compact-user span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.auth-compact-user strong {
+.auth-account-button {
   color: #172033;
-  font-size: 11px;
-  line-height: 1.1;
-}
-
-.auth-compact-user span {
-  color: #64748b;
-  font-size: 9px;
-  line-height: 1.1;
-}
-
-.auth-compact-user button {
-  min-height: 22px;
-  padding: 3px 6px;
-  border-radius: 999px;
-  background: #ffffff;
 }
 
 .auth-form {
@@ -665,50 +704,67 @@ button:focus-visible {
 }
 
 .game-controls-panel {
-  position: absolute;
-  top: 270px;
-  left: 16px;
-  z-index: 1000;
-  width: min(220px, calc(100vw - 32px));
-  padding: 8px;
+  width: 100%;
   border: 1px solid rgba(23, 32, 51, 0.15);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
 }
 
-.game-controls-panel.is-collapsed {
-  padding: 7px 8px;
-}
-
 .game-controls-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
   width: 100%;
-  padding: 0;
+  padding: 7px 9px;
   border: 0;
   color: #172033;
   background: transparent;
   font-size: 13px;
   font-weight: 800;
+  text-align: center;
 }
 
 .game-controls-toggle:hover {
   background: transparent;
 }
 
-.game-controls-toggle span:last-child {
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 700;
+.controls-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1250;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(23, 32, 51, 0.2);
 }
 
-.game-controls-panel p {
-  margin: 0 0 7px;
+.controls-dialog {
+  width: min(320px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(23, 32, 51, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 42px rgba(23, 32, 51, 0.25);
+}
+
+.controls-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.controls-dialog-header p {
+  margin: 0;
   color: #172033;
   font-size: 14px;
+  font-weight: 800;
+}
+
+.controls-dialog-header button {
+  padding: 4px 7px;
+  color: #2563eb;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -1626,12 +1682,10 @@ button:focus-visible {
 }
 
 @media (max-width: 820px) {
-  .auth-compact-user {
-    grid-template-columns: auto;
-  }
-
-  .auth-compact-user div {
-    display: none;
+  .auth-panel {
+    top: auto;
+    left: 16px;
+    bottom: 116px;
   }
 
   .stats-drawer {

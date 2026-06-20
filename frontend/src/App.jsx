@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import AuthPanel from './components/AuthPanel'
 import CatchToast from './components/CatchToast'
 import CaughtInventoryPanel from './components/CaughtInventoryPanel'
 import GameControlsPanel from './components/GameControlsPanel'
@@ -387,36 +388,38 @@ function App() {
         playerName={effectivePlayerName}
       />
       <CatchToast caughtTarget={catchToastTarget} />
-      <GameSessionPanel
-        gameState={gameState}
-        selectedRoundSeconds={selectedRoundSeconds}
-        roundDurationOptions={roundDurationOptions}
-        onRoundDurationChange={setSelectedRoundSeconds}
-        playerName={playerName}
-        onPlayerNameChange={setPlayerName}
-        onStartGame={handleStartGame}
-        onEndGame={handleEndGame}
-        backendSession={backendSession}
-        backendScore={backendScore}
-        backendCaughtCount={backendCaughtCount}
-        sessionNotice={sessionNotice}
-        catchSubmissionWarning={catchSubmissionWarning}
-        isSessionPending={isSessionPending}
-        isAuthenticated={isAuthenticated}
-        authenticatedDisplayName={currentUser?.displayName}
-      />
-      <GameControlsPanel
-        gameState={gameState}
-        isSpawningPaused={isSpawningPaused}
-        simulationSpeed={simulationSpeed}
-        onToggleSpawning={toggleSpawning}
-        onClearTargets={clearTargets}
-        onResetScore={resetScore}
-        onResetPlayer={resetPlayer}
-        onResetGame={resetGame}
-        onSimulationSpeedChange={setSimulationSpeed}
-        maxSimulationSpeed={MAX_SIMULATION_SPEED + speedBonus}
-      />
+      <AuthPanel />
+      <div className="gameplay-setup-stack">
+        <GameSessionPanel
+          gameState={gameState}
+          selectedRoundSeconds={selectedRoundSeconds}
+          roundDurationOptions={roundDurationOptions}
+          onRoundDurationChange={setSelectedRoundSeconds}
+          playerName={playerName}
+          onPlayerNameChange={setPlayerName}
+          onStartGame={handleStartGame}
+          onEndGame={handleEndGame}
+          backendSession={backendSession}
+          backendScore={backendScore}
+          backendCaughtCount={backendCaughtCount}
+          sessionNotice={sessionNotice}
+          catchSubmissionWarning={catchSubmissionWarning}
+          isSessionPending={isSessionPending}
+          isAuthenticated={isAuthenticated}
+          authenticatedDisplayName={currentUser?.displayName}
+        />
+        <GameControlsPanel
+          isSpawningPaused={isSpawningPaused}
+          simulationSpeed={simulationSpeed}
+          onToggleSpawning={toggleSpawning}
+          onClearTargets={clearTargets}
+          onResetScore={resetScore}
+          onResetPlayer={resetPlayer}
+          onResetGame={resetGame}
+          onSimulationSpeedChange={setSimulationSpeed}
+          maxSimulationSpeed={MAX_SIMULATION_SPEED + speedBonus}
+        />
+      </div>
       <TargetInfoPanel
         targets={targets}
         onTargetClick={handleTargetClick}

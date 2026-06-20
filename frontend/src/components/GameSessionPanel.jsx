@@ -29,17 +29,23 @@ function GameSessionPanel({
   return (
     <section className="game-session-panel" aria-label="Game session">
       {canChooseDuration && (
-        <div className="game-session-setup-fields">
-          <label className="player-name-control">
-            <span>Guest player name</span>
-            <input
-              type="text"
-              value={playerName}
-              onChange={handlePlayerNameChange}
-              maxLength={80}
-              disabled={isSessionPending || isAuthenticated}
-            />
-          </label>
+        <div
+          className={`game-session-setup-fields${
+            isAuthenticated ? ' is-authenticated' : ''
+          }`}
+        >
+          {!isAuthenticated && (
+            <label className="player-name-control">
+              <span>Guest player name</span>
+              <input
+                type="text"
+                value={playerName}
+                onChange={handlePlayerNameChange}
+                maxLength={80}
+                disabled={isSessionPending}
+              />
+            </label>
+          )}
           <label className="round-duration-control">
             <span>Duration</span>
             <select
@@ -59,7 +65,7 @@ function GameSessionPanel({
 
       {isAuthenticated && (
         <p className="authenticated-session-note">
-          Sessions use {authenticatedDisplayName}.
+          Signed in as {authenticatedDisplayName}.
         </p>
       )}
 

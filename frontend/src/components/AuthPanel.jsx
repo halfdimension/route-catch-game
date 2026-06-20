@@ -23,6 +23,7 @@ function AuthPanel() {
     logout,
   } = useAuth()
   const [isAuthOverlayOpen, setIsAuthOverlayOpen] = useState(false)
+  const [isAccountOverlayOpen, setIsAccountOverlayOpen] = useState(false)
   const [mode, setMode] = useState('login')
   const [loginForm, setLoginForm] = useState(EMPTY_LOGIN_FORM)
   const [registerForm, setRegisterForm] = useState(EMPTY_REGISTER_FORM)
@@ -58,6 +59,19 @@ function AuthPanel() {
   function closeAuthOverlay() {
     setIsAuthOverlayOpen(false)
     setErrorMessage('')
+  }
+
+  function openAccountOverlay() {
+    setIsAccountOverlayOpen(true)
+  }
+
+  function closeAccountOverlay() {
+    setIsAccountOverlayOpen(false)
+  }
+
+  function handleLogout() {
+    logout()
+    closeAccountOverlay()
   }
 
   async function handleLoginSubmit(event) {
@@ -111,15 +125,37 @@ function AuthPanel() {
   if (isAuthenticated) {
     return (
       <section className="auth-panel" aria-label="Account">
-        <div className="auth-compact-user">
-          <div>
-            <strong>{currentUser.displayName}</strong>
-            <span>@{currentUser.username}</span>
+        <button
+          type="button"
+          className="auth-account-button"
+          onClick={openAccountOverlay}
+          aria-expanded={isAccountOverlayOpen}
+        >
+          <span>{currentUser.displayName}</span>
+        </button>
+
+        {isAccountOverlayOpen && (
+          <div className="account-overlay" role="presentation">
+            <div className="account-dialog" role="dialog" aria-modal="true">
+              <div className="account-dialog-header">
+                <div>
+                  <strong>{currentUser.displayName}</strong>
+                  <span>@{currentUser.username}</span>
+                </div>
+                <button type="button" onClick={closeAccountOverlay}>
+                  Close
+                </button>
+              </div>
+              <button
+                type="button"
+                className="account-logout-button"
+                onClick={handleLogout}
+              >
+                Logout
+              </button>
+            </div>
           </div>
-          <button type="button" onClick={logout}>
-            Logout
-          </button>
-        </div>
+        )}
       </section>
     )
   }

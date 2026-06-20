@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { MAX_SIMULATION_SPEED } from '../config/gameConfig'
 
 function GameControlsPanel({
-  gameState,
   isSpawningPaused,
   simulationSpeed,
   onToggleSpawning,
@@ -13,7 +12,7 @@ function GameControlsPanel({
   onSimulationSpeedChange,
   maxSimulationSpeed = MAX_SIMULATION_SPEED,
 }) {
-  const [isCollapsed, setIsCollapsed] = useState(gameState === 'ready')
+  const [isOpen, setIsOpen] = useState(false)
 
   function handleSpeedChange(event) {
     const nextSpeed = Number(event.target.value)
@@ -24,66 +23,73 @@ function GameControlsPanel({
 
   return (
     <section
-      className={`game-controls-panel${isCollapsed ? ' is-collapsed' : ''}`}
+      className="game-controls-panel"
       aria-label="Game controls"
     >
       <button
         type="button"
         className="game-controls-toggle"
-        onClick={() => setIsCollapsed((currentValue) => !currentValue)}
-        aria-expanded={!isCollapsed}
+        onClick={() => setIsOpen(true)}
+        aria-expanded={isOpen}
       >
         <span>Controls</span>
-        <span>{isCollapsed ? 'Show' : 'Hide'}</span>
       </button>
 
-      {!isCollapsed && (
-        <>
-
-          <label className="speed-control">
-            <span>Speed: {simulationSpeed} m/s</span>
-            <div className="speed-control-inputs">
-              <input
-                type="range"
-                min="10"
-                max={maxSimulationSpeed}
-                step="10"
-                value={simulationSpeed}
-                onChange={handleSpeedChange}
-              />
-              <input
-                type="number"
-                min="10"
-                max={maxSimulationSpeed}
-                step="10"
-                value={simulationSpeed}
-                onChange={handleSpeedChange}
-              />
+      {isOpen && (
+        <div className="controls-overlay" role="presentation">
+          <div className="controls-dialog" role="dialog" aria-modal="true">
+            <div className="controls-dialog-header">
+              <p>Controls</p>
+              <button type="button" onClick={() => setIsOpen(false)}>
+                Close
+              </button>
             </div>
-          </label>
 
-          <div className="game-control-actions">
-            <button type="button" onClick={onToggleSpawning}>
-              {isSpawningPaused ? 'Resume spawning' : 'Pause spawning'}
-            </button>
-            <button type="button" onClick={onClearTargets}>
-              Clear targets
-            </button>
-            <button type="button" onClick={onResetScore}>
-              Reset score
-            </button>
-            <button type="button" onClick={onResetPlayer}>
-              Reset player
-            </button>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={onResetGame}
-            >
-              Reset game
-            </button>
+            <label className="speed-control">
+              <span>Speed: {simulationSpeed} m/s</span>
+              <div className="speed-control-inputs">
+                <input
+                  type="range"
+                  min="10"
+                  max={maxSimulationSpeed}
+                  step="10"
+                  value={simulationSpeed}
+                  onChange={handleSpeedChange}
+                />
+                <input
+                  type="number"
+                  min="10"
+                  max={maxSimulationSpeed}
+                  step="10"
+                  value={simulationSpeed}
+                  onChange={handleSpeedChange}
+                />
+              </div>
+            </label>
+
+            <div className="game-control-actions">
+              <button type="button" onClick={onToggleSpawning}>
+                {isSpawningPaused ? 'Resume spawning' : 'Pause spawning'}
+              </button>
+              <button type="button" onClick={onClearTargets}>
+                Clear targets
+              </button>
+              <button type="button" onClick={onResetScore}>
+                Reset score
+              </button>
+              <button type="button" onClick={onResetPlayer}>
+                Reset player
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={onResetGame}
+              >
+                Reset game
+              </button>
+            </div>
           </div>
-        </>
+        </div>
       )}
     </section>
   )

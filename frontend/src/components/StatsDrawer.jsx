@@ -2,10 +2,17 @@ import { useState } from 'react'
 import GameHistoryPanel from './GameHistoryPanel'
 import LeaderboardPanel from './LeaderboardPanel'
 import PlayerStatsPanel from './PlayerStatsPanel'
+import { useAuth } from '../context/authContextCore'
 
 function StatsDrawer({ activeSessionId, playerName, refreshVersion }) {
   const [isOpen, setIsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('leaderboard')
+  const {
+    currentUser,
+    token,
+    isAuthenticated,
+    logout,
+  } = useAuth()
 
   return (
     <section
@@ -73,13 +80,21 @@ function StatsDrawer({ activeSessionId, playerName, refreshVersion }) {
               <div hidden={activeTab !== 'history'}>
                 <GameHistoryPanel
                   activeSessionId={activeSessionId}
+                  currentUser={currentUser}
+                  isAuthenticated={isAuthenticated}
+                  onAuthExpired={logout}
                   refreshVersion={refreshVersion}
+                  token={token}
                 />
               </div>
               <div hidden={activeTab !== 'my-stats'}>
                 <PlayerStatsPanel
+                  currentUser={currentUser}
+                  isAuthenticated={isAuthenticated}
+                  onAuthExpired={logout}
                   playerName={playerName}
                   refreshVersion={refreshVersion}
+                  token={token}
                 />
               </div>
             </div>

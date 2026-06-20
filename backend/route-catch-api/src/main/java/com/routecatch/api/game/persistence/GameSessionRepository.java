@@ -23,6 +23,18 @@ public interface GameSessionRepository
 
 	List<GameSessionEntity> findByPlayerName(String playerName);
 
+	List<GameSessionEntity> findByUserId(UUID userId);
+
+	List<GameSessionEntity> findByUserIdOrderByCreatedAtDesc(
+		UUID userId,
+		Pageable pageable
+	);
+
+	Optional<GameSessionEntity> findBySessionIdAndUserId(
+		UUID sessionId,
+		UUID userId
+	);
+
 	List<GameSessionEntity>
 		findAllByStatusOrderByScoreDescCaughtCountDescEndedAtAscCreatedAtDesc(
 			GameSessionStatus status,

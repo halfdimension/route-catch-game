@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
+  getMySessionCatches,
+  getMySessions,
   listGameSessions,
   listSessionCatches,
 } from '../api/gameSessionClient'
@@ -81,13 +83,21 @@ function CatchHistoryItem({ caughtCreature }) {
   )
 }
 
-function GameHistoryPanel({ activeSessionId, refreshVersion }) {
+function GameHistoryPanel({
+  activeSessionId,
+  currentUser,
+  isAuthenticated,
+  onAuthExpired,
+  refreshVersion,
+  token,
+}) {
   const [selectedSessionId, setSelectedSessionId] = useState(null)
   const [localRefreshVersion, setLocalRefreshVersion] = useState(0)
+  const historyMode = isAuthenticated && token ? 'auth' : 'global'
   const sessionRequestKey =
-    `${refreshVersion}:${localRefreshVersion}:${activeSessionId ?? ''}`
+    `${refreshVersion}:${localRefreshVersion}:${historyMode}:${currentUser?.userId ?? ''}:${activeSessionId ?? ''}`
   const catchRequestKey =
-    `${refreshVersion}:${localRefreshVersion}:${selectedSessionId ?? ''}`
+    `${refreshVersion}:${localRefreshVersion}:${historyMode}:${selectedSessionId ?? ''}`
   const [sessionResult, setSessionResult] = useState({
     key: null,
     sessions: [],
@@ -113,8 +123,12 @@ function GameHistoryPanel({ activeSessionId, refreshVersion }) {
 
   useEffect(() => {
     let isCurrentRequest = true
+    const sessionsRequest =
+      historyMode === 'auth'
+        ? getMySessions(token)
+        : listGameSessions()
 
-    listGameSessions()
+    sessionsRequest
       .then((recentSessions) => {
         if (!isCurrentRequest) {
           return
@@ -151,12 +165,18 @@ function GameHistoryPanel({ activeSessionId, refreshVersion }) {
           return safeSessions[0]?.sessionId ?? null
         })
       })
-      .catch(() => {
+      .catch((errorResponse) => {
+        if (errorResponse?.status === 401) {
+          onAuthExpired?.()
+        }
+
         if (isCurrentRequest) {
           setSessionResult((currentResult) => ({
             key: sessionRequestKey,
             sessions: currentResult.sessions,
-            error: 'History is unavailable.',
+            error: historyMode === 'auth'
+              ? 'My history is unavailable.'
+              : 'Global history is unavailable.',
           }))
         }
       })
@@ -164,7 +184,13 @@ function GameHistoryPanel({ activeSessionId, refreshVersion }) {
     return () => {
       isCurrentRequest = false
     }
-  }, [activeSessionId, sessionRequestKey])
+  }, [
+    activeSessionId,
+    historyMode,
+    onAuthExpired,
+    sessionRequestKey,
+    token,
+  ])
 
   useEffect(() => {
     if (!selectedSessionId) {
@@ -172,8 +198,12 @@ function GameHistoryPanel({ activeSessionId, refreshVersion }) {
     }
 
     let isCurrentRequest = true
+    const catchesRequest =
+      historyMode === 'auth'
+        ? getMySessionCatches(token, selectedSessionId)
+        : listSessionCatches(selectedSessionId)
 
-    listSessionCatches(selectedSessionId)
+    catchesRequest
       .then((sessionCatches) => {
         if (isCurrentRequest) {
           setCatchResult({
@@ -183,12 +213,18 @@ function GameHistoryPanel({ activeSessionId, refreshVersion }) {
           })
         }
       })
-      .catch(() => {
+      .catch((errorResponse) => {
+        if (errorResponse?.status === 401) {
+          onAuthExpired?.()
+        }
+
         if (isCurrentRequest) {
           setCatchResult({
             key: catchRequestKey,
             catches: [],
-            error: 'Catch history is unavailable.',
+            error: historyMode === 'auth'
+              ? 'My catch history is unavailable.'
+              : 'Catch history is unavailable.',
           })
         }
       })
@@ -196,14 +232,18 @@ function GameHistoryPanel({ activeSessionId, refreshVersion }) {
     return () => {
       isCurrentRequest = false
     }
-  }, [catchRequestKey, selectedSessionId])
+  }, [catchRequestKey, historyMode, onAuthExpired, selectedSessionId, token])
 
   return (
     <section className="game-history-panel" aria-label="Game history">
       <div className="game-history-header">
         <div>
-          <p>Game History</p>
-          <span>{sessions.length} sessions</span>
+          <p>{historyMode === 'auth' ? 'My History' : 'Global History'}</p>
+          <span>
+            {historyMode === 'auth'
+              ? `${currentUser?.displayName || 'You'} · ${sessions.length} sessions`
+              : `${sessions.length} sessions`}
+          </span>
         </div>
         <div className="game-history-header-actions">
           <button
