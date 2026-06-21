@@ -96,13 +96,13 @@ export function useMultiplayerPresence({
     }
   }, [])
 
-  const connectPresence = useCallback(() => {
+  const connectPresence = useCallback((requestedRoomId) => {
     if (!token || !currentUser) {
       setErrorMessage('Sign in to use multiplayer')
       return
     }
 
-    const nextRoomId = roomId.trim() || DEFAULT_ROOM_ID
+    const nextRoomId = (requestedRoomId || roomId).trim() || DEFAULT_ROOM_ID
     disconnectPresence()
     manualDisconnectRef.current = false
     setRoomId(nextRoomId)

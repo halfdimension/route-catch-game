@@ -377,6 +377,11 @@ button:focus-visible {
   text-transform: capitalize;
 }
 
+.multiplayer-status.is-disconnected {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
 .multiplayer-status.is-connected {
   color: #166534;
   background: #dcfce7;
@@ -390,6 +395,33 @@ button:focus-visible {
 .multiplayer-status.is-error {
   color: #991b1b;
   background: #fee2e2;
+}
+
+.multiplayer-section {
+  display: grid;
+  gap: 5px;
+  padding-top: 6px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.multiplayer-section > p,
+.multiplayer-section-heading p {
+  margin: 0;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.multiplayer-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.multiplayer-section-heading button {
+  padding: 3px 6px;
+  font-size: 10px;
 }
 
 .multiplayer-room-control {
@@ -412,6 +444,154 @@ button:focus-visible {
   background: #ffffff;
   font: inherit;
   font-size: 13px;
+}
+
+.multiplayer-join-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  align-items: end;
+  gap: 6px;
+}
+
+.multiplayer-join-row button,
+.multiplayer-section > button {
+  width: 100%;
+  padding: 6px 8px;
+}
+
+.multiplayer-active-room {
+  display: grid;
+  gap: 7px;
+}
+
+.multiplayer-room-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.multiplayer-room-summary div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.multiplayer-room-summary strong {
+  overflow: hidden;
+  color: #172033;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiplayer-room-summary span:not(.multiplayer-room-status) {
+  width: fit-content;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: #334155;
+  background: #eef2f7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.multiplayer-room-status {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #475569;
+  background: #f1f5f9;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.multiplayer-room-status.is-open {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.multiplayer-room-status.is-in-progress {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.multiplayer-room-status.is-closed {
+  color: #64748b;
+  background: #e2e8f0;
+}
+
+.multiplayer-room-meta {
+  display: flex;
+  gap: 8px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.multiplayer-room-meta strong {
+  color: #172033;
+}
+
+.multiplayer-member-list,
+.multiplayer-my-rooms {
+  display: grid;
+  gap: 4px;
+  max-height: 108px;
+  margin: 0;
+  overflow: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.multiplayer-member-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  background: #f3f6f8;
+  color: #334155;
+  font-size: 11px;
+}
+
+.multiplayer-member-list li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiplayer-member-list li strong {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  font-size: 9px;
+}
+
+.multiplayer-my-rooms button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 6px;
+  font-size: 11px;
+}
+
+.multiplayer-my-rooms span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiplayer-my-rooms strong {
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
 }
 
 .multiplayer-actions {
