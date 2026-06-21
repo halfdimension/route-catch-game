@@ -16,6 +16,7 @@ public class MultiplayerRoom {
 	private String hostDisplayName;
 	private MultiplayerRoomStatus status;
 	private final Instant createdAt;
+	private final RoomGameState gameState;
 	private final LinkedHashMap<UUID, RoomMember> members = new LinkedHashMap<>();
 
 	public MultiplayerRoom(String roomCode, String roomName, UserEntity host) {
@@ -25,6 +26,7 @@ public class MultiplayerRoom {
 		this.hostDisplayName = host.getDisplayName();
 		this.status = MultiplayerRoomStatus.OPEN;
 		this.createdAt = Instant.now();
+		this.gameState = new RoomGameState(roomCode);
 		this.members.put(host.getUserId(), new RoomMember(host, true));
 	}
 
@@ -57,6 +59,10 @@ public class MultiplayerRoom {
 		status = MultiplayerRoomStatus.CLOSED;
 	}
 
+	public void markInProgress() {
+		status = MultiplayerRoomStatus.IN_PROGRESS;
+	}
+
 	public String getRoomCode() {
 		return roomCode;
 	}
@@ -83,6 +89,10 @@ public class MultiplayerRoom {
 
 	public List<RoomMember> getMembers() {
 		return new ArrayList<>(members.values());
+	}
+
+	public RoomGameState getGameState() {
+		return gameState;
 	}
 
 	private void transferHostOrClose() {
