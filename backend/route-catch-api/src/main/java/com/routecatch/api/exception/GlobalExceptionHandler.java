@@ -20,6 +20,9 @@ import com.routecatch.api.game.exception.GameSessionNotFoundException;
 import com.routecatch.api.game.exception.InvalidGameSessionStateException;
 import com.routecatch.api.game.exception.InvalidPlayerNameException;
 import com.routecatch.api.game.exception.InvalidSessionHistoryLimitException;
+import com.routecatch.api.multiplayer.room.exception.RoomClosedException;
+import com.routecatch.api.multiplayer.room.exception.RoomForbiddenException;
+import com.routecatch.api.multiplayer.room.exception.RoomNotFoundException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -112,6 +115,45 @@ public class GlobalExceptionHandler {
 		return errorResponse(
 			HttpStatus.UNAUTHORIZED,
 			"INVALID_CREDENTIALS",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoomNotFoundException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoomNotFound(
+		RoomNotFoundException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.NOT_FOUND,
+			"ROOM_NOT_FOUND",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoomClosedException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoomClosed(
+		RoomClosedException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.CONFLICT,
+			"ROOM_CLOSED",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoomForbiddenException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoomForbidden(
+		RoomForbiddenException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.FORBIDDEN,
+			"ROOM_FORBIDDEN",
 			exception.getMessage(),
 			request
 		);
