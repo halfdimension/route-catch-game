@@ -31,6 +31,7 @@ function App() {
     currentUser,
     token,
     isAuthenticated,
+    logout,
   } = useAuth()
   const {
     playerPosition,
@@ -95,11 +96,9 @@ function App() {
       ? 'MOVING'
       : 'IDLE'
   const {
-    roomId,
     connectionStatus: multiplayerConnectionStatus,
     onlinePlayers,
     errorMessage: multiplayerErrorMessage,
-    setRoomId,
     connectPresence,
     disconnectPresence,
   } = useMultiplayerPresence({
@@ -447,13 +446,14 @@ function App() {
         />
         <MultiplayerPanel
           isAuthenticated={isAuthenticated}
-          roomId={roomId}
+          currentUser={currentUser}
+          token={token}
           connectionStatus={multiplayerConnectionStatus}
           onlinePlayerCount={onlinePlayers.length}
           errorMessage={multiplayerErrorMessage}
-          onRoomIdChange={setRoomId}
-          onJoinRoom={connectPresence}
-          onLeaveRoom={disconnectPresence}
+          onConnectPresence={connectPresence}
+          onDisconnectPresence={disconnectPresence}
+          onSessionExpired={logout}
         />
       </div>
       <TargetInfoPanel
