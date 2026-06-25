@@ -8,6 +8,7 @@ import CatchMapEffect from './CatchMapEffect'
 import OtherPlayerMarkers from './OtherPlayerMarkers'
 import PlayerMarker from './PlayerMarker'
 import RouteLine from './RouteLine'
+import SharedRoomCreatureMarkers from './SharedRoomCreatureMarkers'
 import TargetLayer from './TargetLayer'
 
 L.Icon.Default.mergeOptions({
@@ -34,6 +35,7 @@ function GameMap({
   pendingDestination,
   routeCoordinates,
   targets,
+  sharedRoomCreatures = [],
   caughtTarget,
   chasedTargetId,
   routingTargetId,
@@ -65,6 +67,7 @@ function GameMap({
         chasedTargetId={chasedTargetId}
         routingTargetId={routingTargetId}
       />
+      <SharedRoomCreatureMarkers creatures={sharedRoomCreatures} />
       <CatchMapEffect caughtTarget={caughtTarget} />
       <OtherPlayerMarkers players={otherPlayers} />
       <PlayerMarker position={playerPosition} playerName={playerName} />

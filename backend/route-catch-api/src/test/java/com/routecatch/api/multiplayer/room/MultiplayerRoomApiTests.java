@@ -436,6 +436,212 @@ class MultiplayerRoomApiTests {
 			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
 	}
 
+	@Test
+	void spawnRoomCreaturesRequiresAuthentication() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/creatures/spawn",
+				roomCode
+			)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(spawnRequest(10, 120, 500)))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"));
+	}
+
+	@Test
+	void hostCanSpawnRoomCreaturesWhenGameIsRunning() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/creatures/spawn",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(spawnRequest(10, 120, 500)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$", hasSize(10)))
+			.andExpect(jsonPath("$[0].instanceId").isNotEmpty())
+			.andExpect(jsonPath("$[0].creatureId").isNotEmpty())
+			.andExpect(jsonPath("$[0].name").isNotEmpty())
+			.andExpect(jsonPath("$[0].rarity").isNotEmpty())
+			.andExpect(jsonPath("$[0].scoreValue").isNumber())
+			.andExpect(jsonPath("$[0].latitude").isNumber())
+			.andExpect(jsonPath("$[0].longitude").isNumber())
+			.andExpect(jsonPath("$[0].spawnedAt").isNotEmpty())
+			.andExpect(jsonPath("$[0].expiresAt").isNotEmpty())
+			.andExpect(jsonPath("$[0].remainingSeconds").isNumber())
+			.andExpect(jsonPath("$[0].caught").value(false))
+			.andExpect(jsonPath("$[0].caughtByDisplayName").doesNotExist())
+			.andExpect(jsonPath("$[0].caughtAt").doesNotExist());
+	}
+
+	@Test
+	void nonHostCannotSpawnRoomCreatures() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		joinRoom(other.token(), roomCode);
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/creatures/spawn",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + other.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(spawnRequest(10, 120, 500)))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_FORBIDDEN"));
+	}
+
+	@Test
+	void spawnRoomCreaturesBeforeGameStartReturnsConflict() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/creatures/spawn",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(spawnRequest(10, 120, 500)))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_GAME_NOT_RUNNING"));
+	}
+
+	@Test
+	void spawnRoomCreaturesAfterGameEndedReturnsConflict() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+		endRoomGame(host.token(), roomCode);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/creatures/spawn",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(spawnRequest(10, 120, 500)))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_GAME_NOT_RUNNING"));
+	}
+
+	@Test
+	void roomMemberCanListCreatures() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		joinRoom(other.token(), roomCode);
+		startRoomGame(host.token(), roomCode, 60);
+		spawnCreatures(host.token(), roomCode, 3);
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/creatures",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + other.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$", hasSize(3)))
+			.andExpect(jsonPath("$[0].caught").value(false));
+	}
+
+	@Test
+	void nonMemberCannotListCreatures() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/creatures",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + other.token()))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_FORBIDDEN"));
+	}
+
+	@Test
+	void hostAndMemberSeeSameSharedRoomCreatures() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		joinRoom(other.token(), roomCode);
+		startRoomGame(host.token(), roomCode, 60);
+		String spawnedResponse = spawnCreatures(host.token(), roomCode, 2);
+
+		String hostResponse = listCreatures(host.token(), roomCode);
+		String memberResponse = listCreatures(other.token(), roomCode);
+
+		String spawnedFirstId = JsonPath.read(spawnedResponse, "$[0].instanceId");
+		String hostFirstId = JsonPath.read(hostResponse, "$[0].instanceId");
+		String memberFirstId = JsonPath.read(memberResponse, "$[0].instanceId");
+
+		org.junit.jupiter.api.Assertions.assertEquals(spawnedFirstId, hostFirstId);
+		org.junit.jupiter.api.Assertions.assertEquals(hostFirstId, memberFirstId);
+	}
+
+	@Test
+	void invalidRoomCreatureCountBelowMinimumReturnsBadRequest()
+		throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/creatures/spawn",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(spawnRequest(0, 120, 500)))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+	}
+
+	@Test
+	void invalidRoomCreatureCountAboveMaximumReturnsBadRequest()
+		throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/creatures/spawn",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(spawnRequest(21, 120, 500)))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+	}
+
+	@Test
+	void invalidRoomCreatureRadiusReturnsBadRequest() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/creatures/spawn",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(spawnRequest(10, 120, 19)))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+	}
+
 	private AuthFixture registerUser(
 		String username,
 		String email,
@@ -508,6 +714,61 @@ class MultiplayerRoomApiTests {
 					}
 					""".formatted(durationSeconds)))
 			.andExpect(status().isOk());
+	}
+
+	private void endRoomGame(String token, String roomCode) throws Exception {
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/game/end",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk());
+	}
+
+	private String spawnCreatures(
+		String token,
+		String roomCode,
+		int count
+	) throws Exception {
+		return mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/creatures/spawn",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + token)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(spawnRequest(count, 120, 500)))
+			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+	}
+
+	private String listCreatures(String token, String roomCode) throws Exception {
+		return mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/creatures",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+	}
+
+	private String spawnRequest(
+		int count,
+		int ttlSeconds,
+		double radiusMeters
+	) {
+		return """
+			{
+				"centerLat": 28.6139,
+				"centerLon": 77.2090,
+				"count": %d,
+				"ttlSeconds": %d,
+				"radiusMeters": %.1f
+			}
+			""".formatted(count, ttlSeconds, radiusMeters);
 	}
 
 	private record AuthFixture(String token, String userId) {

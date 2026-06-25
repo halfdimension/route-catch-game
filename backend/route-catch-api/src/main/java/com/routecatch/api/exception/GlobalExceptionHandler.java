@@ -20,6 +20,8 @@ import com.routecatch.api.game.exception.GameSessionNotFoundException;
 import com.routecatch.api.game.exception.InvalidGameSessionStateException;
 import com.routecatch.api.game.exception.InvalidPlayerNameException;
 import com.routecatch.api.game.exception.InvalidSessionHistoryLimitException;
+import com.routecatch.api.multiplayer.room.creature.RoomCreatureCatalogEmptyException;
+import com.routecatch.api.multiplayer.room.creature.RoomGameNotRunningException;
 import com.routecatch.api.multiplayer.room.exception.RoomClosedException;
 import com.routecatch.api.multiplayer.room.exception.RoomForbiddenException;
 import com.routecatch.api.multiplayer.room.exception.RoomGameAlreadyRunningException;
@@ -168,6 +170,32 @@ public class GlobalExceptionHandler {
 		return errorResponse(
 			HttpStatus.CONFLICT,
 			"ROOM_GAME_ALREADY_RUNNING",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoomGameNotRunningException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoomGameNotRunning(
+		RoomGameNotRunningException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.CONFLICT,
+			"ROOM_GAME_NOT_RUNNING",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoomCreatureCatalogEmptyException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoomCreatureCatalogEmpty(
+		RoomCreatureCatalogEmptyException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.CONFLICT,
+			"ROOM_CREATURE_CATALOG_EMPTY",
 			exception.getMessage(),
 			request
 		);

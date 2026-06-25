@@ -595,6 +595,17 @@ button:focus-visible {
   padding: 6px 8px;
 }
 
+.multiplayer-running-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.multiplayer-running-controls button {
+  width: 100%;
+  padding: 6px 8px;
+}
+
 .multiplayer-member-list,
 .multiplayer-my-rooms {
   display: grid;
@@ -2155,6 +2166,75 @@ button:focus-visible {
 .target-creature-marker.is-routing::after {
   border-style: solid dashed;
   animation-duration: 1.2s;
+}
+
+.shared-room-creature-marker {
+  position: relative;
+  background: transparent;
+  border: 0;
+}
+
+.shared-room-creature-marker::before {
+  position: absolute;
+  inset: 1px;
+  border: 1px solid rgba(20, 184, 166, 0.42);
+  border-radius: 8px;
+  background: rgba(240, 253, 250, 0.72);
+  content: '';
+  transform: rotate(45deg);
+  box-shadow: 0 6px 14px rgba(23, 32, 51, 0.16);
+}
+
+.shared-room-creature-marker-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 2px solid #ffffff;
+  border-radius: 7px;
+  color: #ffffff;
+  background: #0f766e;
+  transform: translate(-50%, -50%);
+  line-height: 1;
+}
+
+.shared-room-creature-marker-symbol {
+  color: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.shared-room-creature-marker.rarity-rare::before {
+  border-color: rgba(37, 99, 235, 0.44);
+  background: rgba(219, 234, 254, 0.72);
+}
+
+.shared-room-creature-marker.rarity-rare .shared-room-creature-marker-core {
+  background: #1d4ed8;
+}
+
+.shared-room-creature-marker.rarity-legendary::before {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(254, 243, 199, 0.78);
+}
+
+.shared-room-creature-marker.rarity-legendary .shared-room-creature-marker-core {
+  background: #a16207;
+}
+
+.shared-room-creature-tooltip {
+  display: grid;
+  gap: 1px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.shared-room-creature-tooltip strong {
+  color: #172033;
 }
 
 @keyframes target-marker-pulse {

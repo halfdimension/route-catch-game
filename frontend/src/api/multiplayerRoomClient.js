@@ -98,3 +98,21 @@ export function endRoomGame(roomCode, token) {
     { method: 'POST' },
   )
 }
+
+export function spawnRoomCreatures(roomCode, request, token) {
+  return requestMultiplayerRoom(
+    `/api/multiplayer/rooms/${encodeURIComponent(roomCode)}/creatures/spawn`,
+    token,
+    {
+      method: 'POST',
+      body: JSON.stringify(request),
+    },
+  )
+}
+
+export function listRoomCreatures(roomCode, token) {
+  return requestMultiplayerRoom(
+    `/api/multiplayer/rooms/${encodeURIComponent(roomCode)}/creatures`,
+    token,
+  )
+}
