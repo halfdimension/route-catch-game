@@ -2,13 +2,18 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   closeRoom,
   createRoom,
+  endRoomGame,
+  getRoomGame,
   getRoom,
   joinRoom,
   leaveRoom,
   listMyRooms,
+  startRoomGame,
 } from '../api/multiplayerRoomClient'
 
 const DEFAULT_ROOM_NAME = 'Delhi Room'
+const DEFAULT_GAME_DURATION_SECONDS = 60
+const GAME_DURATION_OPTIONS = [30, 60, 90, 120]
 
 function normalizeRoomCode(roomCode) {
   return roomCode.trim().toUpperCase()
@@ -16,6 +21,14 @@ function normalizeRoomCode(roomCode) {
 
 function getRoomStatusClass(status) {
   return `is-${(status || 'unknown').toLowerCase().replaceAll('_', '-')}`
+}
+
+function formatRemainingTime(seconds) {
+  const safeSeconds = Math.max(0, Number(seconds) || 0)
+  const minutes = Math.floor(safeSeconds / 60)
+  const remainingSeconds = safeSeconds % 60
+
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
 
 function MultiplayerPanel({
@@ -37,6 +50,10 @@ function MultiplayerPanel({
   const [isRoomsLoading, setIsRoomsLoading] = useState(false)
   const [roomMessage, setRoomMessage] = useState('')
   const [roomError, setRoomError] = useState('')
+  const [gameState, setGameState] = useState(null)
+  const [gameRemainingSeconds, setGameRemainingSeconds] = useState(null)
+  const [durationSeconds, setDurationSeconds] = useState(DEFAULT_GAME_DURATION_SECONDS)
+  const activeRoomCode = activeRoom?.roomCode
 
   const refreshMyRooms = useCallback(async () => {
     if (!isAuthenticated || !token) {
@@ -63,6 +80,8 @@ function MultiplayerPanel({
       const timerId = window.setTimeout(() => {
         setActiveRoom(null)
         setMyRooms([])
+        setGameState(null)
+        setGameRemainingSeconds(null)
         setRoomMessage('')
         setRoomError('')
         onDisconnectPresence()
@@ -79,13 +98,13 @@ function MultiplayerPanel({
   }, [isAuthenticated, onDisconnectPresence, refreshMyRooms])
 
   useEffect(() => {
-    if (!activeRoom?.roomCode || !token || !isAuthenticated) {
+    if (!activeRoomCode || !token || !isAuthenticated) {
       return
     }
 
     let isMounted = true
 
-    getRoom(activeRoom.roomCode, token)
+    getRoom(activeRoomCode, token)
       .then((room) => {
         if (!isMounted) {
           return
@@ -114,7 +133,7 @@ function MultiplayerPanel({
       isMounted = false
     }
   }, [
-    activeRoom?.roomCode,
+    activeRoomCode,
     isAuthenticated,
     onDisconnectPresence,
     onSessionExpired,
@@ -122,6 +141,75 @@ function MultiplayerPanel({
     refreshMyRooms,
     token,
   ])
+
+  const refreshRoomGame = useCallback(async () => {
+    if (!activeRoomCode || !token || !isAuthenticated) {
+      return
+    }
+
+    try {
+      const nextGameState = await getRoomGame(activeRoomCode, token)
+      setGameState(nextGameState)
+      setGameRemainingSeconds(nextGameState?.remainingSeconds ?? null)
+
+      if (nextGameState?.roomStatus) {
+        setActiveRoom((currentRoom) => (
+          currentRoom?.roomCode === nextGameState.roomCode
+            ? { ...currentRoom, status: nextGameState.roomStatus }
+            : currentRoom
+        ))
+      }
+    } catch (error) {
+      if (error.status === 401) {
+        setRoomError('Session expired. Please sign in again.')
+        onSessionExpired?.()
+      }
+    }
+  }, [activeRoomCode, isAuthenticated, onSessionExpired, token])
+
+  useEffect(() => {
+    if (!activeRoomCode || !token || !isAuthenticated) {
+      return
+    }
+
+    let isPolling = true
+
+    const pollRoomGame = async () => {
+      if (!isPolling) {
+        return
+      }
+
+      await refreshRoomGame()
+    }
+
+    void pollRoomGame()
+    const intervalId = window.setInterval(() => {
+      void pollRoomGame()
+    }, 2000)
+
+    return () => {
+      isPolling = false
+      window.clearInterval(intervalId)
+    }
+  }, [activeRoomCode, isAuthenticated, refreshRoomGame, token])
+
+  useEffect(() => {
+    if (gameState?.gameStatus !== 'RUNNING') {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      setGameRemainingSeconds((currentSeconds) => {
+        if (currentSeconds === null || currentSeconds === undefined) {
+          return currentSeconds
+        }
+
+        return Math.max(0, currentSeconds - 1)
+      })
+    }, 1000)
+
+    return () => window.clearInterval(intervalId)
+  }, [gameState?.gameStatus, gameState?.startedAt, gameState?.endsAt])
 
   function handleRoomError(error, fallbackMessage) {
     if (error.status === 401) {
@@ -135,6 +223,8 @@ function MultiplayerPanel({
 
   async function activateRoom(room, message) {
     setActiveRoom(room)
+    setGameState(null)
+    setGameRemainingSeconds(null)
     setJoinCode(room.roomCode)
     setRoomMessage(message)
     setRoomError('')
@@ -192,6 +282,8 @@ function MultiplayerPanel({
     try {
       await leaveRoom(activeRoom.roomCode, token)
       setActiveRoom(null)
+      setGameState(null)
+      setGameRemainingSeconds(null)
       setRoomMessage('Left room.')
       onDisconnectPresence()
       await refreshMyRooms()
@@ -214,6 +306,8 @@ function MultiplayerPanel({
     try {
       await closeRoom(activeRoom.roomCode, token)
       setActiveRoom(null)
+      setGameState(null)
+      setGameRemainingSeconds(null)
       setRoomMessage('Room closed.')
       onDisconnectPresence()
       await refreshMyRooms()
@@ -224,10 +318,63 @@ function MultiplayerPanel({
     }
   }
 
+  async function handleStartRoomGame() {
+    if (!activeRoom?.roomCode) {
+      return
+    }
+
+    setIsActionPending(true)
+    setRoomMessage('')
+    setRoomError('')
+
+    try {
+      const nextGameState = await startRoomGame(
+        activeRoom.roomCode,
+        { durationSeconds: Number(durationSeconds) || DEFAULT_GAME_DURATION_SECONDS },
+        token,
+      )
+      setGameState(nextGameState)
+      setGameRemainingSeconds(nextGameState?.remainingSeconds ?? null)
+      setRoomMessage('Room game started.')
+    } catch (error) {
+      handleRoomError(error, 'Could not start room game.')
+    } finally {
+      setIsActionPending(false)
+    }
+  }
+
+  async function handleEndRoomGame() {
+    if (!activeRoom?.roomCode) {
+      return
+    }
+
+    setIsActionPending(true)
+    setRoomMessage('')
+    setRoomError('')
+
+    try {
+      const nextGameState = await endRoomGame(activeRoom.roomCode, token)
+      setGameState(nextGameState)
+      setGameRemainingSeconds(nextGameState?.remainingSeconds ?? null)
+      setRoomMessage('Room game ended.')
+    } catch (error) {
+      handleRoomError(error, 'Could not end room game.')
+    } finally {
+      setIsActionPending(false)
+    }
+  }
+
   const isHost = Boolean(
     activeRoom?.hostUserId && activeRoom.hostUserId === currentUser?.userId,
   )
   const memberCount = activeRoom?.members?.length || 0
+  const gameStatus = gameState?.gameStatus || 'WAITING'
+  const roomStatus = gameState?.roomStatus || activeRoom?.status
+  const canStartRoomGame = Boolean(
+    isHost && roomStatus === 'OPEN' && gameStatus === 'WAITING',
+  )
+  const canEndRoomGame = Boolean(isHost && gameStatus === 'RUNNING')
+  const canCloseRoom = Boolean(isHost && gameStatus !== 'RUNNING')
 
   return (
     <section className="multiplayer-panel" aria-label="Multiplayer rooms">
@@ -261,6 +408,57 @@ function MultiplayerPanel({
             </span>
           </div>
 
+          <div className="multiplayer-game-state" aria-label="Room game state">
+            <div className="multiplayer-game-summary">
+              <span>Game</span>
+              <strong>{gameStatus}</strong>
+              {gameStatus === 'RUNNING' && (
+                <time>{formatRemainingTime(gameRemainingSeconds)}</time>
+              )}
+            </div>
+            {gameState?.startedByDisplayName && (
+              <p>Started by {gameState.startedByDisplayName}</p>
+            )}
+            {gameStatus === 'ENDED' && (
+              <p>Shared room game ended.</p>
+            )}
+            {canStartRoomGame && (
+              <div className="multiplayer-game-controls">
+                <label className="multiplayer-room-control">
+                  <span>Duration</span>
+                  <select
+                    value={durationSeconds}
+                    onChange={(event) => setDurationSeconds(Number(event.target.value))}
+                    disabled={isActionPending}
+                  >
+                    {GAME_DURATION_OPTIONS.map((optionSeconds) => (
+                      <option key={optionSeconds} value={optionSeconds}>
+                        {optionSeconds}s
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={handleStartRoomGame}
+                  disabled={isActionPending}
+                >
+                  Start Room Game
+                </button>
+              </div>
+            )}
+            {canEndRoomGame && (
+              <button
+                type="button"
+                onClick={handleEndRoomGame}
+                disabled={isActionPending}
+              >
+                End Room Game
+              </button>
+            )}
+          </div>
+
           <ul className="multiplayer-member-list" aria-label="Room members">
             {(activeRoom.members || []).map((member) => (
               <li key={member.userId}>
@@ -278,7 +476,7 @@ function MultiplayerPanel({
             >
               Leave Room
             </button>
-            {isHost && (
+            {canCloseRoom && (
               <button
                 type="button"
                 onClick={handleCloseRoom}
