@@ -14,6 +14,7 @@ import StatsDrawer from './components/StatsDrawer'
 import TargetInfoPanel from './components/TargetInfoPanel'
 import { MAX_SIMULATION_SPEED } from './config/gameConfig'
 import { useAuth } from './context/authContextCore'
+import { listRoomCreatures } from './api/multiplayerRoomClient'
 import { useBackendGameSession } from './hooks/useBackendGameSession'
 import { useCatchDetection } from './hooks/useCatchDetection'
 import { useGameSession } from './hooks/useGameSession'
@@ -157,8 +158,13 @@ function App() {
   const [score, setScore] = useState(0)
   const [catchToastTarget, setCatchToastTarget] = useState(null)
   const [historyRefreshVersion, setHistoryRefreshVersion] = useState(0)
+  const [activeMultiplayerRoom, setActiveMultiplayerRoom] = useState(null)
+  const [activeRoomGameState, setActiveRoomGameState] = useState(null)
+  const [sharedRoomCreatures, setSharedRoomCreatures] = useState([])
   const previousGameStateRef = useRef(gameState)
   const targetsRef = useRef(targets)
+  const activeRoomCode = activeMultiplayerRoom?.roomCode
+  const activeRoomGameStatus = activeRoomGameState?.gameStatus
 
   useEffect(() => {
     targetsRef.current = targets
@@ -315,6 +321,77 @@ function App() {
     clearChaseState()
   }
 
+  const handleMultiplayerRoomContextChange = useCallback((roomContext) => {
+    setActiveMultiplayerRoom(roomContext?.activeRoom || null)
+    setActiveRoomGameState(roomContext?.gameState || null)
+  }, [])
+
+  const refreshSharedRoomCreatures = useCallback(async () => {
+    if (
+      !isAuthenticated ||
+      !token ||
+      !activeRoomCode ||
+      activeRoomGameStatus !== 'RUNNING'
+    ) {
+      setSharedRoomCreatures([])
+      return []
+    }
+
+    try {
+      const creatures = await listRoomCreatures(activeRoomCode, token)
+      const nextCreatures = Array.isArray(creatures) ? creatures : []
+      setSharedRoomCreatures(nextCreatures)
+      return nextCreatures
+    } catch (error) {
+      if (error.status === 401) {
+        logout()
+      }
+
+      return []
+    }
+  }, [activeRoomCode, activeRoomGameStatus, isAuthenticated, logout, token])
+
+  useEffect(() => {
+    if (
+      !isAuthenticated ||
+      !token ||
+      !activeRoomCode ||
+      activeRoomGameStatus !== 'RUNNING'
+    ) {
+      const timerId = window.setTimeout(() => {
+        setSharedRoomCreatures([])
+      }, 0)
+
+      return () => window.clearTimeout(timerId)
+    }
+
+    let isPolling = true
+
+    const pollSharedCreatures = async () => {
+      if (!isPolling) {
+        return
+      }
+
+      await refreshSharedRoomCreatures()
+    }
+
+    void pollSharedCreatures()
+    const intervalId = window.setInterval(() => {
+      void pollSharedCreatures()
+    }, 3000)
+
+    return () => {
+      isPolling = false
+      window.clearInterval(intervalId)
+    }
+  }, [
+    activeRoomCode,
+    activeRoomGameStatus,
+    isAuthenticated,
+    refreshSharedRoomCreatures,
+    token,
+  ])
+
   const isTargetActive = useCallback((targetId) => {
     return targetsRef.current.some(
       (currentTarget) =>
@@ -386,6 +463,7 @@ function App() {
         pendingDestination={pendingDestination}
         routeCoordinates={routeCoordinates}
         targets={targets}
+        sharedRoomCreatures={sharedRoomCreatures}
         caughtTarget={catchToastTarget}
         chasedTargetId={chasedTargetId}
         routingTargetId={routingTargetId}
@@ -451,8 +529,12 @@ function App() {
           connectionStatus={multiplayerConnectionStatus}
           onlinePlayerCount={onlinePlayers.length}
           errorMessage={multiplayerErrorMessage}
+          playerPosition={playerPosition}
+          sharedRoomCreatures={sharedRoomCreatures}
           onConnectPresence={connectPresence}
           onDisconnectPresence={disconnectPresence}
+          onRoomContextChange={handleMultiplayerRoomContextChange}
+          onRefreshSharedRoomCreatures={refreshSharedRoomCreatures}
           onSessionExpired={logout}
         />
       </div>

@@ -8,12 +8,22 @@ import {
   joinRoom,
   leaveRoom,
   listMyRooms,
+  spawnRoomCreatures,
   startRoomGame,
 } from '../api/multiplayerRoomClient'
 
 const DEFAULT_ROOM_NAME = 'Delhi Room'
 const DEFAULT_GAME_DURATION_SECONDS = 60
 const GAME_DURATION_OPTIONS = [30, 60, 90, 120]
+const DEFAULT_SPAWN_CENTER = {
+  centerLat: 28.6139,
+  centerLon: 77.209,
+}
+const DEFAULT_SPAWN_REQUEST = {
+  count: 5,
+  ttlSeconds: 120,
+  radiusMeters: 500,
+}
 
 function normalizeRoomCode(roomCode) {
   return roomCode.trim().toUpperCase()
@@ -38,8 +48,12 @@ function MultiplayerPanel({
   connectionStatus,
   onlinePlayerCount,
   errorMessage,
+  playerPosition,
+  sharedRoomCreatures = [],
   onConnectPresence,
   onDisconnectPresence,
+  onRoomContextChange,
+  onRefreshSharedRoomCreatures,
   onSessionExpired,
 }) {
   const [roomName, setRoomName] = useState(DEFAULT_ROOM_NAME)
@@ -53,6 +67,7 @@ function MultiplayerPanel({
   const [gameState, setGameState] = useState(null)
   const [gameRemainingSeconds, setGameRemainingSeconds] = useState(null)
   const [durationSeconds, setDurationSeconds] = useState(DEFAULT_GAME_DURATION_SECONDS)
+  const [isSpawningRoomCreatures, setIsSpawningRoomCreatures] = useState(false)
   const activeRoomCode = activeRoom?.roomCode
 
   const refreshMyRooms = useCallback(async () => {
@@ -74,6 +89,10 @@ function MultiplayerPanel({
       setIsRoomsLoading(false)
     }
   }, [isAuthenticated, onSessionExpired, token])
+
+  useEffect(() => {
+    onRoomContextChange?.({ activeRoom, gameState })
+  }, [activeRoom, gameState, onRoomContextChange])
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -364,6 +383,46 @@ function MultiplayerPanel({
     }
   }
 
+  async function handleSpawnRoomCreatures() {
+    if (!activeRoom?.roomCode) {
+      return
+    }
+
+    if (!isHost) {
+      setRoomError('Only host can spawn creatures')
+      return
+    }
+
+    if (gameStatus !== 'RUNNING') {
+      setRoomError('Room game is not running')
+      return
+    }
+
+    const playerLat = Number(playerPosition?.lat)
+    const playerLon = Number(playerPosition?.lon)
+    const hasPlayerCenter = Number.isFinite(playerLat) && Number.isFinite(playerLon)
+    const spawnRequest = {
+      ...(hasPlayerCenter
+        ? { centerLat: playerLat, centerLon: playerLon }
+        : DEFAULT_SPAWN_CENTER),
+      ...DEFAULT_SPAWN_REQUEST,
+    }
+
+    setIsSpawningRoomCreatures(true)
+    setRoomMessage('')
+    setRoomError('')
+
+    try {
+      await spawnRoomCreatures(activeRoom.roomCode, spawnRequest, token)
+      await onRefreshSharedRoomCreatures?.()
+      setRoomMessage('Room creatures spawned.')
+    } catch (error) {
+      handleRoomError(error, 'Could not spawn room creatures.')
+    } finally {
+      setIsSpawningRoomCreatures(false)
+    }
+  }
+
   const isHost = Boolean(
     activeRoom?.hostUserId && activeRoom.hostUserId === currentUser?.userId,
   )
@@ -375,6 +434,7 @@ function MultiplayerPanel({
   )
   const canEndRoomGame = Boolean(isHost && gameStatus === 'RUNNING')
   const canCloseRoom = Boolean(isHost && gameStatus !== 'RUNNING')
+  const canSpawnRoomCreatures = Boolean(isHost && gameStatus === 'RUNNING')
 
   return (
     <section className="multiplayer-panel" aria-label="Multiplayer rooms">
@@ -422,6 +482,9 @@ function MultiplayerPanel({
             {gameStatus === 'ENDED' && (
               <p>Shared room game ended.</p>
             )}
+            <p className="multiplayer-count">
+              Shared creatures: <strong>{sharedRoomCreatures.length}</strong>
+            </p>
             {canStartRoomGame && (
               <div className="multiplayer-game-controls">
                 <label className="multiplayer-room-control">
@@ -449,13 +512,27 @@ function MultiplayerPanel({
               </div>
             )}
             {canEndRoomGame && (
-              <button
-                type="button"
-                onClick={handleEndRoomGame}
-                disabled={isActionPending}
-              >
-                End Room Game
-              </button>
+              <div className="multiplayer-running-controls">
+                {canSpawnRoomCreatures && (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={handleSpawnRoomCreatures}
+                    disabled={isActionPending || isSpawningRoomCreatures}
+                  >
+                    {isSpawningRoomCreatures
+                      ? 'Spawning'
+                      : 'Spawn Room Creatures'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleEndRoomGame}
+                  disabled={isActionPending || isSpawningRoomCreatures}
+                >
+                  End Room Game
+                </button>
+              </div>
             )}
           </div>
 
