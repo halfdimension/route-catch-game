@@ -13,7 +13,9 @@ import org.springframework.web.bind.annotation.RestController;
 import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.auth.service.CurrentUserService;
 import com.routecatch.api.multiplayer.room.dto.CreateRoomRequest;
+import com.routecatch.api.multiplayer.room.dto.RoomGameStateResponse;
 import com.routecatch.api.multiplayer.room.dto.RoomResponse;
+import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
 
 import jakarta.validation.Valid;
@@ -91,5 +93,45 @@ public class MultiplayerRoomController {
 			authentication
 		);
 		return RoomResponse.from(roomService.closeRoom(roomCode, currentUser));
+	}
+
+	@PostMapping("/{roomCode}/game/start")
+	public RoomGameStateResponse startRoomGame(
+		@PathVariable String roomCode,
+		@Valid @RequestBody StartRoomGameRequest request,
+		Authentication authentication
+	) {
+		UserEntity currentUser = currentUserService.getCurrentUserEntity(
+			authentication
+		);
+		return RoomGameStateResponse.from(
+			roomService.startGame(roomCode, currentUser, request)
+		);
+	}
+
+	@GetMapping("/{roomCode}/game")
+	public RoomGameStateResponse getRoomGameState(
+		@PathVariable String roomCode,
+		Authentication authentication
+	) {
+		UserEntity currentUser = currentUserService.getCurrentUserEntity(
+			authentication
+		);
+		return RoomGameStateResponse.from(
+			roomService.getGameState(roomCode, currentUser)
+		);
+	}
+
+	@PostMapping("/{roomCode}/game/end")
+	public RoomGameStateResponse endRoomGame(
+		@PathVariable String roomCode,
+		Authentication authentication
+	) {
+		UserEntity currentUser = currentUserService.getCurrentUserEntity(
+			authentication
+		);
+		return RoomGameStateResponse.from(
+			roomService.endGame(roomCode, currentUser)
+		);
 	}
 }

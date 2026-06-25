@@ -72,3 +72,29 @@ export function closeRoom(roomCode, token) {
     { method: 'POST' },
   )
 }
+
+export function startRoomGame(roomCode, { durationSeconds }, token) {
+  return requestMultiplayerRoom(
+    `/api/multiplayer/rooms/${encodeURIComponent(roomCode)}/game/start`,
+    token,
+    {
+      method: 'POST',
+      body: JSON.stringify({ durationSeconds }),
+    },
+  )
+}
+
+export function getRoomGame(roomCode, token) {
+  return requestMultiplayerRoom(
+    `/api/multiplayer/rooms/${encodeURIComponent(roomCode)}/game`,
+    token,
+  )
+}
+
+export function endRoomGame(roomCode, token) {
+  return requestMultiplayerRoom(
+    `/api/multiplayer/rooms/${encodeURIComponent(roomCode)}/game/end`,
+    token,
+    { method: 'POST' },
+  )
+}

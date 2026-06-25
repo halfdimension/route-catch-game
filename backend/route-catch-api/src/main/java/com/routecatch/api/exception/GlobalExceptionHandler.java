@@ -22,6 +22,7 @@ import com.routecatch.api.game.exception.InvalidPlayerNameException;
 import com.routecatch.api.game.exception.InvalidSessionHistoryLimitException;
 import com.routecatch.api.multiplayer.room.exception.RoomClosedException;
 import com.routecatch.api.multiplayer.room.exception.RoomForbiddenException;
+import com.routecatch.api.multiplayer.room.exception.RoomGameAlreadyRunningException;
 import com.routecatch.api.multiplayer.room.exception.RoomNotFoundException;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -154,6 +155,19 @@ public class GlobalExceptionHandler {
 		return errorResponse(
 			HttpStatus.FORBIDDEN,
 			"ROOM_FORBIDDEN",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoomGameAlreadyRunningException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoomGameAlreadyRunning(
+		RoomGameAlreadyRunningException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.CONFLICT,
+			"ROOM_GAME_ALREADY_RUNNING",
 			exception.getMessage(),
 			request
 		);

@@ -215,6 +215,227 @@ class MultiplayerRoomApiTests {
 			.andExpect(jsonPath("$[1].roomCode").value(harshRoomCode));
 	}
 
+	@Test
+	void startRoomGameRequiresAuthentication() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/game/start",
+				roomCode
+			)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 60
+					}
+					"""))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"));
+	}
+
+	@Test
+	void hostCanStartRoomGame() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/game/start",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 60
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.roomCode").value(roomCode))
+			.andExpect(jsonPath("$.roomStatus").value("IN_PROGRESS"))
+			.andExpect(jsonPath("$.gameStatus").value("RUNNING"))
+			.andExpect(jsonPath("$.durationSeconds").value(60))
+			.andExpect(jsonPath("$.startedAt").isNotEmpty())
+			.andExpect(jsonPath("$.endsAt").isNotEmpty())
+			.andExpect(jsonPath("$.remainingSeconds").isNumber())
+			.andExpect(jsonPath("$.startedByDisplayName").value("Host"));
+	}
+
+	@Test
+	void nonHostCannotStartRoomGame() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		joinRoom(other.token(), roomCode);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/game/start",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + other.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 60
+					}
+					"""))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_FORBIDDEN"));
+	}
+
+	@Test
+	void memberCanGetRoomGameState() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		joinRoom(other.token(), roomCode);
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(get("/api/multiplayer/rooms/{roomCode}/game", roomCode)
+				.header("Authorization", "Bearer " + other.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.roomCode").value(roomCode))
+			.andExpect(jsonPath("$.roomStatus").value("IN_PROGRESS"))
+			.andExpect(jsonPath("$.gameStatus").value("RUNNING"));
+	}
+
+	@Test
+	void nonMemberCannotGetRoomGameState() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(get("/api/multiplayer/rooms/{roomCode}/game", roomCode)
+				.header("Authorization", "Bearer " + other.token()))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_FORBIDDEN"));
+	}
+
+	@Test
+	void getRoomGameBeforeStartReturnsWaiting() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(get("/api/multiplayer/rooms/{roomCode}/game", roomCode)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.roomStatus").value("OPEN"))
+			.andExpect(jsonPath("$.gameStatus").value("WAITING"))
+			.andExpect(jsonPath("$.durationSeconds").value(0))
+			.andExpect(jsonPath("$.remainingSeconds").value(0))
+			.andExpect(jsonPath("$.startedAt").doesNotExist());
+	}
+
+	@Test
+	void startingRoomGameChangesRoomStatusToInProgress() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(get("/api/multiplayer/rooms/{roomCode}", roomCode)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("IN_PROGRESS"));
+	}
+
+	@Test
+	void startingAlreadyRunningRoomGameReturnsConflict() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/game/start",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 60
+					}
+					"""))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_GAME_ALREADY_RUNNING"));
+	}
+
+	@Test
+	void hostCanEndRoomGame() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/game/end",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.roomStatus").value("CLOSED"))
+			.andExpect(jsonPath("$.gameStatus").value("ENDED"))
+			.andExpect(jsonPath("$.remainingSeconds").value(0))
+			.andExpect(jsonPath("$.endedAt").isNotEmpty());
+	}
+
+	@Test
+	void nonHostCannotEndRoomGame() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		joinRoom(other.token(), roomCode);
+		startRoomGame(host.token(), roomCode, 60);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/game/end",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + other.token()))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_FORBIDDEN"));
+	}
+
+	@Test
+	void invalidRoomGameDurationBelowMinimumReturnsBadRequest()
+		throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/game/start",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 29
+					}
+					"""))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+	}
+
+	@Test
+	void invalidRoomGameDurationAboveMaximumReturnsBadRequest()
+		throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/game/start",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 601
+					}
+					"""))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+	}
+
 	private AuthFixture registerUser(
 		String username,
 		String email,
@@ -267,6 +488,25 @@ class MultiplayerRoomApiTests {
 	private void closeRoom(String token, String roomCode) throws Exception {
 		mockMvc.perform(post("/api/multiplayer/rooms/{roomCode}/close", roomCode)
 				.header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk());
+	}
+
+	private void startRoomGame(
+		String token,
+		String roomCode,
+		int durationSeconds
+	) throws Exception {
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/game/start",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + token)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": %d
+					}
+					""".formatted(durationSeconds)))
 			.andExpect(status().isOk());
 	}
 
