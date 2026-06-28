@@ -590,6 +590,195 @@ class MultiplayerRoomApiTests {
 	}
 
 	@Test
+	void scoreboardRequiresAuthentication() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/scoreboard",
+				roomCode
+			))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"));
+	}
+
+	@Test
+	void memberCanReadScoreboard() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture member = registerUser(
+			"member",
+			"member@example.com",
+			"Member"
+		);
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		joinRoom(member.token(), roomCode);
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/scoreboard",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + member.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.roomCode").value(roomCode))
+			.andExpect(jsonPath("$.roomStatus").value("OPEN"))
+			.andExpect(jsonPath("$.gameStatus").value("WAITING"))
+			.andExpect(jsonPath("$.entries", hasSize(2)));
+	}
+
+	@Test
+	void nonMemberCannotReadScoreboard() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/scoreboard",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + other.token()))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_FORBIDDEN"));
+	}
+
+	@Test
+	void unknownRoomScoreboardReturnsNotFound() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/scoreboard",
+				"000000"
+			)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_NOT_FOUND"));
+	}
+
+	@Test
+	void scoreboardIncludesAllRoomMembersWithZeroScoreBeforeCatches()
+		throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture member = registerUser(
+			"member",
+			"member@example.com",
+			"Member"
+		);
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		joinRoom(member.token(), roomCode);
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/scoreboard",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.entries", hasSize(2)))
+			.andExpect(jsonPath("$.entries[0].displayName").value("Host"))
+			.andExpect(jsonPath("$.entries[0].host").value(true))
+			.andExpect(jsonPath("$.entries[0].score").value(0))
+			.andExpect(jsonPath("$.entries[0].catches").value(0))
+			.andExpect(jsonPath("$.entries[0].lastCatchAt").doesNotExist())
+			.andExpect(jsonPath("$.entries[1].displayName").value("Member"))
+			.andExpect(jsonPath("$.entries[1].host").value(false))
+			.andExpect(jsonPath("$.entries[1].score").value(0))
+			.andExpect(jsonPath("$.entries[1].catches").value(0))
+			.andExpect(jsonPath("$.entries[1].lastCatchAt").doesNotExist());
+	}
+
+	@Test
+	void successfulCatchIncrementsCatcherScoreAndCatches() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture member = registerUser(
+			"member",
+			"member@example.com",
+			"Member"
+		);
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		joinRoom(member.token(), roomCode);
+		startRoomGame(host.token(), roomCode, 60);
+		String spawnedResponse = spawnCreatures(host.token(), roomCode, 1);
+		CreatureFixture creature = firstCreature(spawnedResponse);
+
+		catchCreature(
+			member.token(),
+			roomCode,
+			creature.instanceId(),
+			creature.latitude(),
+			creature.longitude()
+		);
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/scoreboard",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.entries[0].userId").value(member.userId()))
+			.andExpect(jsonPath("$.entries[0].score").value(creature.scoreValue()))
+			.andExpect(jsonPath("$.entries[0].catches").value(1))
+			.andExpect(jsonPath("$.entries[0].lastCatchAt").isNotEmpty())
+			.andExpect(jsonPath("$.entries[1].userId").value(host.userId()))
+			.andExpect(jsonPath("$.entries[1].score").value(0))
+			.andExpect(jsonPath("$.entries[1].catches").value(0));
+	}
+
+	@Test
+	void duplicateCatchDoesNotDoubleIncrementScore() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+		String spawnedResponse = spawnCreatures(host.token(), roomCode, 1);
+		CreatureFixture creature = firstCreature(spawnedResponse);
+
+		catchCreature(
+			host.token(),
+			roomCode,
+			creature.instanceId(),
+			creature.latitude(),
+			creature.longitude()
+		);
+
+		mockMvc.perform(post(
+				"/api/multiplayer/rooms/{roomCode}/creatures/{instanceId}/catch",
+				roomCode,
+				creature.instanceId()
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(catchRequest(creature.latitude(), creature.longitude())))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.errorCode")
+				.value("ROOM_CREATURE_ALREADY_CAUGHT"));
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/scoreboard",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.entries[0].score").value(creature.scoreValue()))
+			.andExpect(jsonPath("$.entries[0].catches").value(1));
+	}
+
+	@Test
+	void scoreboardReadableAfterGameEnded() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		startRoomGame(host.token(), roomCode, 60);
+		endRoomGame(host.token(), roomCode);
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/scoreboard",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.roomStatus").value("CLOSED"))
+			.andExpect(jsonPath("$.gameStatus").value("ENDED"))
+			.andExpect(jsonPath("$.entries", hasSize(1)))
+			.andExpect(jsonPath("$.entries[0].score").value(0));
+	}
+
+	@Test
 	void catchRoomCreatureRequiresAuthentication() throws Exception {
 		AuthFixture host = registerUser("host", "host@example.com", "Host");
 		String roomCode = createRoom(host.token(), "Delhi Room");
@@ -1037,13 +1226,19 @@ class MultiplayerRoomApiTests {
 		return new CreatureFixture(
 			JsonPath.read(response, "$[0].instanceId"),
 			number(response, "$[0].latitude"),
-			number(response, "$[0].longitude")
+			number(response, "$[0].longitude"),
+			integer(response, "$[0].scoreValue")
 		);
 	}
 
 	private double number(String response, String path) {
 		Number number = JsonPath.read(response, path);
 		return number.doubleValue();
+	}
+
+	private int integer(String response, String path) {
+		Number number = JsonPath.read(response, path);
+		return number.intValue();
 	}
 
 	private String spawnRequest(
@@ -1077,7 +1272,8 @@ class MultiplayerRoomApiTests {
 	private record CreatureFixture(
 		String instanceId,
 		double latitude,
-		double longitude
+		double longitude,
+		int scoreValue
 	) {
 	}
 }
