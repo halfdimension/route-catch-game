@@ -20,7 +20,11 @@ import com.routecatch.api.game.exception.GameSessionNotFoundException;
 import com.routecatch.api.game.exception.InvalidGameSessionStateException;
 import com.routecatch.api.game.exception.InvalidPlayerNameException;
 import com.routecatch.api.game.exception.InvalidSessionHistoryLimitException;
+import com.routecatch.api.multiplayer.room.creature.RoomCreatureAlreadyCaughtException;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureCatalogEmptyException;
+import com.routecatch.api.multiplayer.room.creature.RoomCreatureExpiredException;
+import com.routecatch.api.multiplayer.room.creature.RoomCreatureNotFoundException;
+import com.routecatch.api.multiplayer.room.creature.RoomCreatureTooFarException;
 import com.routecatch.api.multiplayer.room.creature.RoomGameNotRunningException;
 import com.routecatch.api.multiplayer.room.exception.RoomClosedException;
 import com.routecatch.api.multiplayer.room.exception.RoomForbiddenException;
@@ -196,6 +200,58 @@ public class GlobalExceptionHandler {
 		return errorResponse(
 			HttpStatus.CONFLICT,
 			"ROOM_CREATURE_CATALOG_EMPTY",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoomCreatureNotFoundException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoomCreatureNotFound(
+		RoomCreatureNotFoundException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.NOT_FOUND,
+			"ROOM_CREATURE_NOT_FOUND",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoomCreatureExpiredException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoomCreatureExpired(
+		RoomCreatureExpiredException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.CONFLICT,
+			"ROOM_CREATURE_EXPIRED",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoomCreatureAlreadyCaughtException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoomCreatureAlreadyCaught(
+		RoomCreatureAlreadyCaughtException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.CONFLICT,
+			"ROOM_CREATURE_ALREADY_CAUGHT",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoomCreatureTooFarException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoomCreatureTooFar(
+		RoomCreatureTooFarException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.CONFLICT,
+			"ROOM_CREATURE_TOO_FAR",
 			exception.getMessage(),
 			request
 		);

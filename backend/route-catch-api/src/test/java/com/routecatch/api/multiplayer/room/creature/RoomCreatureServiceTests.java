@@ -1,6 +1,8 @@
 package com.routecatch.api.multiplayer.room.creature;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -8,6 +10,11 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.Test;
 
@@ -48,6 +55,132 @@ class RoomCreatureServiceTests {
 		clock.advance(Duration.ofSeconds(31));
 
 		assertEquals(List.of(), creatureService.listCreatures(roomCode, host));
+	}
+
+	@Test
+	void catchExpiredCreatureReturnsConflictException() {
+		MutableClock clock = new MutableClock(Instant.parse(
+			"2026-06-25T10:00:00Z"
+		));
+		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomCreatureService creatureService = new RoomCreatureService(
+			roomService,
+			new StubCreatureCatalogService(),
+			clock
+		);
+		UserEntity host = user("host", "Host");
+		String roomCode = roomService
+			.createRoom(host, new CreateRoomRequest("Delhi Room"))
+			.getRoomCode();
+		roomService.startGame(roomCode, host, new StartRoomGameRequest(60));
+		RoomCreatureInstance creature = creatureService.spawnCreatures(
+			roomCode,
+			host,
+			new SpawnRoomCreaturesRequest(28.6139, 77.2090, 1, 30, 20.0)
+		).getFirst();
+
+		clock.advance(Duration.ofSeconds(31));
+
+		assertThrows(
+			RoomCreatureExpiredException.class,
+			() -> creatureService.catchCreature(
+				roomCode,
+				creature.getInstanceId(),
+				host,
+				catchRequest(creature)
+			)
+		);
+	}
+
+	@Test
+	void concurrentDuplicateCatchAllowsOnlyOneSuccess() throws Exception {
+		MutableClock clock = new MutableClock(Instant.parse(
+			"2026-06-25T10:00:00Z"
+		));
+		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomCreatureService creatureService = new RoomCreatureService(
+			roomService,
+			new StubCreatureCatalogService(),
+			clock
+		);
+		UserEntity host = user("host", "Host");
+		UserEntity member = user("member", "Member");
+		String roomCode = roomService
+			.createRoom(host, new CreateRoomRequest("Delhi Room"))
+			.getRoomCode();
+		roomService.joinRoom(roomCode, member);
+		roomService.startGame(roomCode, host, new StartRoomGameRequest(60));
+		RoomCreatureInstance creature = creatureService.spawnCreatures(
+			roomCode,
+			host,
+			new SpawnRoomCreaturesRequest(28.6139, 77.2090, 1, 120, 20.0)
+		).getFirst();
+		CountDownLatch ready = new CountDownLatch(2);
+		CountDownLatch start = new CountDownLatch(1);
+		ExecutorService executor = Executors.newFixedThreadPool(2);
+
+		try {
+			Future<Boolean> hostAttempt = executor.submit(catchAttempt(
+				ready,
+				start,
+				creatureService,
+				roomCode,
+				creature,
+				host
+			));
+			Future<Boolean> memberAttempt = executor.submit(catchAttempt(
+				ready,
+				start,
+				creatureService,
+				roomCode,
+				creature,
+				member
+			));
+
+			ready.await();
+			start.countDown();
+
+			int successes = (hostAttempt.get() ? 1 : 0)
+				+ (memberAttempt.get() ? 1 : 0);
+
+			assertEquals(1, successes);
+			assertTrue(creature.isCaught());
+		} finally {
+			executor.shutdownNow();
+		}
+	}
+
+	private Callable<Boolean> catchAttempt(
+		CountDownLatch ready,
+		CountDownLatch start,
+		RoomCreatureService creatureService,
+		String roomCode,
+		RoomCreatureInstance creature,
+		UserEntity user
+	) {
+		return () -> {
+			ready.countDown();
+			start.await();
+
+			try {
+				creatureService.catchCreature(
+					roomCode,
+					creature.getInstanceId(),
+					user,
+					catchRequest(creature)
+				);
+				return true;
+			} catch (RoomCreatureAlreadyCaughtException exception) {
+				return false;
+			}
+		};
+	}
+
+	private CatchRoomCreatureRequest catchRequest(RoomCreatureInstance creature) {
+		return new CatchRoomCreatureRequest(
+			creature.getLatitude(),
+			creature.getLongitude()
+		);
 	}
 
 	private UserEntity user(String username, String displayName) {

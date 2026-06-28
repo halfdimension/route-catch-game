@@ -48,6 +48,17 @@ public class RoomCreatureInstance {
 		return !expiresAt.isAfter(now);
 	}
 
+	public void markCaught(
+		UUID caughtByUserId,
+		String caughtByDisplayName,
+		Instant caughtAt
+	) {
+		this.caught = true;
+		this.caughtByUserId = caughtByUserId;
+		this.caughtByDisplayName = caughtByDisplayName;
+		this.caughtAt = caughtAt;
+	}
+
 	public UUID getInstanceId() {
 		return instanceId;
 	}

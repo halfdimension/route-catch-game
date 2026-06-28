@@ -2,6 +2,7 @@ package com.routecatch.api.multiplayer.room.creature;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -60,5 +61,23 @@ public class RoomCreatureController {
 			.stream()
 			.map((creature) -> RoomCreatureResponse.from(creature, now))
 			.toList();
+	}
+
+	@PostMapping("/{instanceId}/catch")
+	public CatchRoomCreatureResponse catchCreature(
+		@PathVariable String roomCode,
+		@PathVariable UUID instanceId,
+		@Valid @RequestBody CatchRoomCreatureRequest request,
+		Authentication authentication
+	) {
+		UserEntity currentUser = currentUserService.getCurrentUserEntity(
+			authentication
+		);
+		return roomCreatureService.catchCreature(
+			roomCode,
+			instanceId,
+			currentUser,
+			request
+		);
 	}
 }
