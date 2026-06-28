@@ -43,6 +43,7 @@ function GameMap({
   otherPlayers = [],
   onMapClick,
   onTargetClick,
+  onSharedRoomCreatureCatch,
 }) {
   return (
     <MapContainer
@@ -67,7 +68,10 @@ function GameMap({
         chasedTargetId={chasedTargetId}
         routingTargetId={routingTargetId}
       />
-      <SharedRoomCreatureMarkers creatures={sharedRoomCreatures} />
+      <SharedRoomCreatureMarkers
+        creatures={sharedRoomCreatures}
+        onCatchCreature={onSharedRoomCreatureCatch}
+      />
       <CatchMapEffect caughtTarget={caughtTarget} />
       <OtherPlayerMarkers players={otherPlayers} />
       <PlayerMarker position={playerPosition} playerName={playerName} />

@@ -116,3 +116,21 @@ export function listRoomCreatures(roomCode, token) {
     token,
   )
 }
+
+export function catchRoomCreature(
+  roomCode,
+  instanceId,
+  { playerLat, playerLon },
+  token,
+) {
+  return requestMultiplayerRoom(
+    `/api/multiplayer/rooms/${encodeURIComponent(
+      roomCode,
+    )}/creatures/${encodeURIComponent(instanceId)}/catch`,
+    token,
+    {
+      method: 'POST',
+      body: JSON.stringify({ playerLat, playerLon }),
+    },
+  )
+}

@@ -26,6 +26,8 @@ public class RoomCreatureService {
 
 	private static final int MAX_ACTIVE_UNCAUGHT_CREATURES_PER_ROOM = 50;
 	private static final double METERS_PER_DEGREE_LATITUDE = 111_320.0;
+	private static final double CATCH_RADIUS_METERS = 75.0;
+	private static final double EARTH_RADIUS_METERS = 6_371_000.0;
 
 	private final MultiplayerRoomService roomService;
 	private final CreatureCatalogService creatureCatalogService;
@@ -135,6 +137,54 @@ public class RoomCreatureService {
 			.toList();
 	}
 
+	public synchronized CatchRoomCreatureResponse catchCreature(
+		String roomCode,
+		UUID instanceId,
+		UserEntity currentUser,
+		CatchRoomCreatureRequest request
+	) {
+		MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
+		requireGameRunning(room);
+
+		String normalizedRoomCode = room.getRoomCode();
+		Instant now = Instant.now(clock);
+		RoomCreatureInstance creature = findCreature(
+			normalizedRoomCode,
+			instanceId
+		);
+
+		if (creature.isExpired(now)) {
+			throw new RoomCreatureExpiredException(instanceId);
+		}
+
+		if (creature.isCaught()) {
+			throw new RoomCreatureAlreadyCaughtException(instanceId);
+		}
+
+		double distanceMeters = distanceMeters(
+			request.playerLat(),
+			request.playerLon(),
+			creature.getLatitude(),
+			creature.getLongitude()
+		);
+
+		if (distanceMeters > CATCH_RADIUS_METERS) {
+			throw new RoomCreatureTooFarException(
+				instanceId,
+				distanceMeters,
+				CATCH_RADIUS_METERS
+			);
+		}
+
+		creature.markCaught(
+			currentUser.getUserId(),
+			currentUser.getDisplayName(),
+			now
+		);
+
+		return CatchRoomCreatureResponse.from(creature, distanceMeters);
+	}
+
 	public synchronized void clearExpiredCreatures(String roomCode) {
 		Instant now = Instant.now(clock);
 		List<RoomCreatureInstance> roomCreatures =
@@ -173,6 +223,41 @@ public class RoomCreatureService {
 			.filter((creature) -> !creature.isCaught())
 			.filter((creature) -> !creature.isExpired(now))
 			.count();
+	}
+
+	private RoomCreatureInstance findCreature(
+		String normalizedRoomCode,
+		UUID instanceId
+	) {
+		return creaturesByRoom.getOrDefault(normalizedRoomCode, List.of())
+			.stream()
+			.filter((creature) -> creature.getInstanceId().equals(instanceId))
+			.findFirst()
+			.orElseThrow(() -> new RoomCreatureNotFoundException(instanceId));
+	}
+
+	private double distanceMeters(
+		double startLatitude,
+		double startLongitude,
+		double endLatitude,
+		double endLongitude
+	) {
+		double startLatitudeRadians = Math.toRadians(startLatitude);
+		double endLatitudeRadians = Math.toRadians(endLatitude);
+		double latitudeDelta = Math.toRadians(endLatitude - startLatitude);
+		double longitudeDelta = Math.toRadians(endLongitude - startLongitude);
+
+		double haversine = Math.sin(latitudeDelta / 2.0)
+			* Math.sin(latitudeDelta / 2.0)
+			+ Math.cos(startLatitudeRadians)
+			* Math.cos(endLatitudeRadians)
+			* Math.sin(longitudeDelta / 2.0)
+			* Math.sin(longitudeDelta / 2.0);
+
+		return EARTH_RADIUS_METERS * 2.0 * Math.atan2(
+			Math.sqrt(haversine),
+			Math.sqrt(1.0 - haversine)
+		);
 	}
 
 	private CreatureDefinition randomCreature(List<CreatureDefinition> catalog) {
