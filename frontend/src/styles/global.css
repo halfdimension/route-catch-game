@@ -119,6 +119,34 @@ button:focus-visible {
   background: rgba(254, 242, 242, 0.96);
 }
 
+.shared-room-catch-status {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  z-index: 1000;
+  width: min(340px, calc(100vw - 32px));
+  padding: 8px 11px;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.16);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.shared-room-catch-status.is-success {
+  border: 1px solid rgba(15, 118, 110, 0.28);
+  color: #134e4a;
+  background: rgba(240, 253, 250, 0.97);
+}
+
+.shared-room-catch-status.is-error {
+  border: 1px solid rgba(185, 28, 28, 0.28);
+  color: #7f1d1d;
+  background: rgba(254, 242, 242, 0.97);
+}
+
 .movement-status-panel {
   position: absolute;
   top: 16px;
@@ -2235,6 +2263,31 @@ button:focus-visible {
 
 .shared-room-creature-tooltip strong {
   color: #172033;
+}
+
+.shared-room-creature-popup {
+  display: grid;
+  gap: 6px;
+  min-width: 148px;
+}
+
+.shared-room-creature-popup strong {
+  color: #172033;
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.shared-room-creature-popup span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.shared-room-creature-popup button {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 @keyframes target-marker-pulse {

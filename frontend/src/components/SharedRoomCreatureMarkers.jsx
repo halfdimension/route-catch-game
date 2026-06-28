@@ -1,5 +1,5 @@
-import { divIcon } from 'leaflet'
-import { Marker, Tooltip } from 'react-leaflet'
+import { DomEvent, divIcon } from 'leaflet'
+import { Marker, Popup, Tooltip } from 'react-leaflet'
 import { getRarityClassName } from '../utils/rarityStyles'
 
 function escapeHtml(value) {
@@ -20,7 +20,7 @@ function getCreatureInitial(name) {
   return String(name || 'S').trim().charAt(0).toUpperCase() || 'S'
 }
 
-function SharedRoomCreatureMarkers({ creatures = [] }) {
+function SharedRoomCreatureMarkers({ creatures = [], onCatchCreature }) {
   return creatures.map((creature) => {
     const latitude = Number(creature.latitude)
     const longitude = Number(creature.longitude)
@@ -49,6 +49,11 @@ function SharedRoomCreatureMarkers({ creatures = [] }) {
         position={[latitude, longitude]}
         icon={icon}
         title={`${creature.name}, ${creature.rarity} shared creature`}
+        eventHandlers={{
+          click(event) {
+            DomEvent.stop(event.originalEvent)
+          },
+        }}
       >
         <Tooltip direction="top" offset={[0, -12]} opacity={0.95}>
           <span className="shared-room-creature-tooltip">
@@ -58,6 +63,22 @@ function SharedRoomCreatureMarkers({ creatures = [] }) {
             <span>{creature.remainingSeconds}s left</span>
           </span>
         </Tooltip>
+        <Popup closeButton={false} minWidth={156}>
+          <div className="shared-room-creature-popup">
+            <strong>{creature.name}</strong>
+            <span>Shared room catch</span>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onCatchCreature?.(creature)
+              }}
+            >
+              Catch shared creature
+            </button>
+          </div>
+        </Popup>
       </Marker>
     )
   })

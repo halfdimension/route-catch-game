@@ -14,7 +14,10 @@ import StatsDrawer from './components/StatsDrawer'
 import TargetInfoPanel from './components/TargetInfoPanel'
 import { MAX_SIMULATION_SPEED } from './config/gameConfig'
 import { useAuth } from './context/authContextCore'
-import { listRoomCreatures } from './api/multiplayerRoomClient'
+import {
+  catchRoomCreature,
+  listRoomCreatures,
+} from './api/multiplayerRoomClient'
 import { useBackendGameSession } from './hooks/useBackendGameSession'
 import { useCatchDetection } from './hooks/useCatchDetection'
 import { useGameSession } from './hooks/useGameSession'
@@ -26,6 +29,13 @@ import { useTargetSpawner } from './hooks/useTargetSpawner'
 import { playCatchSound } from './utils/soundEffects'
 
 const TARGET_EXPIRED_MESSAGE = 'Target expired'
+
+const ROOM_CREATURE_CATCH_ERROR_MESSAGES = {
+  ROOM_CREATURE_TOO_FAR: 'Too far from this creature.',
+  ROOM_CREATURE_ALREADY_CAUGHT: 'Already caught by another player.',
+  ROOM_CREATURE_EXPIRED: 'Creature expired.',
+  ROOM_GAME_NOT_RUNNING: 'Room game is not running.',
+}
 
 function App() {
   const {
@@ -161,6 +171,7 @@ function App() {
   const [activeMultiplayerRoom, setActiveMultiplayerRoom] = useState(null)
   const [activeRoomGameState, setActiveRoomGameState] = useState(null)
   const [sharedRoomCreatures, setSharedRoomCreatures] = useState([])
+  const [sharedRoomCatchMessage, setSharedRoomCatchMessage] = useState(null)
   const previousGameStateRef = useRef(gameState)
   const targetsRef = useRef(targets)
   const activeRoomCode = activeMultiplayerRoom?.roomCode
@@ -219,6 +230,18 @@ function App() {
 
     return () => clearTimeout(timerId)
   }, [catchToastTarget])
+
+  useEffect(() => {
+    if (!sharedRoomCatchMessage) {
+      return undefined
+    }
+
+    const timerId = window.setTimeout(() => {
+      setSharedRoomCatchMessage(null)
+    }, 2600)
+
+    return () => window.clearTimeout(timerId)
+  }, [sharedRoomCatchMessage])
 
   useEffect(() => {
     const previousGameState = previousGameStateRef.current
@@ -351,6 +374,67 @@ function App() {
     }
   }, [activeRoomCode, activeRoomGameStatus, isAuthenticated, logout, token])
 
+  const handleSharedRoomCreatureCatch = useCallback(
+    async (creature) => {
+      const playerLat = Number(playerPosition?.lat)
+      const playerLon = Number(playerPosition?.lon)
+
+      if (!Number.isFinite(playerLat) || !Number.isFinite(playerLon)) {
+        setSharedRoomCatchMessage({
+          type: 'error',
+          text: 'Player position unavailable.',
+        })
+        return
+      }
+
+      if (!token || !activeRoomCode || !creature?.instanceId) {
+        setSharedRoomCatchMessage({
+          type: 'error',
+          text: 'Could not catch creature.',
+        })
+        return
+      }
+
+      try {
+        const caughtCreature = await catchRoomCreature(
+          activeRoomCode,
+          creature.instanceId,
+          { playerLat, playerLon },
+          token,
+        )
+        const catchName = caughtCreature?.name || creature.name || 'Creature'
+        const scoreValue =
+          caughtCreature?.scoreValue ?? creature.scoreValue ?? 0
+
+        setSharedRoomCatchMessage({
+          type: 'success',
+          text: `Caught ${catchName} (+${scoreValue})`,
+        })
+        await refreshSharedRoomCreatures()
+      } catch (error) {
+        if (error.status === 401) {
+          logout()
+        }
+
+        setSharedRoomCatchMessage({
+          type: 'error',
+          text:
+            ROOM_CREATURE_CATCH_ERROR_MESSAGES[error.errorCode] ||
+            error.message ||
+            'Could not catch creature.',
+        })
+      }
+    },
+    [
+      activeRoomCode,
+      logout,
+      playerPosition?.lat,
+      playerPosition?.lon,
+      refreshSharedRoomCreatures,
+      token,
+    ],
+  )
+
   useEffect(() => {
     if (
       !isAuthenticated ||
@@ -471,9 +555,17 @@ function App() {
         otherPlayers={otherOnlinePlayers}
         onMapClick={handleMapClick}
         onTargetClick={handleTargetClick}
+        onSharedRoomCreatureCatch={handleSharedRoomCreatureCatch}
       />
 
       {routeError && <div className="route-status route-error">{routeError}</div>}
+      {sharedRoomCatchMessage && (
+        <div
+          className={`shared-room-catch-status is-${sharedRoomCatchMessage.type}`}
+        >
+          {sharedRoomCatchMessage.text}
+        </div>
+      )}
 
       <MovementStatusPanel
         isMoving={isMoving}
