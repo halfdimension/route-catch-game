@@ -20,6 +20,7 @@ import com.routecatch.api.multiplayer.room.exception.RoomForbiddenException;
 import com.routecatch.api.multiplayer.room.model.MultiplayerRoom;
 import com.routecatch.api.multiplayer.room.model.RoomGameStatus;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
+import com.routecatch.api.multiplayer.room.service.RoomScoreService;
 
 @Service
 public class RoomCreatureService {
@@ -30,6 +31,7 @@ public class RoomCreatureService {
 	private static final double EARTH_RADIUS_METERS = 6_371_000.0;
 
 	private final MultiplayerRoomService roomService;
+	private final RoomScoreService scoreService;
 	private final CreatureCatalogService creatureCatalogService;
 	private final Clock clock;
 	private final SecureRandom random = new SecureRandom();
@@ -39,17 +41,20 @@ public class RoomCreatureService {
 	@Autowired
 	public RoomCreatureService(
 		MultiplayerRoomService roomService,
+		RoomScoreService scoreService,
 		CreatureCatalogService creatureCatalogService
 	) {
-		this(roomService, creatureCatalogService, Clock.systemUTC());
+		this(roomService, scoreService, creatureCatalogService, Clock.systemUTC());
 	}
 
 	RoomCreatureService(
 		MultiplayerRoomService roomService,
+		RoomScoreService scoreService,
 		CreatureCatalogService creatureCatalogService,
 		Clock clock
 	) {
 		this.roomService = roomService;
+		this.scoreService = scoreService;
 		this.creatureCatalogService = creatureCatalogService;
 		this.clock = clock;
 	}
@@ -180,6 +185,12 @@ public class RoomCreatureService {
 			currentUser.getUserId(),
 			currentUser.getDisplayName(),
 			now
+		);
+		scoreService.awardCatch(
+			room,
+			currentUser,
+			creature.getScoreValue(),
+			creature.getCaughtAt()
 		);
 
 		return CatchRoomCreatureResponse.from(creature, distanceMeters);

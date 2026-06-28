@@ -15,8 +15,10 @@ import com.routecatch.api.auth.service.CurrentUserService;
 import com.routecatch.api.multiplayer.room.dto.CreateRoomRequest;
 import com.routecatch.api.multiplayer.room.dto.RoomGameStateResponse;
 import com.routecatch.api.multiplayer.room.dto.RoomResponse;
+import com.routecatch.api.multiplayer.room.dto.RoomScoreboardResponse;
 import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
+import com.routecatch.api.multiplayer.room.service.RoomScoreService;
 
 import jakarta.validation.Valid;
 
@@ -25,13 +27,16 @@ import jakarta.validation.Valid;
 public class MultiplayerRoomController {
 
 	private final MultiplayerRoomService roomService;
+	private final RoomScoreService scoreService;
 	private final CurrentUserService currentUserService;
 
 	public MultiplayerRoomController(
 		MultiplayerRoomService roomService,
+		RoomScoreService scoreService,
 		CurrentUserService currentUserService
 	) {
 		this.roomService = roomService;
+		this.scoreService = scoreService;
 		this.currentUserService = currentUserService;
 	}
 
@@ -133,5 +138,16 @@ public class MultiplayerRoomController {
 		return RoomGameStateResponse.from(
 			roomService.endGame(roomCode, currentUser)
 		);
+	}
+
+	@GetMapping("/{roomCode}/scoreboard")
+	public RoomScoreboardResponse getScoreboard(
+		@PathVariable String roomCode,
+		Authentication authentication
+	) {
+		UserEntity currentUser = currentUserService.getCurrentUserEntity(
+			authentication
+		);
+		return scoreService.getScoreboard(roomCode, currentUser);
 	}
 }

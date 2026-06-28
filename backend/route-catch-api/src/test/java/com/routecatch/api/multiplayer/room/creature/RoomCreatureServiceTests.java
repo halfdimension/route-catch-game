@@ -22,8 +22,10 @@ import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.game.creature.CreatureCatalogService;
 import com.routecatch.api.game.creature.CreatureDefinition;
 import com.routecatch.api.multiplayer.room.dto.CreateRoomRequest;
+import com.routecatch.api.multiplayer.room.dto.RoomScoreboardResponse;
 import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
+import com.routecatch.api.multiplayer.room.service.RoomScoreService;
 
 class RoomCreatureServiceTests {
 
@@ -33,8 +35,10 @@ class RoomCreatureServiceTests {
 			"2026-06-25T10:00:00Z"
 		));
 		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomScoreService scoreService = new RoomScoreService(roomService);
 		RoomCreatureService creatureService = new RoomCreatureService(
 			roomService,
+			scoreService,
 			new StubCreatureCatalogService(),
 			clock
 		);
@@ -63,8 +67,10 @@ class RoomCreatureServiceTests {
 			"2026-06-25T10:00:00Z"
 		));
 		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomScoreService scoreService = new RoomScoreService(roomService);
 		RoomCreatureService creatureService = new RoomCreatureService(
 			roomService,
+			scoreService,
 			new StubCreatureCatalogService(),
 			clock
 		);
@@ -98,8 +104,10 @@ class RoomCreatureServiceTests {
 			"2026-06-25T10:00:00Z"
 		));
 		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomScoreService scoreService = new RoomScoreService(roomService);
 		RoomCreatureService creatureService = new RoomCreatureService(
 			roomService,
+			scoreService,
 			new StubCreatureCatalogService(),
 			clock
 		);
@@ -145,6 +153,25 @@ class RoomCreatureServiceTests {
 
 			assertEquals(1, successes);
 			assertTrue(creature.isCaught());
+
+			RoomScoreboardResponse scoreboard = scoreService.getScoreboard(
+				roomCode,
+				host
+			);
+			assertEquals(
+				10,
+				scoreboard.entries()
+					.stream()
+					.mapToInt((entry) -> entry.score())
+					.sum()
+			);
+			assertEquals(
+				1,
+				scoreboard.entries()
+					.stream()
+					.mapToInt((entry) -> entry.catches())
+					.sum()
+			);
 		} finally {
 			executor.shutdownNow();
 		}
