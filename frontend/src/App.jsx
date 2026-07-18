@@ -17,12 +17,14 @@ import { useBackendGameSession } from './hooks/useBackendGameSession'
 import { useCatchDetection } from './hooks/useCatchDetection'
 import { useGameSession } from './hooks/useGameSession'
 import { useMultiplayerPresence } from './hooks/useMultiplayerPresence'
+import { useMovementPlanRenderer } from './hooks/useMovementPlanRenderer'
 import { usePlayerProgression } from './hooks/usePlayerProgression'
 import { usePlayerName } from './hooks/usePlayerName'
 import { usePlayerState } from './hooks/usePlayerState'
 import { useTargetSpawner } from './hooks/useTargetSpawner'
 import {
   DEFAULT_SIMULATION_SPEED,
+  INITIAL_PLAYER_POSITION,
   MIN_SIMULATION_SPEED,
 } from './config/gameConfig'
 import HomePage from './pages/HomePage'
@@ -36,6 +38,10 @@ import RoomsPage from './pages/RoomsPage'
 import SoloPlayPage from './pages/SoloPlayPage'
 import StatsPage from './pages/StatsPage'
 import { playCatchSound } from './utils/soundEffects'
+import {
+  MOVEMENT_ARCHITECTURE,
+  startMovementForArchitecture,
+} from './utils/movementArchitecture'
 
 const TARGET_EXPIRED_MESSAGE = 'Target expired'
 
@@ -197,13 +203,7 @@ function App() {
   const routingTargetIdRef = useRef(null)
   const chasedSharedRoomCreatureIdRef = useRef(null)
   const routingSharedRoomCreatureIdRef = useRef(null)
-  const multiplayerPresenceStatus =
-    chasedTargetId || chasedSharedRoomCreatureId
-    ? 'CHASING'
-    : isMoving
-      ? 'MOVING'
-      : 'IDLE'
-
+  const cancelRoomMovementRef = useRef(() => false)
   const updateChasedTargetId = useCallback((targetId) => {
     chasedTargetIdRef.current = targetId
     setChasedTargetId(targetId)
@@ -272,6 +272,7 @@ function App() {
   const targetsRef = useRef(targets)
   const sharedRoomCreaturesRef = useRef(sharedRoomCreatures)
   const pendingSharedRoomCatchIdsRef = useRef(new Set())
+  const sharedRoomCatchRetryAfterRef = useRef(new Map())
   const speedInitializedRoomCodeRef = useRef('')
   const activeRoomCode = activeMultiplayerRoom?.roomCode
   const activeRoomStatus =
@@ -308,29 +309,94 @@ function App() {
           chasedSharedRoomCreatureIdRef.current === creature.instanceId ||
           routingSharedRoomCreatureIdRef.current === creature.instanceId
         ) {
-          stopPlayerMovement()
+          cancelRoomMovementRef.current()
           clearSharedRoomCreatureChaseState()
         }
       }
     },
-    [activeRoomCode, clearSharedRoomCreatureChaseState, stopPlayerMovement],
+    [activeRoomCode, clearSharedRoomCreatureChaseState],
   )
   const {
+    cancelRoomMovement,
     connectionStatus: multiplayerConnectionStatus,
+    movementCommandPending,
+    movementErrorMessage,
+    movementNeedsSnapshot,
+    movementPlans,
+    movementRoomSequence,
+    movementServerOffsetMs,
+    movementSnapshotStatus,
     onlinePlayers,
     errorMessage: multiplayerErrorMessage,
     connectPresence,
     disconnectPresence,
+    sendPresenceUpdate,
+    startRoomMovement,
   } = useMultiplayerPresence({
     token,
     currentUser,
-    playerPosition,
-    status: multiplayerPresenceStatus,
+    playerPosition: INITIAL_PLAYER_POSITION,
+    status: 'IDLE',
     onRoomCreatureEvent: handleRoomCreatureEvent,
   })
+  useEffect(() => {
+    cancelRoomMovementRef.current = cancelRoomMovement
+  }, [cancelRoomMovement])
+  const {
+    getCurrentPlayerPosition: getCurrentRoomPlayerPosition,
+    positionsByPlayerId: roomPositionsByPlayerId,
+    preparedPlans: preparedRoomMovementPlans,
+  } = useMovementPlanRenderer({
+    movementPlans,
+    serverOffsetMs: movementServerOffsetMs,
+  })
+  const localRoomMovementPlan = useMemo(
+    () => movementPlans.find(
+      (plan) => String(plan.playerId) === String(currentUser?.userId),
+    ) ?? null,
+    [currentUser?.userId, movementPlans],
+  )
+  const localPresencePosition = useMemo(() => {
+    const localPresence = onlinePlayers.find(
+      (player) => String(player.userId) === String(currentUser?.userId),
+    )
+    const lat = Number(localPresence?.lat)
+    const lon = Number(localPresence?.lon)
+    return Number.isFinite(lat) && Number.isFinite(lon)
+      ? { lat, lon }
+      : null
+  }, [currentUser?.userId, onlinePlayers])
+  const roomPlayerPosition =
+    roomPositionsByPlayerId.get(String(currentUser?.userId)) ||
+    localPresencePosition ||
+    INITIAL_PLAYER_POSITION
+  const roomRouteCoordinates = useMemo(() => {
+    if (localRoomMovementPlan?.status !== 'MOVING') {
+      return []
+    }
+
+    return preparedRoomMovementPlans
+      .get(String(currentUser?.userId))
+      ?.route.coordinates ?? []
+  }, [
+    currentUser?.userId,
+    localRoomMovementPlan?.status,
+    preparedRoomMovementPlans,
+  ])
+  const roomMovementStatus = localRoomMovementPlan?.status ?? 'IDLE'
+  const roomIsMoving = roomMovementStatus === 'MOVING'
+  const roomMovementSpeed = roomIsMoving
+    ? localRoomMovementPlan?.simulationSpeedMps ?? 0
+    : 0
   const otherOnlinePlayers = useMemo(
-    () => onlinePlayers.filter((player) => player.userId !== currentUser?.userId),
-    [currentUser?.userId, onlinePlayers],
+    () => onlinePlayers
+      .filter((player) => String(player.userId) !== String(currentUser?.userId))
+      .map((player) => ({
+        ...player,
+        renderPosition:
+          roomPositionsByPlayerId.get(String(player.userId)) || null,
+      })),
+    [currentUser?.userId, onlinePlayers, roomPositionsByPlayerId],
   )
 
   useEffect(() => {
@@ -373,14 +439,94 @@ function App() {
         pendingSharedRoomCatchIdsRef.current.delete(instanceId)
       }
     })
+    sharedRoomCatchRetryAfterRef.current.forEach((_, instanceId) => {
+      if (!activeCreatureIds.has(instanceId)) {
+        sharedRoomCatchRetryAfterRef.current.delete(instanceId)
+      }
+    })
 
     if (
       chasedSharedRoomCreatureIdRef.current &&
       !activeCreatureIds.has(chasedSharedRoomCreatureIdRef.current)
     ) {
+      cancelRoomMovementRef.current()
       clearSharedRoomCreatureChaseState()
     }
   }, [clearSharedRoomCreatureChaseState, sharedRoomCreatures])
+
+  useEffect(() => {
+    if (!localRoomMovementPlan) {
+      const timerId = window.setTimeout(
+        clearSharedRoomCreatureChaseState,
+        0,
+      )
+      return () => window.clearTimeout(timerId)
+    }
+
+    const targetCreatureInstanceId =
+      localRoomMovementPlan.targetCreatureInstanceId
+
+    const timerId = window.setTimeout(() => {
+      if (
+        (
+          localRoomMovementPlan.status === 'MOVING' ||
+          localRoomMovementPlan.status === 'COMPLETED'
+        ) &&
+        localRoomMovementPlan.destinationType === 'CREATURE' &&
+        targetCreatureInstanceId
+      ) {
+        updateChasedSharedRoomCreatureId(targetCreatureInstanceId)
+        updateRoutingSharedRoomCreatureId(null)
+      } else if (
+        localRoomMovementPlan.status === 'CANCELLED' ||
+        localRoomMovementPlan.destinationType !== 'CREATURE'
+      ) {
+        clearSharedRoomCreatureChaseState()
+      }
+    }, 0)
+
+    const authoritativePosition = getCurrentRoomPlayerPosition(
+      currentUser?.userId,
+    )
+
+    if (authoritativePosition) {
+      sendPresenceUpdate({
+        force: true,
+        position: authoritativePosition,
+        reason: 'authoritative-movement-transition',
+        status:
+          localRoomMovementPlan.status === 'MOVING'
+            ? targetCreatureInstanceId ? 'CHASING' : 'MOVING'
+            : 'IDLE',
+      })
+    }
+
+    return () => window.clearTimeout(timerId)
+  }, [
+    clearSharedRoomCreatureChaseState,
+    currentUser?.userId,
+    getCurrentRoomPlayerPosition,
+    localRoomMovementPlan,
+    sendPresenceUpdate,
+    updateChasedSharedRoomCreatureId,
+    updateRoutingSharedRoomCreatureId,
+  ])
+
+  useEffect(() => {
+    if (movementCommandPending || !movementErrorMessage) {
+      return undefined
+    }
+
+    const timerId = window.setTimeout(
+      () => updateRoutingSharedRoomCreatureId(null),
+      0,
+    )
+    return () => window.clearTimeout(timerId)
+  }, [
+    movementCommandPending,
+    movementErrorMessage,
+    updateRoutingSharedRoomCreatureId,
+  ])
 
   const handleCatchTarget = useCallback(
     (target) => {
@@ -543,7 +689,38 @@ function App() {
   async function handleConfirmPendingMove() {
     clearChaseState()
     clearSharedRoomCreatureChaseState()
-    await confirmPendingMove()
+    await startMovementForArchitecture({
+      architecture: MOVEMENT_ARCHITECTURE.SOLO,
+      startAuthoritativePlan: () => false,
+      startLocalRoute: confirmPendingMove,
+    })
+  }
+
+  function handleRoomConfirmPendingMove() {
+    clearChaseState()
+
+    if (!pendingDestination || activeRoomGameStatus !== 'RUNNING') {
+      return false
+    }
+
+    const commandId = startMovementForArchitecture({
+      architecture: MOVEMENT_ARCHITECTURE.MULTIPLAYER,
+      startAuthoritativePlan: () => startRoomMovement({
+        destinationLat: pendingDestination.lat,
+        destinationLon: pendingDestination.lon,
+        requestedSpeedMps: simulationSpeed,
+        destinationType: 'MAP',
+        targetCreatureInstanceId: null,
+      }),
+      startLocalRoute: () => false,
+    })
+
+    if (commandId) {
+      clearPendingDestination()
+      return true
+    }
+
+    return false
   }
 
   function handleCancelChase() {
@@ -554,9 +731,15 @@ function App() {
 
   const cleanupRoomMovement = useCallback(() => {
     pendingSharedRoomCatchIdsRef.current.clear()
+    sharedRoomCatchRetryAfterRef.current.clear()
     stopPlayerMovement()
     clearSharedRoomCreatureChaseState()
   }, [clearSharedRoomCreatureChaseState, stopPlayerMovement])
+
+  const prepareRoomMovement = useCallback(() => {
+    stopPlayerMovement()
+    clearChaseState()
+  }, [clearChaseState, stopPlayerMovement])
 
   const handleMultiplayerRoomContextChange = useCallback((roomContext) => {
     setActiveMultiplayerRoom(roomContext?.activeRoom || null)
@@ -599,17 +782,27 @@ function App() {
   }, [])
 
   const attemptSharedRoomCreatureCatch = useCallback(
-    async (creature, positionOverride) => {
+    async (creature) => {
       const instanceId = creature?.instanceId
+      const retryAfterMs =
+        sharedRoomCatchRetryAfterRef.current.get(instanceId) ?? 0
 
-      if (!instanceId || pendingSharedRoomCatchIdsRef.current.has(instanceId)) {
+      if (
+        !instanceId ||
+        pendingSharedRoomCatchIdsRef.current.has(instanceId) ||
+        retryAfterMs > Date.now()
+      ) {
         return false
       }
 
+      sharedRoomCatchRetryAfterRef.current.delete(instanceId)
       pendingSharedRoomCatchIdsRef.current.add(instanceId)
 
-      const playerLat = Number(positionOverride?.lat ?? playerPosition?.lat)
-      const playerLon = Number(positionOverride?.lon ?? playerPosition?.lon)
+      const currentAuthoritativePosition =
+        getCurrentRoomPlayerPosition(currentUser?.userId) ||
+        roomPlayerPosition
+      const playerLat = Number(currentAuthoritativePosition?.lat)
+      const playerLon = Number(currentAuthoritativePosition?.lon)
 
       if (!Number.isFinite(playerLat) || !Number.isFinite(playerLon)) {
         setSharedRoomCatchMessage({
@@ -650,7 +843,8 @@ function App() {
             (currentCreature) => currentCreature.instanceId !== instanceId,
           ),
         )
-        stopPlayerMovement()
+        sharedRoomCatchRetryAfterRef.current.delete(instanceId)
+        cancelRoomMovement()
         if (
           chasedSharedRoomCreatureIdRef.current === instanceId ||
           routingSharedRoomCreatureIdRef.current === instanceId
@@ -669,7 +863,6 @@ function App() {
           'ROOM_CREATURE_EXPIRED',
           'ROOM_CREATURE_NOT_FOUND',
         ].includes(error.errorCode)
-        const shouldRetryLater = error.errorCode === 'ROOM_CREATURE_TOO_FAR'
         const message = wasUnavailable
           ? 'Already caught by another player.'
           : ROOM_CREATURE_CATCH_ERROR_MESSAGES[error.errorCode] ||
@@ -682,12 +875,13 @@ function App() {
         })
 
         if (wasUnavailable) {
+          sharedRoomCatchRetryAfterRef.current.delete(instanceId)
           setSharedRoomCreatures((currentCreatures) =>
             currentCreatures.filter(
               (currentCreature) => currentCreature.instanceId !== instanceId,
             ),
           )
-          stopPlayerMovement()
+          cancelRoomMovement()
           if (
             chasedSharedRoomCreatureIdRef.current === instanceId ||
             routingSharedRoomCreatureIdRef.current === instanceId
@@ -695,29 +889,33 @@ function App() {
             clearSharedRoomCreatureChaseState()
           }
           await refreshSharedRoomCreatures()
-        }
-
-        if (shouldRetryLater) {
-          pendingSharedRoomCatchIdsRef.current.delete(instanceId)
+        } else {
+          sharedRoomCatchRetryAfterRef.current.set(
+            instanceId,
+            Date.now() + 2000,
+          )
         }
 
         return false
+      } finally {
+        pendingSharedRoomCatchIdsRef.current.delete(instanceId)
       }
     },
     [
       activeRoomCode,
+      cancelRoomMovement,
       clearSharedRoomCreatureChaseState,
+      currentUser?.userId,
+      getCurrentRoomPlayerPosition,
       logout,
-      playerPosition?.lat,
-      playerPosition?.lon,
       refreshSharedRoomCreatures,
-      stopPlayerMovement,
+      roomPlayerPosition,
       token,
     ],
   )
 
   const handleSharedRoomCreatureCatch = useCallback(
-    async (creature) => {
+    (creature) => {
       const instanceId = creature?.instanceId
       const creaturePosition = getSharedRoomCreaturePosition(creature)
 
@@ -729,53 +927,39 @@ function App() {
         return
       }
 
-      stopPlayerMovement()
       clearPendingDestination()
       clearChaseState()
-      clearSharedRoomCreatureChaseState()
 
       if (!isSharedRoomCreatureActive(instanceId)) {
         setSharedRoomCatchMessage({
           type: 'error',
           text: 'Already caught by another player.',
         })
-        await refreshSharedRoomCreatures()
+        void refreshSharedRoomCreatures()
         return
       }
 
-      updateChasedSharedRoomCreatureId(instanceId)
       updateRoutingSharedRoomCreatureId(instanceId)
 
-      const didStartChase = await moveToDestination(creaturePosition, {
-        blockedMessage: 'Already caught by another player.',
-        shouldStart: () => isSharedRoomCreatureActive(instanceId),
-        onComplete: () => {
-          if (chasedSharedRoomCreatureIdRef.current === instanceId) {
-            void attemptSharedRoomCreatureCatch(creature, creaturePosition)
-          }
-        },
+      const commandId = startRoomMovement({
+        destinationLat: creaturePosition.lat,
+        destinationLon: creaturePosition.lon,
+        requestedSpeedMps: simulationSpeed,
+        destinationType: 'CREATURE',
+        targetCreatureInstanceId: instanceId,
       })
 
-      if (routingSharedRoomCreatureIdRef.current !== instanceId) {
-        return
-      }
-
-      updateRoutingSharedRoomCreatureId(null)
-
-      if (!didStartChase) {
-        updateChasedSharedRoomCreatureId(null)
+      if (!commandId) {
+        updateRoutingSharedRoomCreatureId(null)
       }
     },
     [
-      attemptSharedRoomCreatureCatch,
       clearChaseState,
-      clearSharedRoomCreatureChaseState,
       clearPendingDestination,
       isSharedRoomCreatureActive,
-      moveToDestination,
       refreshSharedRoomCreatures,
-      stopPlayerMovement,
-      updateChasedSharedRoomCreatureId,
+      simulationSpeed,
+      startRoomMovement,
       updateRoutingSharedRoomCreatureId,
     ],
   )
@@ -831,8 +1015,8 @@ function App() {
         currentCreature.instanceId === chasedSharedRoomCreatureId,
     )
     const creaturePosition = getSharedRoomCreaturePosition(creature)
-    const playerLat = Number(playerPosition?.lat)
-    const playerLon = Number(playerPosition?.lon)
+    const playerLat = Number(roomPlayerPosition?.lat)
+    const playerLon = Number(roomPlayerPosition?.lon)
 
     if (
       !creature ||
@@ -850,10 +1034,7 @@ function App() {
 
     if (distanceMeters <= SHARED_ROOM_CREATURE_CATCH_RADIUS_METERS) {
       const timerId = window.setTimeout(() => {
-        void attemptSharedRoomCreatureCatch(creature, {
-          lat: playerLat,
-          lon: playerLon,
-        })
+        void attemptSharedRoomCreatureCatch(creature)
       }, 0)
 
       return () => window.clearTimeout(timerId)
@@ -861,8 +1042,8 @@ function App() {
   }, [
     attemptSharedRoomCreatureCatch,
     chasedSharedRoomCreatureId,
-    playerPosition?.lat,
-    playerPosition?.lon,
+    roomPlayerPosition?.lat,
+    roomPlayerPosition?.lon,
     sharedRoomCreatures,
   ])
 
@@ -942,6 +1123,7 @@ function App() {
     clearPendingDestination,
     clearTargets,
     cleanupRoomMovement,
+    cancelRoomMovement,
     connectPresence,
     currentUser,
     disconnectPresence,
@@ -949,6 +1131,7 @@ function App() {
     gameState,
     handleCancelChase,
     handleConfirmPendingMove,
+    handleRoomConfirmPendingMove,
     handleMapClick,
     handleMultiplayerRoomContextChange,
     handleSharedRoomCreatureCatch,
@@ -965,12 +1148,23 @@ function App() {
     logout,
     multiplayerConnectionStatus,
     multiplayerErrorMessage,
+    movementCommandPending,
+    movementErrorMessage,
+    movementNeedsSnapshot,
+    movementRoomSequence,
+    movementSnapshotStatus,
     nextLevelXp,
     onlinePlayers,
     otherOnlinePlayers,
     pendingDestination,
     playerName,
     playerPosition,
+    prepareRoomMovement,
+    roomIsMoving,
+    roomMovementSpeed,
+    roomMovementStatus,
+    roomPlayerPosition,
+    roomRouteCoordinates,
     refreshSharedRoomCreatures,
     remainingSeconds,
     resetGame,

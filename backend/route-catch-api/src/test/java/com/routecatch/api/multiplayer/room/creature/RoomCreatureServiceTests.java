@@ -26,6 +26,7 @@ import com.routecatch.api.game.creature.CreatureDefinition;
 import com.routecatch.api.multiplayer.room.dto.CreateRoomRequest;
 import com.routecatch.api.multiplayer.room.dto.RoomScoreboardResponse;
 import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
+import com.routecatch.api.multiplayer.room.exception.RoomForbiddenException;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
 import com.routecatch.api.multiplayer.room.service.RoomScoreService;
 
@@ -61,6 +62,163 @@ class RoomCreatureServiceTests {
 		clock.advance(Duration.ofSeconds(31));
 
 		assertEquals(List.of(), creatureService.listCreatures(roomCode, host));
+	}
+
+	@Test
+	void resolvesActiveCreatureAsAuthoritativeMovementTarget() {
+		MutableClock clock = new MutableClock(Instant.parse(
+			"2026-06-25T10:00:00Z"
+		));
+		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomScoreService scoreService = new RoomScoreService(roomService);
+		RoomCreatureService creatureService = new RoomCreatureService(
+			roomService,
+			scoreService,
+			new StubCreatureCatalogService(),
+			clock
+		);
+		UserEntity host = user("host", "Host");
+		String roomCode = roomService
+			.createRoom(host, new CreateRoomRequest("Delhi Room"))
+			.getRoomCode();
+		roomService.startGame(roomCode, host, new StartRoomGameRequest(60));
+		RoomCreatureInstance creature = creatureService.spawnCreatures(
+			roomCode,
+			host,
+			new SpawnRoomCreaturesRequest(28.6139, 77.2090, 1, 30, 20.0)
+		).getFirst();
+
+		RoomCreatureMovementTarget target =
+			creatureService.resolveActiveMovementTarget(
+				roomCode.toLowerCase(),
+				creature.getInstanceId(),
+				host
+			);
+
+		assertEquals(creature.getInstanceId(), target.instanceId());
+		assertEquals(creature.getLatitude(), target.latitude());
+		assertEquals(creature.getLongitude(), target.longitude());
+	}
+
+	@Test
+	void nonMemberCannotResolveCreatureMovementTarget() {
+		MutableClock clock = new MutableClock(Instant.parse(
+			"2026-06-25T10:00:00Z"
+		));
+		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomScoreService scoreService = new RoomScoreService(roomService);
+		RoomCreatureService creatureService = new RoomCreatureService(
+			roomService,
+			scoreService,
+			new StubCreatureCatalogService(),
+			clock
+		);
+		UserEntity host = user("host", "Host");
+		UserEntity outsider = user("outsider", "Outsider");
+		String roomCode = roomService
+			.createRoom(host, new CreateRoomRequest("Delhi Room"))
+			.getRoomCode();
+		roomService.startGame(roomCode, host, new StartRoomGameRequest(60));
+		RoomCreatureInstance creature = creatureService.spawnCreatures(
+			roomCode,
+			host,
+			new SpawnRoomCreaturesRequest(28.6139, 77.2090, 1, 30, 20.0)
+		).getFirst();
+
+		assertThrows(
+			RoomForbiddenException.class,
+			() -> creatureService.resolveActiveMovementTarget(
+				roomCode,
+				creature.getInstanceId(),
+				outsider
+			)
+		);
+	}
+
+	@Test
+	void expiredCreatureCannotBeResolvedAsMovementTarget() {
+		MutableClock clock = new MutableClock(Instant.parse(
+			"2026-06-25T10:00:00Z"
+		));
+		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomScoreService scoreService = new RoomScoreService(roomService);
+		RecordingRoomCreatureEventPublisher eventPublisher =
+			new RecordingRoomCreatureEventPublisher();
+		RoomCreatureService creatureService = new RoomCreatureService(
+			roomService,
+			scoreService,
+			new StubCreatureCatalogService(),
+			null,
+			eventPublisher,
+			clock
+		);
+		UserEntity host = user("host", "Host");
+		String roomCode = roomService
+			.createRoom(host, new CreateRoomRequest("Delhi Room"))
+			.getRoomCode();
+		roomService.startGame(roomCode, host, new StartRoomGameRequest(60));
+		RoomCreatureInstance creature = creatureService.spawnCreatures(
+			roomCode,
+			host,
+			new SpawnRoomCreaturesRequest(28.6139, 77.2090, 1, 30, 20.0)
+		).getFirst();
+		eventPublisher.clear();
+		clock.advance(Duration.ofSeconds(31));
+
+		assertThrows(
+			RoomCreatureExpiredException.class,
+			() -> creatureService.resolveActiveMovementTarget(
+				roomCode,
+				creature.getInstanceId(),
+				host
+			)
+		);
+		assertEquals(RoomCreatureStatus.EXPIRED, creature.getStatus());
+		assertEquals(1, eventPublisher.events().size());
+		assertEquals(
+			RoomCreatureEventType.EXPIRED,
+			eventPublisher.events().getFirst().eventType()
+		);
+	}
+
+	@Test
+	void caughtCreatureCannotBeResolvedAsMovementTarget() {
+		MutableClock clock = new MutableClock(Instant.parse(
+			"2026-06-25T10:00:00Z"
+		));
+		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomScoreService scoreService = new RoomScoreService(roomService);
+		RoomCreatureService creatureService = new RoomCreatureService(
+			roomService,
+			scoreService,
+			new StubCreatureCatalogService(),
+			clock
+		);
+		UserEntity host = user("host", "Host");
+		String roomCode = roomService
+			.createRoom(host, new CreateRoomRequest("Delhi Room"))
+			.getRoomCode();
+		roomService.startGame(roomCode, host, new StartRoomGameRequest(60));
+		RoomCreatureInstance creature = creatureService.spawnCreatures(
+			roomCode,
+			host,
+			new SpawnRoomCreaturesRequest(28.6139, 77.2090, 1, 30, 20.0)
+		).getFirst();
+		creatureService.catchCreature(
+			roomCode,
+			creature.getInstanceId(),
+			host,
+			catchRequest(creature)
+		);
+
+		assertThrows(
+			RoomCreatureAlreadyCaughtException.class,
+			() -> creatureService.resolveActiveMovementTarget(
+				roomCode,
+				creature.getInstanceId(),
+				host
+			)
+		);
 	}
 
 	@Test

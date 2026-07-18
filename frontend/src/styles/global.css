@@ -414,6 +414,19 @@ button:focus-visible {
   font-size: 13px;
 }
 
+.movement-status-panel button {
+  display: block;
+  margin-top: 8px;
+  padding: 5px 8px;
+  border: 1px solid rgba(185, 28, 28, 0.3);
+  border-radius: 6px;
+  color: #991b1b;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
 .player-hud-panel {
   position: absolute;
   top: 16px;

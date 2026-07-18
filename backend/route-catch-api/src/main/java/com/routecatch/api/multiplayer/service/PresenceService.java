@@ -4,7 +4,10 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,6 +19,7 @@ import java.util.function.Supplier;
 import org.springframework.stereotype.Service;
 
 import com.routecatch.api.auth.persistence.UserEntity;
+import com.routecatch.api.dto.CoordinateDto;
 import com.routecatch.api.multiplayer.dto.PresenceResponse;
 import com.routecatch.api.multiplayer.dto.PresenceUpdateRequest;
 import com.routecatch.api.multiplayer.model.PresenceSession;
@@ -100,6 +104,51 @@ public class PresenceService {
 				.comparing(PresenceResponse::displayName)
 				.thenComparing(PresenceResponse::username))
 			.toList();
+	}
+
+	public Optional<CoordinateDto> findValidPlayerPosition(
+		String roomId,
+		UUID userId
+	) {
+		if (roomId == null || roomId.isBlank() || userId == null) {
+			return Optional.empty();
+		}
+
+		StoredPresence storedPresence = storedPresence(roomId, userId);
+
+		if (storedPresence == null) {
+			String normalizedRoomId = normalizeRoomId(roomId);
+			storedPresence = storedPresence(normalizedRoomId, userId);
+
+			if (storedPresence == null) {
+				storedPresence = roomPresence
+					.entrySet()
+					.stream()
+					.filter((entry) ->
+						normalizeRoomId(entry.getKey()).equals(normalizedRoomId)
+					)
+					.map((entry) -> entry.getValue().get(userId))
+					.filter(Objects::nonNull)
+					.max(Comparator.comparing((presence) ->
+						presence.presence().lastSeenAt()
+					))
+					.orElse(null);
+			}
+		}
+
+		if (storedPresence == null) {
+			return Optional.empty();
+		}
+
+		PresenceResponse presence = storedPresence.presence();
+		Double latitude = presence.lat();
+		Double longitude = presence.lon();
+
+		if (!isValidCoordinate(latitude, longitude)) {
+			return Optional.empty();
+		}
+
+		return Optional.of(new CoordinateDto(latitude, longitude));
 	}
 
 	public Map<String, List<PresenceResponse>> removeSocketSession(
@@ -199,6 +248,16 @@ public class PresenceService {
 		return lockFor(socketSessionId, socketSessionLocks);
 	}
 
+	private StoredPresence storedPresence(String roomId, UUID userId) {
+		Map<UUID, StoredPresence> presenceByUser = roomPresence.get(roomId);
+
+		if (presenceByUser == null) {
+			return null;
+		}
+
+		return presenceByUser.get(userId);
+	}
+
 	private Object lockFor(String key, Object[] locks) {
 		return locks[Math.floorMod(key.hashCode(), locks.length)];
 	}
@@ -219,6 +278,21 @@ public class PresenceService {
 		}
 
 		return status.trim();
+	}
+
+	private String normalizeRoomId(String roomId) {
+		return roomId.trim().toUpperCase(Locale.ROOT);
+	}
+
+	private boolean isValidCoordinate(Double latitude, Double longitude) {
+		return latitude != null
+			&& longitude != null
+			&& Double.isFinite(latitude)
+			&& Double.isFinite(longitude)
+			&& latitude >= -90.0
+			&& latitude <= 90.0
+			&& longitude >= -180.0
+			&& longitude <= 180.0;
 	}
 
 	private Instant nextTimestamp(StoredPresence storedPresence) {

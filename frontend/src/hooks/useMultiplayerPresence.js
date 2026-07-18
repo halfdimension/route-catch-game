@@ -7,6 +7,20 @@ import {
 } from 'react'
 import { API_BASE_URL } from '../config/apiConfig'
 import {
+  fetchMovementSnapshot,
+  movementTopic,
+  publishMovementCancel,
+  publishMovementStart,
+} from '../api/multiplayerMovementClient'
+import {
+  applyMovementEvent,
+  createMovementPlanState,
+  getMovementPlanForPlayer,
+  isCurrentMovementSubscription,
+  reconcileMovementSnapshot,
+} from '../multiplayer/movementPlanState'
+import { createServerClockOffsetEstimator } from '../utils/movementPlanTimeline'
+import {
   createPresencePublishScheduler,
   isCurrentPresenceSubscription,
   normalizePresencePlayers,
@@ -16,6 +30,8 @@ import {
 
 const DEFAULT_ROOM_ID = 'delhi'
 const RECONNECT_DELAY_MS = 1000
+const MOVEMENT_SNAPSHOT_RETRY_BASE_DELAY_MS = 1000
+const MOVEMENT_SNAPSHOT_RETRY_MAX_DELAY_MS = 10000
 
 function getWebSocketUrl() {
   const apiUrl = new URL(API_BASE_URL)
@@ -43,6 +59,15 @@ export function useMultiplayerPresence({
   const clientRef = useRef(null)
   const subscriptionRef = useRef(null)
   const creatureSubscriptionRef = useRef(null)
+  const movementSubscriptionRef = useRef(null)
+  const movementSnapshotAbortControllerRef = useRef(null)
+  const movementSnapshotRequestIdRef = useRef(0)
+  const movementSnapshotInFlightRef = useRef(null)
+  const movementSnapshotRefreshQueuedRef = useRef(false)
+  const movementSnapshotForcedRefreshQueuedRef = useRef(false)
+  const movementSnapshotRetryAttemptRef = useRef(0)
+  const movementSnapshotRetryTimerRef = useRef(null)
+  const refreshMovementSnapshotRef = useRef(() => Promise.resolve(false))
   const connectionIdRef = useRef(0)
   const subscriptionGenerationRef = useRef(0)
   const roomIdRef = useRef(roomId)
@@ -51,10 +76,25 @@ export function useMultiplayerPresence({
   const connectionStatusRef = useRef(connectionStatus)
   const playerPositionRef = useRef(playerPosition)
   const statusRef = useRef(status)
+  const currentUserIdRef = useRef(currentUser?.userId)
   const lastSentPositionRef = useRef(null)
   const lastSentStatusRef = useRef('')
   const manualDisconnectRef = useRef(false)
   const roomCreatureEventHandlerRef = useRef(onRoomCreatureEvent)
+  const movementStateRef = useRef(createMovementPlanState())
+  const movementClockEstimatorRef = useRef(
+    createServerClockOffsetEstimator(),
+  )
+  const pendingMovementStartRef = useRef(null)
+  const pendingMovementStartTimerRef = useRef(null)
+  const [movementPlans, setMovementPlans] = useState([])
+  const [movementRoomSequence, setMovementRoomSequence] = useState(0)
+  const [movementServerOffsetMs, setMovementServerOffsetMs] = useState(0)
+  const [movementNeedsSnapshot, setMovementNeedsSnapshot] = useState(true)
+  const [movementSnapshotStatus, setMovementSnapshotStatus] =
+    useState('idle')
+  const [movementErrorMessage, setMovementErrorMessage] = useState('')
+  const [movementCommandPending, setMovementCommandPending] = useState(false)
   const [publishScheduler] = useState(() => createPresencePublishScheduler({
     now: () => performance.now(),
     setTimer: (callback, delay) => window.setTimeout(callback, delay),
@@ -75,6 +115,10 @@ export function useMultiplayerPresence({
   }, [status])
 
   useEffect(() => {
+    currentUserIdRef.current = currentUser?.userId
+  }, [currentUser?.userId])
+
+  useEffect(() => {
     roomIdRef.current = roomId
   }, [roomId])
 
@@ -87,13 +131,296 @@ export function useMultiplayerPresence({
     setConnectionStatus(nextStatus)
   }, [])
 
+  const clearMovementSnapshotRetry = useCallback((resetAttempt = true) => {
+    if (movementSnapshotRetryTimerRef.current !== null) {
+      window.clearTimeout(movementSnapshotRetryTimerRef.current)
+      movementSnapshotRetryTimerRef.current = null
+    }
+
+    if (resetAttempt) {
+      movementSnapshotRetryAttemptRef.current = 0
+    }
+  }, [])
+
+  const scheduleMovementSnapshotRetry = useCallback((context) => {
+    if (movementSnapshotRetryTimerRef.current !== null) {
+      return
+    }
+
+    const attempt = movementSnapshotRetryAttemptRef.current
+    const delayMs = Math.min(
+      MOVEMENT_SNAPSHOT_RETRY_BASE_DELAY_MS * (2 ** attempt),
+      MOVEMENT_SNAPSHOT_RETRY_MAX_DELAY_MS,
+    )
+    movementSnapshotRetryAttemptRef.current = attempt + 1
+    movementSnapshotRetryTimerRef.current = window.setTimeout(() => {
+      movementSnapshotRetryTimerRef.current = null
+      void refreshMovementSnapshotRef.current(context)
+    }, delayMs)
+  }, [])
+
+  const clearPendingMovementStart = useCallback(() => {
+    if (pendingMovementStartTimerRef.current !== null) {
+      window.clearTimeout(pendingMovementStartTimerRef.current)
+      pendingMovementStartTimerRef.current = null
+    }
+    pendingMovementStartRef.current = null
+    setMovementCommandPending(false)
+  }, [])
+
+  const updateMovementState = useCallback((nextState) => {
+    movementStateRef.current = nextState
+    setMovementPlans(Object.values(nextState.plansByPlayerId))
+    setMovementRoomSequence(nextState.roomSequence)
+    setMovementNeedsSnapshot(
+      nextState.needsSnapshot || !nextState.hasSnapshot,
+    )
+    const pendingStart = pendingMovementStartRef.current
+    const currentPlan = getMovementPlanForPlayer(
+      nextState,
+      currentUserIdRef.current,
+    )
+
+    if (pendingStart && currentPlan?.version > pendingStart.expectedVersion) {
+      clearPendingMovementStart()
+    }
+  }, [clearPendingMovementStart])
+
+  const resetMovementState = useCallback((nextRoomId = null) => {
+    movementSnapshotRequestIdRef.current += 1
+    movementSnapshotAbortControllerRef.current?.abort()
+    movementSnapshotAbortControllerRef.current = null
+    movementSnapshotInFlightRef.current = null
+    movementSnapshotRefreshQueuedRef.current = false
+    movementSnapshotForcedRefreshQueuedRef.current = false
+    clearMovementSnapshotRetry()
+    movementClockEstimatorRef.current.reset()
+    clearPendingMovementStart()
+    updateMovementState(createMovementPlanState({ roomCode: nextRoomId }))
+    setMovementServerOffsetMs(0)
+    setMovementSnapshotStatus('idle')
+    setMovementErrorMessage('')
+  }, [
+    clearMovementSnapshotRetry,
+    clearPendingMovementStart,
+    updateMovementState,
+  ])
+
+  const observeServerTimestamp = useCallback(
+    (serverTimestamp, clientReceiveTimeMs) => {
+      try {
+        const nextOffsetMs = movementClockEstimatorRef.current.observe(
+          serverTimestamp,
+          clientReceiveTimeMs,
+        )
+        setMovementServerOffsetMs(nextOffsetMs)
+      } catch (error) {
+        console.warn('Ignored invalid movement server timestamp.', {
+          serverTimestamp,
+          error,
+        })
+      }
+    },
+    [],
+  )
+
+  const refreshMovementSnapshot = useCallback(async (context = {}) => {
+    const client = context.client || clientRef.current
+    const currentRoomId = context.roomId || activeRoomIdRef.current
+    const connectionGeneration =
+      context.connectionGeneration ?? connectionIdRef.current
+    const subscriptionGeneration =
+      context.subscriptionGeneration ?? subscriptionGenerationRef.current
+
+    if (
+      !token ||
+      !currentUser?.userId ||
+      !client?.connected ||
+      !currentRoomId ||
+      !isCurrentMovementSubscription({
+        client,
+        currentClient: clientRef.current,
+        connectionGeneration,
+        currentConnectionGeneration: connectionIdRef.current,
+        subscriptionGeneration,
+        currentSubscriptionGeneration: subscriptionGenerationRef.current,
+        roomCode: currentRoomId,
+        currentRoomCode: activeRoomIdRef.current,
+      })
+    ) {
+      return false
+    }
+
+    if (
+      movementSnapshotRetryTimerRef.current !== null &&
+      context.force !== true
+    ) {
+      return false
+    }
+
+    const inFlightRequest = movementSnapshotInFlightRef.current
+
+    if (inFlightRequest) {
+      if (
+        inFlightRequest.client === client &&
+        inFlightRequest.connectionGeneration === connectionGeneration &&
+        inFlightRequest.subscriptionGeneration === subscriptionGeneration &&
+        inFlightRequest.roomId === currentRoomId
+      ) {
+        movementSnapshotRefreshQueuedRef.current = true
+        movementSnapshotForcedRefreshQueuedRef.current =
+          movementSnapshotForcedRefreshQueuedRef.current ||
+          context.force === true
+      }
+      return false
+    }
+
+    movementSnapshotRequestIdRef.current += 1
+    const requestId = movementSnapshotRequestIdRef.current
+    const abortController = new AbortController()
+    movementSnapshotAbortControllerRef.current = abortController
+    movementSnapshotInFlightRef.current = {
+      client,
+      connectionGeneration,
+      requestId,
+      roomId: currentRoomId,
+      subscriptionGeneration,
+    }
+    clearMovementSnapshotRetry(false)
+    setMovementSnapshotStatus('loading')
+
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const snapshot = await fetchMovementSnapshot(currentRoomId, token, {
+          signal: abortController.signal,
+        })
+
+        if (
+          requestId !== movementSnapshotRequestIdRef.current ||
+          !isCurrentMovementSubscription({
+            client,
+            currentClient: clientRef.current,
+            connectionGeneration,
+            currentConnectionGeneration: connectionIdRef.current,
+            subscriptionGeneration,
+            currentSubscriptionGeneration: subscriptionGenerationRef.current,
+            roomCode: currentRoomId,
+            currentRoomCode: activeRoomIdRef.current,
+          })
+        ) {
+          return false
+        }
+
+        const reconciliation = reconcileMovementSnapshot(
+          movementStateRef.current,
+          snapshot,
+        )
+
+        if (reconciliation.accepted) {
+          observeServerTimestamp(snapshot.serverTimestamp, Date.now())
+          updateMovementState(reconciliation.state)
+          clearMovementSnapshotRetry()
+          setMovementSnapshotStatus('ready')
+          setMovementErrorMessage('')
+          return true
+        }
+
+        if (reconciliation.reason !== 'stale-snapshot') {
+          throw new TypeError(
+            `Invalid movement snapshot: ${reconciliation.reason}`,
+          )
+        }
+      }
+
+      setMovementSnapshotStatus('stale')
+      scheduleMovementSnapshotRetry({
+        client,
+        connectionGeneration,
+        roomId: currentRoomId,
+        subscriptionGeneration,
+      })
+      return false
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        return false
+      }
+
+      console.warn('Could not recover authoritative movement state.', {
+        roomCode: currentRoomId,
+        connectionGeneration,
+        subscriptionGeneration,
+        error,
+      })
+      setMovementSnapshotStatus('error')
+      setMovementErrorMessage(
+        error.status === 401
+          ? 'Movement authorization expired'
+          : 'Authoritative movement state is temporarily unavailable',
+      )
+      scheduleMovementSnapshotRetry({
+        client,
+        connectionGeneration,
+        roomId: currentRoomId,
+        subscriptionGeneration,
+      })
+      return false
+    } finally {
+      if (requestId === movementSnapshotRequestIdRef.current) {
+        movementSnapshotAbortControllerRef.current = null
+        movementSnapshotInFlightRef.current = null
+        const forceRefreshAgain =
+          movementSnapshotForcedRefreshQueuedRef.current
+        const shouldRefreshAgain =
+          forceRefreshAgain ||
+          (
+            movementSnapshotRefreshQueuedRef.current &&
+            (
+              movementStateRef.current.needsSnapshot ||
+              !movementStateRef.current.hasSnapshot
+            )
+          )
+        movementSnapshotRefreshQueuedRef.current = false
+        movementSnapshotForcedRefreshQueuedRef.current = false
+
+        if (
+          shouldRefreshAgain &&
+          (
+            forceRefreshAgain ||
+            movementSnapshotRetryTimerRef.current === null
+          )
+        ) {
+          void Promise.resolve().then(() => refreshMovementSnapshotRef.current({
+            client,
+            connectionGeneration,
+            force: forceRefreshAgain,
+            roomId: currentRoomId,
+            subscriptionGeneration,
+          }))
+        }
+      }
+    }
+  }, [
+    clearMovementSnapshotRetry,
+    currentUser?.userId,
+    observeServerTimestamp,
+    scheduleMovementSnapshotRetry,
+    token,
+    updateMovementState,
+  ])
+
+  useEffect(() => {
+    refreshMovementSnapshotRef.current = refreshMovementSnapshot
+  }, [refreshMovementSnapshot])
+
   const publishPresence = useCallback((options = {}) => {
     const {
       force = false,
+      position = playerPositionRef.current,
       reason = 'position-change',
+      status: statusOverride,
     } = options
     const client = clientRef.current
-    const currentPosition = playerPositionRef.current
+    const currentPosition = position
     const currentRoomId = activeRoomIdRef.current
 
     if (
@@ -104,7 +431,7 @@ export function useMultiplayerPresence({
       return false
     }
 
-    const nextStatus = statusRef.current || 'IDLE'
+    const nextStatus = statusOverride || statusRef.current || 'IDLE'
     publishScheduler.markAttempt()
 
     if (!shouldPublishPresence({
@@ -151,23 +478,119 @@ export function useMultiplayerPresence({
     publishScheduler.setOnAttempt(publishPresence)
   }, [publishPresence, publishScheduler])
 
-  const schedulePresencePublish = useCallback(() => {
-    if (connectionStatusRef.current !== 'connected') {
-      return
+  const startRoomMovement = useCallback((intent) => {
+    const client = clientRef.current
+    const currentRoomId = activeRoomIdRef.current
+    const movementState = movementStateRef.current
+
+    if (
+      !client?.connected ||
+      !currentRoomId ||
+      !movementState.hasSnapshot ||
+      movementState.needsSnapshot ||
+      pendingMovementStartRef.current
+    ) {
+      setMovementErrorMessage(
+        'Waiting for authoritative movement state to synchronize',
+      )
+      return false
     }
 
-    publishScheduler.schedule()
-  }, [publishScheduler])
+    const currentPlan = getMovementPlanForPlayer(
+      movementState,
+      currentUser?.userId,
+    )
 
-  const disconnectPresence = useCallback(() => {
+    try {
+      const expectedVersion = currentPlan?.version ?? 0
+      const commandId = publishMovementStart(client, currentRoomId, {
+        ...intent,
+        expectedMovementVersion: expectedVersion,
+      })
+
+      if (!commandId) {
+        throw new Error('Movement socket closed before the command was sent')
+      }
+
+      pendingMovementStartRef.current = { commandId, expectedVersion }
+      setMovementCommandPending(true)
+      pendingMovementStartTimerRef.current = window.setTimeout(() => {
+        clearPendingMovementStart()
+        setMovementErrorMessage(
+          'Movement command was not confirmed; state is being refreshed',
+        )
+        void refreshMovementSnapshot({ force: true })
+      }, 15000)
+      setMovementErrorMessage('')
+      return commandId
+    } catch (error) {
+      console.warn('Could not send authoritative movement intent.', {
+        roomCode: currentRoomId,
+        playerId: currentUser?.userId,
+        error,
+      })
+      setMovementErrorMessage('Could not send movement command')
+      return false
+    }
+  }, [
+    clearPendingMovementStart,
+    currentUser?.userId,
+    refreshMovementSnapshot,
+  ])
+
+  const cancelRoomMovement = useCallback(() => {
+    const client = clientRef.current
+    const currentRoomId = activeRoomIdRef.current
+    const currentPlan = getMovementPlanForPlayer(
+      movementStateRef.current,
+      currentUser?.userId,
+    )
+
+    if (
+      !client?.connected ||
+      !currentRoomId ||
+      currentPlan?.status !== 'MOVING'
+    ) {
+      return false
+    }
+
+    try {
+      const commandId = publishMovementCancel(
+        client,
+        currentRoomId,
+        currentPlan,
+      )
+
+      if (!commandId) {
+        throw new Error('Movement socket closed before cancellation was sent')
+      }
+
+      clearPendingMovementStart()
+      setMovementErrorMessage('')
+      return commandId
+    } catch (error) {
+      console.warn('Could not send authoritative movement cancellation.', {
+        roomCode: currentRoomId,
+        playerId: currentUser?.userId,
+        movementId: currentPlan.movementId,
+        error,
+      })
+      setMovementErrorMessage('Could not cancel movement')
+      return false
+    }
+  }, [clearPendingMovementStart, currentUser?.userId])
+
+  const disconnectPresence = useCallback((reason = 'manual') => {
     manualDisconnectRef.current = true
     const client = clientRef.current
     const subscription = subscriptionRef.current
     const creatureSubscription = creatureSubscriptionRef.current
+    const movementSubscription = movementSubscriptionRef.current
     const currentRoomId = activeRoomIdRef.current
     const hadActivePresence = Boolean(
       client ||
       subscription ||
+      movementSubscription ||
       currentRoomId ||
       requestedRoomIdRef.current ||
       connectionStatusRef.current !== 'disconnected',
@@ -177,9 +600,18 @@ export function useMultiplayerPresence({
       return
     }
 
+    if (
+      reason === 'game-ended' ||
+      reason === 'room-closed' ||
+      String(reason).startsWith('room-closed:')
+    ) {
+      cancelRoomMovement()
+    }
+
     clientRef.current = null
     subscriptionRef.current = null
     creatureSubscriptionRef.current = null
+    movementSubscriptionRef.current = null
     connectionIdRef.current += 1
     subscriptionGenerationRef.current += 1
     activeRoomIdRef.current = ''
@@ -192,6 +624,7 @@ export function useMultiplayerPresence({
     setOnlinePlayers([])
     updateConnectionStatus('disconnected')
     setErrorMessage('')
+    resetMovementState()
 
     if (subscription && client?.connected) {
       subscription.unsubscribe()
@@ -201,16 +634,25 @@ export function useMultiplayerPresence({
       creatureSubscription.unsubscribe()
     }
 
+    if (movementSubscription && client?.connected) {
+      movementSubscription.unsubscribe()
+    }
+
     if (client?.active) {
       void client.deactivate()
     }
-  }, [publishScheduler, updateConnectionStatus])
+  }, [
+    cancelRoomMovement,
+    publishScheduler,
+    resetMovementState,
+    updateConnectionStatus,
+  ])
 
   const connectPresence = useCallback((nextRequestedRoomId, options = {}) => {
-    const { enabled = true } = options
+    const { enabled = true, reason = 'disabled' } = options
 
     if (!enabled) {
-      disconnectPresence()
+      disconnectPresence(reason)
       return
     }
 
@@ -237,10 +679,12 @@ export function useMultiplayerPresence({
     activeRoomIdRef.current = nextRoomId
     setOnlinePlayers([])
     setErrorMessage('')
+    resetMovementState(nextRoomId)
     updateConnectionStatus('connecting')
   }, [
     currentUser?.userId,
     disconnectPresence,
+    resetMovementState,
     token,
     updateConnectionStatus,
   ])
@@ -281,8 +725,12 @@ export function useMultiplayerPresence({
         if (creatureSubscriptionRef.current && client.connected) {
           creatureSubscriptionRef.current.unsubscribe()
         }
+        if (movementSubscriptionRef.current && client.connected) {
+          movementSubscriptionRef.current.unsubscribe()
+        }
         subscriptionRef.current = null
         creatureSubscriptionRef.current = null
+        movementSubscriptionRef.current = null
 
         updateConnectionStatus('connected')
         setErrorMessage('')
@@ -366,6 +814,70 @@ export function useMultiplayerPresence({
             }
           },
         )
+
+        movementSubscriptionRef.current = client.subscribe(
+          movementTopic(nextRoomId),
+          (message) => {
+            if (!isCurrentMovementSubscription({
+              client,
+              currentClient: clientRef.current,
+              connectionGeneration: connectionId,
+              currentConnectionGeneration: connectionIdRef.current,
+              subscriptionGeneration,
+              currentSubscriptionGeneration:
+                subscriptionGenerationRef.current,
+              roomCode: nextRoomId,
+              currentRoomCode: activeRoomIdRef.current,
+            })) {
+              return
+            }
+
+            try {
+              const receiveTimeMs = Date.now()
+              const movementEvent = JSON.parse(message.body)
+              const result = applyMovementEvent(
+                movementStateRef.current,
+                movementEvent,
+              )
+
+              if (result.state !== movementStateRef.current) {
+                updateMovementState(result.state)
+              }
+
+              if (result.accepted) {
+                observeServerTimestamp(
+                  movementEvent.serverTimestamp,
+                  receiveTimeMs,
+                )
+                setMovementErrorMessage('')
+              }
+
+              if (result.needsSnapshot) {
+                void refreshMovementSnapshot({
+                  client,
+                  connectionGeneration: connectionId,
+                  roomId: nextRoomId,
+                  subscriptionGeneration,
+                })
+              }
+            } catch (error) {
+              console.warn('Ignored invalid room movement event.', {
+                roomCode: nextRoomId,
+                playerId: currentUser?.userId,
+                connectionGeneration: connectionId,
+                subscriptionGeneration,
+                error,
+              })
+            }
+          },
+        )
+
+        void refreshMovementSnapshot({
+          client,
+          connectionGeneration: connectionId,
+          roomId: nextRoomId,
+          subscriptionGeneration,
+        })
         publishPresence({ force: true, reason: 'connection-established' })
       },
       onStompError: () => {
@@ -403,7 +915,21 @@ export function useMultiplayerPresence({
 
         subscriptionRef.current = null
         creatureSubscriptionRef.current = null
+        movementSubscriptionRef.current = null
         subscriptionGenerationRef.current += 1
+        movementSnapshotRequestIdRef.current += 1
+        movementSnapshotAbortControllerRef.current?.abort()
+        movementSnapshotAbortControllerRef.current = null
+        movementSnapshotInFlightRef.current = null
+        movementSnapshotRefreshQueuedRef.current = false
+        movementSnapshotForcedRefreshQueuedRef.current = false
+        clearMovementSnapshotRetry()
+        updateMovementState({
+          ...movementStateRef.current,
+          hasSnapshot: false,
+          needsSnapshot: true,
+        })
+        setMovementSnapshotStatus('stale')
         publishScheduler.cancel()
         updateConnectionStatus('connecting')
         setErrorMessage('Multiplayer reconnecting')
@@ -417,6 +943,7 @@ export function useMultiplayerPresence({
       const ownsClient = clientRef.current === client
       const subscription = subscriptionRef.current
       const creatureSubscription = creatureSubscriptionRef.current
+      const movementSubscription = movementSubscriptionRef.current
 
       if (ownsClient && subscription && client.connected) {
         subscription.unsubscribe()
@@ -426,9 +953,14 @@ export function useMultiplayerPresence({
         creatureSubscription.unsubscribe()
       }
 
+      if (ownsClient && movementSubscription && client.connected) {
+        movementSubscription.unsubscribe()
+      }
+
       if (ownsClient) {
         subscriptionRef.current = null
         creatureSubscriptionRef.current = null
+        movementSubscriptionRef.current = null
         clientRef.current = null
         activeRoomIdRef.current = ''
         lastSentPositionRef.current = null
@@ -436,6 +968,7 @@ export function useMultiplayerPresence({
         publishScheduler.reset()
         connectionIdRef.current += 1
         subscriptionGenerationRef.current += 1
+        resetMovementState()
       }
 
       if (client.active) {
@@ -444,11 +977,16 @@ export function useMultiplayerPresence({
     }
   }, [
     connectionRequestVersion,
+    clearMovementSnapshotRetry,
     currentUser?.userId,
     publishPresence,
     publishScheduler,
+    observeServerTimestamp,
+    refreshMovementSnapshot,
     requestedRoomId,
+    resetMovementState,
     token,
+    updateMovementState,
     updateConnectionStatus,
   ])
 
@@ -469,26 +1007,44 @@ export function useMultiplayerPresence({
   }, [disconnectPresence])
 
   useEffect(() => {
-    if (connectionStatus === 'connected') {
-      schedulePresencePublish()
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState === 'visible' &&
+        clientRef.current?.connected &&
+        (
+          movementStateRef.current.needsSnapshot ||
+          !movementStateRef.current.hasSnapshot
+        )
+      ) {
+        void refreshMovementSnapshot({ force: true })
+      }
     }
-  }, [
-    connectionStatus,
-    playerPosition?.lat,
-    playerPosition?.lon,
-    schedulePresencePublish,
-    status,
-  ])
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [refreshMovementSnapshot])
 
   return {
     multiplayerEnabled: connectionStatus === 'connected',
     roomId,
     activeRoomId,
     connectionStatus,
+    movementErrorMessage,
+    movementCommandPending,
+    movementNeedsSnapshot,
+    movementPlans,
+    movementRoomSequence,
+    movementServerOffsetMs,
+    movementSnapshotStatus,
     onlinePlayers,
     errorMessage,
     setRoomId,
     connectPresence,
+    startRoomMovement,
+    cancelRoomMovement,
+    refreshMovementSnapshot,
     disconnectPresence,
     sendPresenceUpdate: publishPresence,
   }

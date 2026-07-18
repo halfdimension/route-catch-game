@@ -213,6 +213,35 @@ public class RoomCreatureService {
 			.toList();
 	}
 
+	public synchronized RoomCreatureMovementTarget resolveActiveMovementTarget(
+		String roomCode,
+		UUID instanceId,
+		UserEntity currentUser
+	) {
+		MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
+		String normalizedRoomCode = room.getRoomCode();
+		Instant now = Instant.now(clock);
+		RoomCreatureInstance creature = findCreature(
+			normalizedRoomCode,
+			instanceId
+		);
+
+		if (creature.isExpired(now)) {
+			expireCreature(normalizedRoomCode, creature, now);
+			throw new RoomCreatureExpiredException(instanceId);
+		}
+
+		if (creature.isCaught()) {
+			throw new RoomCreatureAlreadyCaughtException(instanceId);
+		}
+
+		return new RoomCreatureMovementTarget(
+			creature.getInstanceId(),
+			creature.getLatitude(),
+			creature.getLongitude()
+		);
+	}
+
 	public synchronized CatchRoomCreatureResponse catchCreature(
 		String roomCode,
 		UUID instanceId,

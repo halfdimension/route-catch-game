@@ -89,6 +89,84 @@ class PresenceServiceTests {
 	}
 
 	@Test
+	void findsValidPlayerPositionForExactRoomKey() {
+		UserEntity user = user("harsh", "Harsh");
+		presenceService.registerSocketSession("socket-1");
+		presenceService.updatePresence(
+			"demo-room",
+			user,
+			new PresenceUpdateRequest(28.6, 77.2, "MOVING"),
+			"socket-1"
+		);
+
+		var position = presenceService
+			.findValidPlayerPosition("demo-room", user.getUserId())
+			.orElseThrow();
+
+		assertEquals(28.6, position.lat());
+		assertEquals(77.2, position.lon());
+	}
+
+	@Test
+	void findsValidPlayerPositionUsingNormalizedRoomFallback() {
+		UserEntity user = user("harsh", "Harsh");
+		presenceService.registerSocketSession("socket-1");
+		presenceService.updatePresence(
+			"demo-room",
+			user,
+			new PresenceUpdateRequest(28.6, 77.2, "MOVING"),
+			"socket-1"
+		);
+
+		var position = presenceService
+			.findValidPlayerPosition("  DEMO-ROOM  ", user.getUserId())
+			.orElseThrow();
+
+		assertEquals(28.6, position.lat());
+		assertEquals(77.2, position.lon());
+	}
+
+	@Test
+	void invalidPresenceCoordinatesAreNotMovementSources() {
+		UserEntity user = user("harsh", "Harsh");
+		presenceService.registerSocketSession("socket-1");
+		List<PresenceUpdateRequest> invalidUpdates = List.of(
+			new PresenceUpdateRequest(null, 77.2, "MOVING"),
+			new PresenceUpdateRequest(28.6, null, "MOVING"),
+			new PresenceUpdateRequest(Double.NaN, 77.2, "MOVING"),
+			new PresenceUpdateRequest(28.6, Double.POSITIVE_INFINITY, "MOVING"),
+			new PresenceUpdateRequest(90.1, 77.2, "MOVING"),
+			new PresenceUpdateRequest(28.6, -180.1, "MOVING")
+		);
+
+		for (PresenceUpdateRequest invalidUpdate : invalidUpdates) {
+			presenceService.updatePresence(
+				"demo-room",
+				user,
+				invalidUpdate,
+				"socket-1"
+			);
+
+			assertTrue(presenceService
+				.findValidPlayerPosition("demo-room", user.getUserId())
+				.isEmpty());
+		}
+	}
+
+	@Test
+	void missingPresenceHasNoMovementSource() {
+		assertTrue(presenceService
+			.findValidPlayerPosition("missing-room", UUID.randomUUID())
+			.isEmpty());
+		assertTrue(presenceService
+			.findValidPlayerPosition(null, UUID.randomUUID())
+			.isEmpty());
+		assertTrue(presenceService
+			.findValidPlayerPosition("demo-room", null)
+			.isEmpty());
+	}
+
+	@Test
 	void disconnectRemovesUserFromTrackedRooms() {
 		UserEntity user = user("harsh", "Harsh");
 		presenceService.registerSocketSession("socket-1");

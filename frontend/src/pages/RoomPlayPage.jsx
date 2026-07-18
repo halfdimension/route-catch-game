@@ -9,7 +9,11 @@ import { DEFAULT_SIMULATION_SPEED } from '../config/gameConfig'
 
 function RoomPlayPage({ gameplay }) {
   const { roomCode } = useParams()
-  const { cleanupRoomMovement } = gameplay
+  const {
+    cancelRoomMovement,
+    cleanupRoomMovement,
+    prepareRoomMovement,
+  } = gameplay
   const activeRoomGameStatus = gameplay.activeRoomGameStatus || 'WAITING'
   const activeRoomStatus = gameplay.activeRoomStatus || 'OPEN'
   const roomSettings = gameplay.activeMultiplayerRoom?.settings || {}
@@ -21,15 +25,24 @@ function RoomPlayPage({ gameplay }) {
 
   useEffect(() => {
     if (activeRoomGameStatus === 'ENDED' || activeRoomStatus === 'CLOSED') {
+      cancelRoomMovement()
       cleanupRoomMovement()
     }
-  }, [activeRoomGameStatus, activeRoomStatus, cleanupRoomMovement])
+  }, [
+    activeRoomGameStatus,
+    activeRoomStatus,
+    cancelRoomMovement,
+    cleanupRoomMovement,
+  ])
 
   useEffect(() => {
+    const timerId = window.setTimeout(prepareRoomMovement, 0)
+
     return () => {
+      window.clearTimeout(timerId)
       cleanupRoomMovement()
     }
-  }, [cleanupRoomMovement, roomCode])
+  }, [cleanupRoomMovement, prepareRoomMovement, roomCode])
 
   function handleRoomMapClick(destination) {
     if (!canMoveInRoom) {
@@ -41,6 +54,7 @@ function RoomPlayPage({ gameplay }) {
 
   function handleRoomSharedCreatureCatch(creature) {
     if (!canMoveInRoom) {
+      cancelRoomMovement()
       cleanupRoomMovement()
       return
     }
@@ -50,19 +64,20 @@ function RoomPlayPage({ gameplay }) {
 
   function handleRoomConfirmPendingMove() {
     if (!canMoveInRoom) {
+      cancelRoomMovement()
       cleanupRoomMovement()
       return
     }
 
-    void gameplay.handleConfirmPendingMove()
+    gameplay.handleRoomConfirmPendingMove()
   }
 
   return (
     <main className="game-shell">
       <GameMap
-        playerPosition={gameplay.playerPosition}
+        playerPosition={gameplay.roomPlayerPosition}
         pendingDestination={gameplay.pendingDestination}
-        routeCoordinates={gameplay.routeCoordinates}
+        routeCoordinates={gameplay.roomRouteCoordinates}
         targets={[]}
         sharedRoomCreatures={gameplay.sharedRoomCreatures}
         caughtTarget={null}
@@ -80,6 +95,11 @@ function RoomPlayPage({ gameplay }) {
       {gameplay.routeError && (
         <div className="route-status route-error">{gameplay.routeError}</div>
       )}
+      {gameplay.movementErrorMessage && (
+        <div className="route-status route-error">
+          {gameplay.movementErrorMessage}
+        </div>
+      )}
       {gameplay.sharedRoomCatchMessage && (
         <div
           className={`shared-room-catch-status is-${gameplay.sharedRoomCatchMessage.type}`}
@@ -89,8 +109,10 @@ function RoomPlayPage({ gameplay }) {
       )}
 
       <MovementStatusPanel
-        isMoving={gameplay.isMoving}
-        simulationSpeed={gameplay.simulationSpeed}
+        isMoving={gameplay.roomIsMoving}
+        status={gameplay.roomMovementStatus}
+        simulationSpeed={gameplay.roomMovementSpeed}
+        onCancel={cancelRoomMovement}
       />
       <div className="room-play-panel-stack">
         <RoomSpeedControl
@@ -108,7 +130,7 @@ function RoomPlayPage({ gameplay }) {
           connectionStatus={gameplay.multiplayerConnectionStatus}
           onlinePlayerCount={gameplay.onlinePlayers.length}
           errorMessage={gameplay.multiplayerErrorMessage}
-          playerPosition={gameplay.playerPosition}
+          playerPosition={gameplay.roomPlayerPosition}
           sharedRoomCreatures={gameplay.sharedRoomCreatures}
           onConnectPresence={gameplay.connectPresence}
           onDisconnectPresence={gameplay.disconnectPresence}
@@ -123,7 +145,10 @@ function RoomPlayPage({ gameplay }) {
           destination={gameplay.pendingDestination}
           onConfirm={handleRoomConfirmPendingMove}
           onCancel={gameplay.clearPendingDestination}
-          isLoading={gameplay.isRouteLoading}
+          isLoading={
+            gameplay.movementCommandPending ||
+            gameplay.movementSnapshotStatus === 'loading'
+          }
         />
       )}
     </main>
