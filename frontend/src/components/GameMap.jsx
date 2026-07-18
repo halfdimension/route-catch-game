@@ -1,5 +1,5 @@
 import L from 'leaflet'
-import { MapContainer, TileLayer, useMapEvents } from 'react-leaflet'
+import { MapContainer, Pane, TileLayer, useMapEvents } from 'react-leaflet'
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
@@ -39,6 +39,8 @@ function GameMap({
   caughtTarget,
   chasedTargetId,
   routingTargetId,
+  chasedSharedRoomCreatureId,
+  routingSharedRoomCreatureId,
   playerName,
   otherPlayers = [],
   onMapClick,
@@ -58,23 +60,33 @@ function GameMap({
       />
 
       <MapClickHandler onMapClick={onMapClick} />
-      <RouteLine
-        coordinates={routeCoordinates}
-        isChaseActive={Boolean(chasedTargetId)}
-      />
-      <TargetLayer
-        targets={targets}
-        onTargetClick={onTargetClick}
-        chasedTargetId={chasedTargetId}
-        routingTargetId={routingTargetId}
-      />
-      <SharedRoomCreatureMarkers
-        creatures={sharedRoomCreatures}
-        onCatchCreature={onSharedRoomCreatureCatch}
-      />
-      <CatchMapEffect caughtTarget={caughtTarget} />
-      <OtherPlayerMarkers players={otherPlayers} />
-      <PlayerMarker position={playerPosition} playerName={playerName} />
+      <Pane name="route-pane" style={{ zIndex: 420 }}>
+        <RouteLine
+          coordinates={routeCoordinates}
+          isChaseActive={Boolean(
+            chasedTargetId || chasedSharedRoomCreatureId,
+          )}
+        />
+      </Pane>
+      <Pane name="creature-marker-pane" style={{ zIndex: 640 }}>
+        <TargetLayer
+          targets={targets}
+          onTargetClick={onTargetClick}
+          chasedTargetId={chasedTargetId}
+          routingTargetId={routingTargetId}
+        />
+        <SharedRoomCreatureMarkers
+          creatures={sharedRoomCreatures}
+          onCatchCreature={onSharedRoomCreatureCatch}
+          chasedCreatureId={chasedSharedRoomCreatureId}
+          routingCreatureId={routingSharedRoomCreatureId}
+        />
+        <CatchMapEffect caughtTarget={caughtTarget} />
+      </Pane>
+      <Pane name="player-marker-pane" style={{ zIndex: 660 }}>
+        <OtherPlayerMarkers players={otherPlayers} />
+        <PlayerMarker position={playerPosition} playerName={playerName} />
+      </Pane>
 
       {pendingDestination && (
         <PlayerMarker position={pendingDestination} variant="destination" />

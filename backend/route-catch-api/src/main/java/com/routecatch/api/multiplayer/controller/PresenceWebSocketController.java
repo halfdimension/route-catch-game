@@ -3,6 +3,8 @@ package com.routecatch.api.multiplayer.controller;
 import java.security.Principal;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -18,6 +20,10 @@ import com.routecatch.api.multiplayer.service.PresenceService;
 
 @Controller
 public class PresenceWebSocketController {
+
+	private static final Logger LOGGER = LoggerFactory.getLogger(
+		PresenceWebSocketController.class
+	);
 
 	private final PresenceService presenceService;
 	private final SimpMessagingTemplate messagingTemplate;
@@ -37,17 +43,33 @@ public class PresenceWebSocketController {
 		@Header("simpSessionId") String socketSessionId,
 		Principal principal
 	) {
-		List<PresenceResponse> roomPresence = presenceService.updatePresence(
-			roomId,
-			authenticatedUser(principal),
-			request,
-			socketSessionId
-		);
+		UserEntity currentUser = authenticatedUser(principal);
 
-		messagingTemplate.convertAndSend(
-			"/topic/rooms/" + roomId + "/presence",
-			roomPresence
-		);
+		presenceService.withRoomLock(roomId, () -> {
+			List<PresenceResponse> roomPresence = presenceService.updatePresence(
+				roomId,
+				currentUser,
+				request,
+				socketSessionId
+			);
+
+			try {
+				messagingTemplate.convertAndSend(
+					"/topic/rooms/" + roomId + "/presence",
+					roomPresence
+				);
+			} catch (RuntimeException exception) {
+				LOGGER.error(
+					"Presence broadcast failed for roomCode={} playerId={}",
+					roomId,
+					currentUser.getUserId(),
+					exception
+				);
+				throw exception;
+			}
+
+			return null;
+		});
 	}
 
 	private UserEntity authenticatedUser(Principal principal) {

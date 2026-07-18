@@ -1,0 +1,116 @@
+import CatchToast from '../components/CatchToast'
+import CaughtInventoryPanel from '../components/CaughtInventoryPanel'
+import GameControlsPanel from '../components/GameControlsPanel'
+import GameMap from '../components/GameMap'
+import GameSessionPanel from '../components/GameSessionPanel'
+import MovementStatusPanel from '../components/MovementStatusPanel'
+import MoveConfirmPanel from '../components/MoveConfirmPanel'
+import PlayerHudPanel from '../components/PlayerHudPanel'
+import RoundSummaryPanel from '../components/RoundSummaryPanel'
+import TargetInfoPanel from '../components/TargetInfoPanel'
+import { MAX_SIMULATION_SPEED } from '../config/gameConfig'
+
+function SoloPlayPage({ gameplay }) {
+  return (
+    <main className="game-shell">
+      <GameMap
+        playerPosition={gameplay.playerPosition}
+        pendingDestination={gameplay.pendingDestination}
+        routeCoordinates={gameplay.routeCoordinates}
+        targets={gameplay.targets}
+        sharedRoomCreatures={[]}
+        caughtTarget={gameplay.catchToastTarget}
+        chasedTargetId={gameplay.chasedTargetId}
+        routingTargetId={gameplay.routingTargetId}
+        chasedSharedRoomCreatureId={null}
+        routingSharedRoomCreatureId={null}
+        playerName={gameplay.effectivePlayerName}
+        otherPlayers={[]}
+        onMapClick={gameplay.handleMapClick}
+        onTargetClick={gameplay.handleTargetClick}
+        onSharedRoomCreatureCatch={gameplay.handleSharedRoomCreatureCatch}
+      />
+
+      {gameplay.routeError && (
+        <div className="route-status route-error">{gameplay.routeError}</div>
+      )}
+
+      <MovementStatusPanel
+        isMoving={gameplay.isMoving}
+        simulationSpeed={gameplay.simulationSpeed}
+      />
+      <PlayerHudPanel
+        score={gameplay.score}
+        caughtCount={gameplay.caughtTargets.length}
+        level={gameplay.level}
+        xp={gameplay.xp}
+        nextLevelXp={gameplay.nextLevelXp}
+        gameState={gameplay.gameState}
+        remainingSeconds={gameplay.remainingSeconds}
+        selectedRoundSeconds={gameplay.selectedRoundSeconds}
+        playerName={gameplay.effectivePlayerName}
+      />
+      <CatchToast caughtTarget={gameplay.catchToastTarget} />
+      <div className="gameplay-setup-stack">
+        <GameSessionPanel
+          gameState={gameplay.gameState}
+          selectedRoundSeconds={gameplay.selectedRoundSeconds}
+          roundDurationOptions={gameplay.roundDurationOptions}
+          onRoundDurationChange={gameplay.setSelectedRoundSeconds}
+          playerName={gameplay.playerName}
+          onPlayerNameChange={gameplay.setPlayerName}
+          onStartGame={gameplay.handleStartGame}
+          onEndGame={gameplay.handleEndGame}
+          backendSession={gameplay.backendSession}
+          backendScore={gameplay.backendScore}
+          backendCaughtCount={gameplay.backendCaughtCount}
+          sessionNotice={gameplay.sessionNotice}
+          catchSubmissionWarning={gameplay.catchSubmissionWarning}
+          isSessionPending={gameplay.isSessionPending}
+          isAuthenticated={gameplay.isAuthenticated}
+          authenticatedDisplayName={gameplay.currentUser?.displayName}
+        />
+        <GameControlsPanel
+          isSpawningPaused={gameplay.isSpawningPaused}
+          simulationSpeed={gameplay.simulationSpeed}
+          onToggleSpawning={gameplay.toggleSpawning}
+          onClearTargets={gameplay.clearTargets}
+          onResetScore={gameplay.resetScore}
+          onResetPlayer={gameplay.resetPlayer}
+          onResetGame={gameplay.resetGame}
+          onSimulationSpeedChange={gameplay.setSimulationSpeed}
+          maxSimulationSpeed={MAX_SIMULATION_SPEED + gameplay.speedBonus}
+        />
+      </div>
+      <TargetInfoPanel
+        targets={gameplay.targets}
+        onTargetClick={gameplay.handleTargetClick}
+        chasedTargetId={gameplay.chasedTargetId}
+        routingTargetId={gameplay.routingTargetId}
+        onCancelChase={gameplay.handleCancelChase}
+      />
+      <CaughtInventoryPanel caughtTargets={gameplay.caughtTargets} />
+
+      {gameplay.gameState === 'ended' && (
+        <RoundSummaryPanel
+          score={gameplay.score}
+          caughtTargets={gameplay.caughtTargets}
+          level={gameplay.level}
+          onRestartGame={gameplay.restartGame}
+          isRestarting={gameplay.isSessionPending}
+        />
+      )}
+
+      {gameplay.pendingDestination && (
+        <MoveConfirmPanel
+          destination={gameplay.pendingDestination}
+          onConfirm={gameplay.handleConfirmPendingMove}
+          onCancel={gameplay.clearPendingDestination}
+          isLoading={gameplay.isRouteLoading}
+        />
+      )}
+    </main>
+  )
+}
+
+export default SoloPlayPage

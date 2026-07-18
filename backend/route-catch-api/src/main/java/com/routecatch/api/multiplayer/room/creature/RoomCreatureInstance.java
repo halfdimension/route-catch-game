@@ -15,7 +15,7 @@ public class RoomCreatureInstance {
 	private final double longitude;
 	private final Instant spawnedAt;
 	private final Instant expiresAt;
-	private boolean caught;
+	private RoomCreatureStatus status = RoomCreatureStatus.ACTIVE;
 	private UUID caughtByUserId;
 	private String caughtByDisplayName;
 	private Instant caughtAt;
@@ -45,7 +45,7 @@ public class RoomCreatureInstance {
 	}
 
 	public boolean isExpired(Instant now) {
-		return !expiresAt.isAfter(now);
+		return status == RoomCreatureStatus.EXPIRED || !expiresAt.isAfter(now);
 	}
 
 	public void markCaught(
@@ -53,10 +53,14 @@ public class RoomCreatureInstance {
 		String caughtByDisplayName,
 		Instant caughtAt
 	) {
-		this.caught = true;
+		this.status = RoomCreatureStatus.CAUGHT;
 		this.caughtByUserId = caughtByUserId;
 		this.caughtByDisplayName = caughtByDisplayName;
 		this.caughtAt = caughtAt;
+	}
+
+	public void markExpired() {
+		this.status = RoomCreatureStatus.EXPIRED;
 	}
 
 	public UUID getInstanceId() {
@@ -99,8 +103,12 @@ public class RoomCreatureInstance {
 		return expiresAt;
 	}
 
+	public RoomCreatureStatus getStatus() {
+		return status;
+	}
+
 	public boolean isCaught() {
-		return caught;
+		return status == RoomCreatureStatus.CAUGHT;
 	}
 
 	public UUID getCaughtByUserId() {

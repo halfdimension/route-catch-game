@@ -6,17 +6,25 @@ import {
   endRoomGame,
   getRoomGame,
   getRoom,
+  getRoomSettingsEndpoint,
   joinRoom,
   leaveRoom,
   listMyRooms,
   spawnRoomCreatures,
   startRoomGame,
+  updateRoomSettings,
 } from '../api/multiplayerRoomClient'
+import RoomSettingsPanel from './RoomSettingsPanel'
 
 const DEFAULT_ROOM_NAME = 'Delhi Room'
 const DEFAULT_GAME_DURATION_SECONDS = 60
 const GAME_DURATION_OPTIONS = [30, 60, 90, 120]
 const LOBBY_ROOM_POLL_INTERVAL_MS = 2000
+const LOBBY_ROOM_POLL_MAX_RETRY_MS = 15000
+const ROOM_POLL_CONNECTION_STATUS = {
+  CONNECTED: 'CONNECTED',
+  RECONNECTING: 'RECONNECTING',
+}
 const DEFAULT_SPAWN_CENTER = {
   centerLat: 28.6139,
   centerLon: 77.209,
@@ -45,6 +53,28 @@ function formatRemainingTime(seconds) {
 
 function getMemberCount(room) {
   return Array.isArray(room?.members) ? room.members.length : 0
+}
+
+function isAbortError(error) {
+  return error?.name === 'AbortError'
+}
+
+function isNetworkFetchError(error) {
+  return !error?.status && !isAbortError(error)
+}
+
+function isExplicitRoomClosedError(error) {
+  if (
+    error?.errorCode === 'ROOM_NOT_FOUND' &&
+    [404, 410].includes(error.status)
+  ) {
+    return true
+  }
+
+  return (
+    error?.errorCode === 'ROOM_CLOSED' &&
+    [404, 409, 410].includes(error.status)
+  )
 }
 
 function MultiplayerPanel({
@@ -77,7 +107,14 @@ function MultiplayerPanel({
   const [gameRemainingSeconds, setGameRemainingSeconds] = useState(null)
   const [durationSeconds, setDurationSeconds] = useState(DEFAULT_GAME_DURATION_SECONDS)
   const [isSpawningRoomCreatures, setIsSpawningRoomCreatures] = useState(false)
+  const [isSavingRoomSettings, setIsSavingRoomSettings] = useState(false)
+  const [roomSettingsError, setRoomSettingsError] = useState('')
+  const [roomPollConnectionStatus, setRoomPollConnectionStatus] = useState(
+    ROOM_POLL_CONNECTION_STATUS.CONNECTED,
+  )
   const routeRoomCode = roomCode ? normalizeRoomCode(roomCode) : ''
+  const isPlayView = view === 'play'
+  const isLobbyView = view === 'lobby'
   const activeRoomCode = activeRoom?.roomCode
   const currentPlayerId = currentUser?.userId
   const routeCleanupRef = useRef({
@@ -87,6 +124,7 @@ function MultiplayerPanel({
     view,
   })
   const autoEnteredRoomGameRef = useRef('')
+  const isSavingRoomSettingsRef = useRef(false)
 
   const handleRoomError = useCallback((error, fallbackMessage) => {
     if (error.status === 401) {
@@ -125,6 +163,7 @@ function MultiplayerPanel({
         reason = 'room-refresh',
         shouldLogLobbyFetch = false,
         shouldSyncJoinCode = false,
+        signal,
       } = {},
     ) => {
       if (!roomCodeToFetch || !isAuthenticated || !token) {
@@ -138,7 +177,19 @@ function MultiplayerPanel({
         })
       }
 
-      const room = await getRoom(roomCodeToFetch, token)
+      const room = await getRoom(roomCodeToFetch, token, { signal })
+      console.debug('[multiplayer-room-settings]', 'room settings from refresh', {
+        roomCode: room?.roomCode || roomCodeToFetch,
+        reason,
+        settings: room?.settings,
+      })
+
+      if (room?.status === 'CLOSED') {
+        console.debug('[multiplayer-lobby]', 'room explicitly closed', {
+          roomCode: room?.roomCode || roomCodeToFetch,
+          reason,
+        })
+      }
 
       if (shouldLogLobbyFetch) {
         console.debug('[multiplayer-lobby]', 'lobby room fetch success', {
@@ -166,6 +217,8 @@ function MultiplayerPanel({
   useEffect(() => {
     if (
       !routeRoomCode ||
+      isLobbyView ||
+      isPlayView ||
       !isAuthenticated ||
       !token ||
       activeRoom?.roomCode === routeRoomCode
@@ -204,6 +257,8 @@ function MultiplayerPanel({
     activeRoom?.roomCode,
     handleRoomError,
     isAuthenticated,
+    isLobbyView,
+    isPlayView,
     onConnectPresence,
     refreshRoomState,
     routeRoomCode,
@@ -234,7 +289,13 @@ function MultiplayerPanel({
   }, [isAuthenticated, onDisconnectPresence, refreshMyRooms])
 
   useEffect(() => {
-    if (!activeRoomCode || !token || !isAuthenticated) {
+    if (
+      isLobbyView ||
+      isPlayView ||
+      !activeRoomCode ||
+      !token ||
+      !isAuthenticated
+    ) {
       return
     }
 
@@ -277,6 +338,8 @@ function MultiplayerPanel({
     activeRoomCode,
     currentPlayerId,
     isAuthenticated,
+    isLobbyView,
+    isPlayView,
     onDisconnectPresence,
     onSessionExpired,
     refreshMyRooms,
@@ -557,6 +620,11 @@ function MultiplayerPanel({
       return
     }
 
+    if (activeRoom.settings?.allowManualCreatureSpawn === false) {
+      setRoomError('Manual creature spawning is disabled for this room.')
+      return
+    }
+
     if (gameStatus !== 'RUNNING') {
       setRoomError('Room game is not running')
       return
@@ -587,6 +655,70 @@ function MultiplayerPanel({
     }
   }
 
+  async function handleSaveRoomSettings(nextSettings) {
+    if (!activeRoom?.roomCode || isSavingRoomSettingsRef.current) {
+      return
+    }
+
+    const roomCodeToSave = activeRoom.roomCode
+    const endpoint = getRoomSettingsEndpoint(roomCodeToSave)
+    isSavingRoomSettingsRef.current = true
+    setIsSavingRoomSettings(true)
+    setRoomSettingsError('')
+    setRoomMessage('')
+
+    try {
+      console.debug('[multiplayer-room-settings]', 'settings save started', {
+        roomCode: roomCodeToSave,
+        endpoint,
+        payload: nextSettings,
+      })
+      const savedRoom = await updateRoomSettings(roomCodeToSave, nextSettings, token)
+      console.debug('[multiplayer-room-settings]', 'settings save succeeded', {
+        roomCode: savedRoom?.roomCode || roomCodeToSave,
+        endpoint,
+        settings: savedRoom?.settings,
+      })
+      if (savedRoom?.roomCode) {
+        setActiveRoom(savedRoom)
+      }
+      setRoomSettingsError('')
+      setRoomMessage('Room settings saved.')
+    } catch (error) {
+      if (isAbortError(error)) {
+        console.debug('[multiplayer-room-settings]', 'request aborted', {
+          roomCode: roomCodeToSave,
+          endpoint,
+        })
+        return
+      }
+
+      console.debug('[multiplayer-room-settings]', 'settings save failed', {
+        roomCode: roomCodeToSave,
+        endpoint,
+        status: error.status,
+        errorCode: error.errorCode,
+        message: error.message,
+      })
+
+      if (error.status === 401) {
+        setRoomSettingsError('Session expired. Please sign in again.')
+        onSessionExpired?.()
+        return
+      }
+
+      if (error.status === 403) {
+        setRoomSettingsError('Only the host can update room settings.')
+        return
+      }
+
+      setRoomSettingsError(error.message || 'Could not save room settings.')
+    } finally {
+      isSavingRoomSettingsRef.current = false
+      setIsSavingRoomSettings(false)
+    }
+  }
+
   const isHost = Boolean(
     activeRoom?.hostUserId && activeRoom.hostUserId === currentUser?.userId,
   )
@@ -602,10 +734,14 @@ function MultiplayerPanel({
   )
   const canEndRoomGame = Boolean(isHost && gameStatus === 'RUNNING')
   const canCloseRoom = Boolean(isHost && gameStatus !== 'RUNNING')
-  const canSpawnRoomCreatures = Boolean(isHost && gameStatus === 'RUNNING')
+  const isManualCreatureSpawnAllowed =
+    activeRoom?.settings?.allowManualCreatureSpawn !== false
+  const canSpawnRoomCreatures = Boolean(
+    isHost &&
+    gameStatus === 'RUNNING' &&
+    isManualCreatureSpawnAllowed,
+  )
 
-  const isPlayView = view === 'play'
-  const isLobbyView = view === 'lobby'
   const shouldShowRoomSetup = view === 'rooms'
   const shouldShowMemberList = view === 'lobby'
   const shouldShowRoomLinks = Boolean(activeRoom?.roomCode && view === 'rooms')
@@ -635,14 +771,41 @@ function MultiplayerPanel({
   const displayedConnectionStatus = presenceEnabled
     ? connectionStatus
     : 'disconnected'
-  const statusBadgeLabel = isLobbyView ? 'Lobby' : displayedConnectionStatus
+  const statusBadgeLabel = isLobbyView
+    ? roomPollConnectionStatus === ROOM_POLL_CONNECTION_STATUS.RECONNECTING
+      ? 'Reconnecting'
+      : 'Lobby'
+    : displayedConnectionStatus
   const statusBadgeClassName = isLobbyView
-    ? 'lobby'
+    ? roomPollConnectionStatus === ROOM_POLL_CONNECTION_STATUS.RECONNECTING
+      ? 'reconnecting'
+      : 'lobby'
     : displayedConnectionStatus
   const shouldShowStatusBadge = isPlayView || isLobbyView
   const visibleConnectionMessage =
     presenceEnabled && connectionStatus !== 'connected' ? errorMessage : ''
   const lobbyRoomCode = isLobbyView ? activeRoomCode || routeRoomCode : ''
+  const playRoomCode = isPlayView ? activeRoomCode || routeRoomCode : ''
+  const roomPollView = isLobbyView ? 'lobby' : isPlayView ? 'play' : ''
+  const roomPollCode = roomPollView === 'lobby' ? lobbyRoomCode : playRoomCode
+  const visibleRoomPollConnectionMessage =
+    roomPollView &&
+    roomPollConnectionStatus === ROOM_POLL_CONNECTION_STATUS.RECONNECTING
+      ? 'Server unavailable. Reconnecting...'
+      : ''
+
+  useEffect(() => {
+    if (!activeRoom?.roomCode) {
+      return
+    }
+
+    console.debug('[multiplayer-room-settings]', 'settings displayed by panel', {
+      roomCode: activeRoom.roomCode,
+      isHost,
+      view,
+      settings: activeRoom.settings,
+    })
+  }, [activeRoom?.roomCode, activeRoom?.settings, isHost, view])
 
   useEffect(() => {
     if (
@@ -675,31 +838,117 @@ function MultiplayerPanel({
   ])
 
   useEffect(() => {
-    if (!isLobbyView || !lobbyRoomCode || !token || !isAuthenticated) {
+    if (!roomPollView || !roomPollCode || !token || !isAuthenticated) {
       return
     }
 
     let isPolling = true
+    let retryDelayMs = LOBBY_ROOM_POLL_INTERVAL_MS
+    let timeoutId = null
+    let abortController = null
 
-    console.debug('[multiplayer-lobby]', 'lobby polling start', {
-      roomCode: lobbyRoomCode,
-    })
-
-    const pollLobbyRoom = async () => {
+    const scheduleNextPoll = (delayMs, isRetry = false) => {
       if (!isPolling) {
         return
       }
 
-      try {
-        await refreshRoomState(lobbyRoomCode, {
-          reason: 'lobby-poll',
-          shouldLogLobbyFetch: true,
-          shouldSyncJoinCode: true,
+      if (isRetry) {
+        console.debug('[multiplayer-lobby]', 'retry scheduled', {
+          roomCode: roomPollCode,
+          delayMs,
         })
-      } catch (error) {
+      }
+
+      timeoutId = window.setTimeout(() => {
+        void pollRoom()
+      }, delayMs)
+    }
+
+    const markRoomExplicitlyClosed = (source) => {
+      console.debug('[multiplayer-lobby]', 'room explicitly closed', {
+        roomCode: roomPollCode,
+        source,
+      })
+      setActiveRoom((currentRoom) => (
+        currentRoom?.roomCode === roomPollCode
+          ? { ...currentRoom, status: 'CLOSED' }
+          : currentRoom
+      ))
+      setGameState((currentGameState) => (
+        currentGameState
+          ? { ...currentGameState, roomStatus: 'CLOSED' }
+          : currentGameState
+      ))
+      setRoomPollConnectionStatus(ROOM_POLL_CONNECTION_STATUS.CONNECTED)
+      setRoomMessage('Room closed.')
+      setRoomError('')
+      onDisconnectPresence(`room-closed:${source}`)
+      void refreshMyRooms()
+    }
+
+    const pollRoom = async () => {
+      if (!isPolling) {
+        return
+      }
+
+      abortController = new AbortController()
+      console.debug('[multiplayer-lobby]', 'poll started', {
+        roomCode: roomPollCode,
+        view: roomPollView,
+      })
+
+      try {
+        const room = await refreshRoomState(roomPollCode, {
+          reason: `${roomPollView}-poll`,
+          shouldSyncJoinCode: true,
+          signal: abortController.signal,
+        })
+
         if (!isPolling) {
           return
         }
+
+        retryDelayMs = LOBBY_ROOM_POLL_INTERVAL_MS
+        setRoomPollConnectionStatus((currentStatus) => (
+          currentStatus === ROOM_POLL_CONNECTION_STATUS.CONNECTED
+            ? currentStatus
+            : ROOM_POLL_CONNECTION_STATUS.CONNECTED
+        ))
+        console.debug('[multiplayer-lobby]', 'poll succeeded', {
+          roomCode: room?.roomCode || roomPollCode,
+          memberCount: getMemberCount(room),
+          view: roomPollView,
+        })
+
+        if (room?.status === 'CLOSED') {
+          console.debug('[multiplayer-lobby]', 'room explicitly closed', {
+            roomCode: room?.roomCode || roomPollCode,
+            source: `${roomPollView}-poll`,
+          })
+          setGameState((currentGameState) => (
+            currentGameState
+              ? { ...currentGameState, roomStatus: 'CLOSED' }
+              : currentGameState
+          ))
+          setRoomMessage('Room closed.')
+          onDisconnectPresence(`room-closed:${roomPollView}-poll`)
+          void refreshMyRooms()
+          return
+        }
+
+        scheduleNextPoll(LOBBY_ROOM_POLL_INTERVAL_MS)
+      } catch (error) {
+        if (!isPolling || isAbortError(error)) {
+          return
+        }
+
+        console.debug('[multiplayer-lobby]', 'poll failed', {
+          roomCode: roomPollCode,
+          view: roomPollView,
+          status: error.status,
+          errorCode: error.errorCode,
+          message: error.message,
+        })
 
         if (error.status === 401) {
           setRoomError('Session expired. Please sign in again.')
@@ -707,28 +956,54 @@ function MultiplayerPanel({
           return
         }
 
+        if (isExplicitRoomClosedError(error)) {
+          markRoomExplicitlyClosed(`${roomPollView}-poll`)
+          return
+        }
+
+        if (isNetworkFetchError(error)) {
+          setRoomPollConnectionStatus((currentStatus) => (
+            currentStatus === ROOM_POLL_CONNECTION_STATUS.RECONNECTING
+              ? currentStatus
+              : ROOM_POLL_CONNECTION_STATUS.RECONNECTING
+          ))
+          setRoomError('')
+          scheduleNextPoll(retryDelayMs, true)
+          retryDelayMs = Math.min(
+            retryDelayMs * 2,
+            LOBBY_ROOM_POLL_MAX_RETRY_MS,
+          )
+          return
+        }
+
         setRoomError(error.message || 'Could not load room.')
+        scheduleNextPoll(LOBBY_ROOM_POLL_INTERVAL_MS)
+      } finally {
+        abortController = null
       }
     }
 
-    void pollLobbyRoom()
-    const intervalId = window.setInterval(() => {
-      void pollLobbyRoom()
-    }, LOBBY_ROOM_POLL_INTERVAL_MS)
+    void pollRoom()
 
     return () => {
       isPolling = false
-      window.clearInterval(intervalId)
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
+      abortController?.abort()
       console.debug('[multiplayer-lobby]', 'lobby polling stop', {
-        roomCode: lobbyRoomCode,
+        roomCode: roomPollCode,
+        view: roomPollView,
       })
     }
   }, [
     isAuthenticated,
-    isLobbyView,
-    lobbyRoomCode,
     onSessionExpired,
+    onDisconnectPresence,
     refreshRoomState,
+    refreshMyRooms,
+    roomPollCode,
+    roomPollView,
     token,
   ])
 
@@ -828,6 +1103,21 @@ function MultiplayerPanel({
             )}
           </div>
 
+          <RoomSettingsPanel
+            key={[
+              activeRoom.roomCode,
+              activeRoom.settings?.maxSpeedMps,
+              activeRoom.settings?.allowPlayerSpeedControl,
+              activeRoom.settings?.allowManualCreatureSpawn,
+            ].join(':')}
+            settings={activeRoom.settings}
+            isHost={isHost}
+            isSaving={isSavingRoomSettings}
+            disabled={isActionPending}
+            errorMessage={roomSettingsError}
+            onSave={handleSaveRoomSettings}
+          />
+
           <div className="multiplayer-game-state" aria-label="Room game state">
             <div className="multiplayer-game-summary">
               <span>Game</span>
@@ -893,6 +1183,9 @@ function MultiplayerPanel({
                       ? 'Spawning'
                       : 'Spawn Room Creatures'}
                   </button>
+                )}
+                {isHost && !isManualCreatureSpawnAllowed && (
+                  <p className="multiplayer-count">Manual spawn disabled.</p>
                 )}
                 <button
                   type="button"
@@ -1032,9 +1325,19 @@ function MultiplayerPanel({
         </p>
       )}
 
-      {(roomMessage || roomError || visibleConnectionMessage) && (
-        <p className={roomError || visibleConnectionMessage ? 'multiplayer-error' : 'multiplayer-muted'}>
-          {roomError || visibleConnectionMessage || roomMessage}
+      {(roomMessage ||
+        roomError ||
+        visibleRoomPollConnectionMessage ||
+        visibleConnectionMessage) && (
+        <p className={
+          roomError || visibleRoomPollConnectionMessage || visibleConnectionMessage
+            ? 'multiplayer-error'
+            : 'multiplayer-muted'
+        }>
+          {roomError ||
+            visibleRoomPollConnectionMessage ||
+            visibleConnectionMessage ||
+            roomMessage}
         </p>
       )}
     </section>

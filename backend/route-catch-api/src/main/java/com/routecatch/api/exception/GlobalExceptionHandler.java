@@ -263,7 +263,7 @@ public class GlobalExceptionHandler {
 		HttpServletRequest request
 	) {
 		return errorResponse(
-			HttpStatus.BAD_GATEWAY,
+			exception.getStatus(),
 			exception.getErrorCode(),
 			exception.getMessage(),
 			request

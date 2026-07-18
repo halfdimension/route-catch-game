@@ -2,8 +2,11 @@ package com.routecatch.api.multiplayer.room.controller;
 
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -17,6 +20,7 @@ import com.routecatch.api.multiplayer.room.dto.RoomGameStateResponse;
 import com.routecatch.api.multiplayer.room.dto.RoomResponse;
 import com.routecatch.api.multiplayer.room.dto.RoomScoreboardResponse;
 import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
+import com.routecatch.api.multiplayer.room.dto.UpdateRoomSettingsRequest;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
 import com.routecatch.api.multiplayer.room.service.RoomScoreService;
 
@@ -25,6 +29,10 @@ import jakarta.validation.Valid;
 @RestController
 @RequestMapping("/api/multiplayer/rooms")
 public class MultiplayerRoomController {
+
+	private static final Logger LOGGER = LoggerFactory.getLogger(
+		MultiplayerRoomController.class
+	);
 
 	private final MultiplayerRoomService roomService;
 	private final RoomScoreService scoreService;
@@ -98,6 +106,26 @@ public class MultiplayerRoomController {
 			authentication
 		);
 		return RoomResponse.from(roomService.closeRoom(roomCode, currentUser));
+	}
+
+	@PatchMapping("/{roomCode}/settings")
+	public RoomResponse updateRoomSettings(
+		@PathVariable String roomCode,
+		@Valid @RequestBody UpdateRoomSettingsRequest request,
+		Authentication authentication
+	) {
+		UserEntity currentUser = currentUserService.getCurrentUserEntity(
+			authentication
+		);
+		LOGGER.info(
+			"room settings patch reached roomCode={} playerId={} maxSpeedMps={}",
+			roomCode,
+			currentUser.getUserId(),
+			request.maxSpeedMps()
+		);
+		return RoomResponse.from(
+			roomService.updateSettings(roomCode, currentUser, request)
+		);
 	}
 
 	@PostMapping("/{roomCode}/game/start")

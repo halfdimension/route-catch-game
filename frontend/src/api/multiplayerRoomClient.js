@@ -54,10 +54,27 @@ export function leaveRoom(roomCode, token) {
   )
 }
 
-export function getRoom(roomCode, token) {
+export function getRoom(roomCode, token, options = {}) {
   return requestMultiplayerRoom(
     `/api/multiplayer/rooms/${encodeURIComponent(roomCode)}`,
     token,
+    options,
+  )
+}
+
+export function getRoomSettingsEndpoint(roomCode) {
+  return `/api/multiplayer/rooms/${encodeURIComponent(roomCode)}/settings`
+}
+
+export function updateRoomSettings(roomCode, settings, token, options = {}) {
+  return requestMultiplayerRoom(
+    getRoomSettingsEndpoint(roomCode),
+    token,
+    {
+      ...options,
+      method: 'PATCH',
+      body: JSON.stringify(settings),
+    },
   )
 }
 
