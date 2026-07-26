@@ -66,6 +66,10 @@ public class MultiplayerRoom {
 		status = MultiplayerRoomStatus.IN_PROGRESS;
 	}
 
+	public void markOpen() {
+		status = MultiplayerRoomStatus.OPEN;
+	}
+
 	public String getRoomCode() {
 		return roomCode;
 	}

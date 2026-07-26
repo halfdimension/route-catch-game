@@ -1,12 +1,13 @@
 package com.routecatch.api.multiplayer.room.creature;
 
-import java.security.SecureRandom;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -29,28 +30,71 @@ import com.routecatch.api.multiplayer.room.service.RoomScoreService;
 import com.routecatch.api.service.OsrmRoutingService;
 
 @Service
-public class RoomCreatureService {
+public class RoomCreatureService implements RoomCreaturePopulationStore {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(
 		RoomCreatureService.class
 	);
-	private static final int MAX_ACTIVE_UNCAUGHT_CREATURES_PER_ROOM = 50;
-	private static final int ROUTE_VALIDATION_ATTEMPTS_PER_CREATURE = 6;
-	private static final double METERS_PER_DEGREE_LATITUDE = 111_320.0;
+	private static final int ROOM_LOCK_COUNT = 64;
+	private static final int MANUAL_PLACEMENT_ATTEMPTS_PER_CREATURE = 6;
 	private static final double CATCH_RADIUS_METERS = 75.0;
-	private static final double EARTH_RADIUS_METERS = 6_371_000.0;
 
 	private final MultiplayerRoomService roomService;
 	private final RoomScoreService scoreService;
 	private final CreatureCatalogService creatureCatalogService;
 	private final OsrmRoutingService routingService;
 	private final RoomCreatureEventPublisher eventPublisher;
+	private final RoomCreatureSpawnPolicy spawnPolicy;
+	private final RoomCreatureSpawnProperties spawnProperties;
+	private final SpawnRandomSource random;
 	private final Clock clock;
-	private final SecureRandom random = new SecureRandom();
 	private final Map<String, List<RoomCreatureInstance>> creaturesByRoom =
 		new ConcurrentHashMap<>();
+	private final Object[] roomLocks = createLocks(ROOM_LOCK_COUNT);
 
 	@Autowired
+	public RoomCreatureService(
+		MultiplayerRoomService roomService,
+		RoomScoreService scoreService,
+		CreatureCatalogService creatureCatalogService,
+		OsrmRoutingService routingService,
+		RoomCreatureEventPublisher eventPublisher,
+		RoomCreatureSpawnPolicy spawnPolicy,
+		RoomCreatureSpawnProperties spawnProperties,
+		SpawnRandomSource random
+	) {
+		this(
+			roomService,
+			scoreService,
+			creatureCatalogService,
+			routingService,
+			eventPublisher,
+			spawnPolicy,
+			spawnProperties,
+			random,
+			Clock.systemUTC()
+		);
+	}
+
+	RoomCreatureService(
+		MultiplayerRoomService roomService,
+		RoomScoreService scoreService,
+		CreatureCatalogService creatureCatalogService,
+		Clock clock
+	) {
+		this(
+			roomService,
+			scoreService,
+			creatureCatalogService,
+			null,
+			(roomCode, event) -> {},
+			new RoomCreatureSpawnPolicy(),
+			defaultProperties(),
+			new SecureSpawnRandomSource(),
+			clock
+		);
+	}
+
 	public RoomCreatureService(
 		MultiplayerRoomService roomService,
 		RoomScoreService scoreService,
@@ -72,14 +116,19 @@ public class RoomCreatureService {
 		MultiplayerRoomService roomService,
 		RoomScoreService scoreService,
 		CreatureCatalogService creatureCatalogService,
+		OsrmRoutingService routingService,
+		RoomCreatureEventPublisher eventPublisher,
 		Clock clock
 	) {
 		this(
 			roomService,
 			scoreService,
 			creatureCatalogService,
-			null,
-			(roomCode, event) -> {},
+			routingService,
+			eventPublisher,
+			new RoomCreatureSpawnPolicy(),
+			defaultProperties(),
+			new SecureSpawnRandomSource(),
 			clock
 		);
 	}
@@ -90,6 +139,9 @@ public class RoomCreatureService {
 		CreatureCatalogService creatureCatalogService,
 		OsrmRoutingService routingService,
 		RoomCreatureEventPublisher eventPublisher,
+		RoomCreatureSpawnPolicy spawnPolicy,
+		RoomCreatureSpawnProperties spawnProperties,
+		SpawnRandomSource random,
 		Clock clock
 	) {
 		this.roomService = roomService;
@@ -97,10 +149,17 @@ public class RoomCreatureService {
 		this.creatureCatalogService = creatureCatalogService;
 		this.routingService = routingService;
 		this.eventPublisher = eventPublisher;
+		this.spawnPolicy = spawnPolicy;
+		this.spawnProperties = spawnProperties;
+		this.random = random;
 		this.clock = clock;
 	}
 
-	public synchronized List<RoomCreatureInstance> spawnCreatures(
+	/**
+	 * Host-only manual/development override. Normal room population is maintained
+	 * by {@link RoomCreatureSpawnCoordinator}.
+	 */
+	public List<RoomCreatureInstance> spawnCreatures(
 		String roomCode,
 		UserEntity currentUser,
 		SpawnRoomCreaturesRequest request
@@ -111,138 +170,90 @@ public class RoomCreatureService {
 		requireManualCreatureSpawnAllowed(room);
 
 		String normalizedRoomCode = room.getRoomCode();
-		clearExpiredCreatures(normalizedRoomCode);
-
-		List<RoomCreatureInstance> roomCreatures =
-			creaturesByRoom.computeIfAbsent(
-				normalizedRoomCode,
-				(ignored) -> new ArrayList<>()
-			);
-
-		int activeCount = activeUncaughtCount(roomCreatures, Instant.now(clock));
-		int spawnCount = Math.min(
+		long generation = room.getGameState().getGeneration();
+		List<CreatureDefinition> catalog = requiredCatalog();
+		List<RoomCreatureInstance> spawned = new ArrayList<>();
+		int attemptLimit = Math.max(
 			request.count(),
-			MAX_ACTIVE_UNCAUGHT_CREATURES_PER_ROOM - activeCount
-		);
-
-		if (spawnCount <= 0) {
-			return List.of();
-		}
-
-		List<CreatureDefinition> catalog = creatureCatalogService.getAllCreatures();
-
-		if (catalog.isEmpty()) {
-			throw new RoomCreatureCatalogEmptyException();
-		}
-
-		Instant spawnedAt = Instant.now(clock);
-		Instant expiresAt = spawnedAt.plusSeconds(request.ttlSeconds());
-		List<RoomCreatureInstance> spawnedCreatures = new ArrayList<>(spawnCount);
-		int maxAttempts = Math.max(
-			spawnCount,
-			spawnCount * ROUTE_VALIDATION_ATTEMPTS_PER_CREATURE
+			request.count() * MANUAL_PLACEMENT_ATTEMPTS_PER_CREATURE
 		);
 
 		for (
 			int attempts = 0;
-			spawnedCreatures.size() < spawnCount && attempts < maxAttempts;
+			spawned.size() < request.count() && attempts < attemptLimit;
 			attempts += 1
 		) {
-			CreatureDefinition definition = randomCreature(catalog);
-			Coordinate coordinate = randomCoordinate(
-				request.centerLat(),
-				request.centerLon(),
-				request.radiusMeters()
+			GeoPoint candidate = spawnPolicy.generateCandidate(
+				new GeoPoint(request.centerLat(), request.centerLon()),
+				0.0,
+				request.radiusMeters(),
+				random
 			);
 
-			if (!hasCandidateRoute(request, coordinate)) {
+			if (!hasCandidateRoute(request, candidate)) {
 				continue;
 			}
 
-			RoomCreatureInstance creature = new RoomCreatureInstance(
-				UUID.randomUUID(),
-				normalizedRoomCode,
-				definition.creatureId(),
-				definition.creatureName(),
-				definition.rarity(),
-				definition.scoreValue(),
-				coordinate.latitude(),
-				coordinate.longitude(),
-				spawnedAt,
-				expiresAt
-			);
+			Optional<RoomCreatureInstance> created =
+				createForCurrentRound(
+					normalizedRoomCode,
+					generation,
+					candidate,
+					Duration.ofSeconds(request.ttlSeconds()),
+					currentUser.getUserId().toString(),
+					catalog
+				);
+			created.ifPresent(spawned::add);
 
-			roomCreatures.add(creature);
-			spawnedCreatures.add(creature);
-			LOGGER.info(
-				"creature created roomCode={} creatureId={} playerId={} catalogCreatureId={} rarity={} expiresAt={}",
-				normalizedRoomCode,
-				creature.getInstanceId(),
-				currentUser.getUserId(),
-				creature.getCreatureId(),
-				creature.getRarity(),
-				creature.getExpiresAt()
-			);
-			publishEvent(
-				RoomCreatureEventType.CREATED,
-				normalizedRoomCode,
-				currentUser.getUserId().toString(),
-				creature,
-				spawnedAt
-			);
+			if (created.isEmpty() && activeCount(normalizedRoomCode)
+				>= spawnProperties.maxActiveCount()) {
+				break;
+			}
 		}
 
-		return spawnedCreatures;
+		return List.copyOf(spawned);
 	}
 
-	public synchronized List<RoomCreatureInstance> listCreatures(
+	public List<RoomCreatureInstance> listCreatures(
 		String roomCode,
 		UserEntity currentUser
 	) {
 		MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
-		String normalizedRoomCode = room.getRoomCode();
-		Instant now = Instant.now(clock);
-
-		clearExpiredCreatures(normalizedRoomCode);
-
-		return creaturesByRoom.getOrDefault(normalizedRoomCode, List.of())
-			.stream()
-			.filter((creature) -> !creature.isCaught())
-			.filter((creature) -> !creature.isExpired(now))
-			.sorted(Comparator.comparing(RoomCreatureInstance::getSpawnedAt))
-			.toList();
+		return activeCreatures(room.getRoomCode());
 	}
 
-	public synchronized RoomCreatureMovementTarget resolveActiveMovementTarget(
+	public RoomCreatureMovementTarget resolveActiveMovementTarget(
 		String roomCode,
 		UUID instanceId,
 		UserEntity currentUser
 	) {
 		MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
 		String normalizedRoomCode = room.getRoomCode();
-		Instant now = Instant.now(clock);
-		RoomCreatureInstance creature = findCreature(
-			normalizedRoomCode,
-			instanceId
-		);
 
-		if (creature.isExpired(now)) {
-			expireCreature(normalizedRoomCode, creature, now);
-			throw new RoomCreatureExpiredException(instanceId);
+		synchronized (roomLock(normalizedRoomCode)) {
+			Instant now = Instant.now(clock);
+			RoomCreatureInstance creature = findCreature(
+				normalizedRoomCode,
+				instanceId
+			);
+
+			if (creature.isExpired(now)) {
+				expireCreature(normalizedRoomCode, creature, now);
+				throw new RoomCreatureExpiredException(instanceId);
+			}
+			if (creature.isCaught()) {
+				throw new RoomCreatureAlreadyCaughtException(instanceId);
+			}
+
+			return new RoomCreatureMovementTarget(
+				creature.getInstanceId(),
+				creature.getLatitude(),
+				creature.getLongitude()
+			);
 		}
-
-		if (creature.isCaught()) {
-			throw new RoomCreatureAlreadyCaughtException(instanceId);
-		}
-
-		return new RoomCreatureMovementTarget(
-			creature.getInstanceId(),
-			creature.getLatitude(),
-			creature.getLongitude()
-		);
 	}
 
-	public synchronized CatchRoomCreatureResponse catchCreature(
+	public CatchRoomCreatureResponse catchCreature(
 		String roomCode,
 		UUID instanceId,
 		UserEntity currentUser,
@@ -250,84 +261,54 @@ public class RoomCreatureService {
 	) {
 		MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
 		requireGameRunning(room);
-
 		String normalizedRoomCode = room.getRoomCode();
+		RoomCreatureInstance creature;
+		double distanceMeters;
 		Instant now = Instant.now(clock);
-		RoomCreatureInstance creature = findCreature(
-			normalizedRoomCode,
-			instanceId
-		);
 
-		LOGGER.info(
-			"catch attempt roomCode={} creatureId={} playerId={} playerLat={} playerLon={}",
-			normalizedRoomCode,
-			instanceId,
-			currentUser.getUserId(),
-			request.playerLat(),
-			request.playerLon()
-		);
-
-		if (creature.isExpired(now)) {
-			expireCreature(normalizedRoomCode, creature, now);
+		synchronized (roomLock(normalizedRoomCode)) {
+			creature = findCreature(normalizedRoomCode, instanceId);
 			LOGGER.info(
-				"catch rejected roomCode={} creatureId={} playerId={} reason=expired",
-				normalizedRoomCode,
-				instanceId,
-				currentUser.getUserId()
-			);
-			throw new RoomCreatureExpiredException(instanceId);
-		}
-
-		if (creature.isCaught()) {
-			LOGGER.info(
-				"catch rejected roomCode={} creatureId={} playerId={} reason=already_caught",
-				normalizedRoomCode,
-				instanceId,
-				currentUser.getUserId()
-			);
-			throw new RoomCreatureAlreadyCaughtException(instanceId);
-		}
-
-		double distanceMeters = distanceMeters(
-			request.playerLat(),
-			request.playerLon(),
-			creature.getLatitude(),
-			creature.getLongitude()
-		);
-
-		if (distanceMeters > CATCH_RADIUS_METERS) {
-			LOGGER.info(
-				"catch rejected roomCode={} creatureId={} playerId={} reason=too_far distanceMeters={} catchRadiusMeters={}",
+				"catch attempt roomCode={} creatureId={} playerId={} playerLat={} playerLon={}",
 				normalizedRoomCode,
 				instanceId,
 				currentUser.getUserId(),
-				distanceMeters,
-				CATCH_RADIUS_METERS
+				request.playerLat(),
+				request.playerLon()
 			);
-			throw new RoomCreatureTooFarException(
-				instanceId,
-				distanceMeters,
-				CATCH_RADIUS_METERS
+
+			if (creature.isExpired(now)) {
+				expireCreature(normalizedRoomCode, creature, now);
+				throw new RoomCreatureExpiredException(instanceId);
+			}
+			if (creature.isCaught()) {
+				throw new RoomCreatureAlreadyCaughtException(instanceId);
+			}
+
+			distanceMeters = spawnPolicy.distanceMeters(
+				new GeoPoint(request.playerLat(), request.playerLon()),
+				new GeoPoint(creature.getLatitude(), creature.getLongitude())
+			);
+			if (distanceMeters > CATCH_RADIUS_METERS) {
+				throw new RoomCreatureTooFarException(
+					instanceId,
+					distanceMeters,
+					CATCH_RADIUS_METERS
+				);
+			}
+
+			creature.markCaught(
+				currentUser.getUserId(),
+				currentUser.getDisplayName(),
+				now
 			);
 		}
 
-		creature.markCaught(
-			currentUser.getUserId(),
-			currentUser.getDisplayName(),
-			now
-		);
 		scoreService.awardCatch(
 			room,
 			currentUser,
 			creature.getScoreValue(),
 			creature.getCaughtAt()
-		);
-		LOGGER.info(
-			"catch accepted roomCode={} creatureId={} playerId={} scoreValue={}",
-			normalizedRoomCode,
-			instanceId,
-			currentUser.getUserId(),
-			creature.getScoreValue()
 		);
 		publishEvent(
 			RoomCreatureEventType.CAUGHT,
@@ -336,22 +317,63 @@ public class RoomCreatureService {
 			creature,
 			now
 		);
-
 		return CatchRoomCreatureResponse.from(creature, distanceMeters);
 	}
 
-	public synchronized void clearExpiredCreatures(String roomCode) {
-		Instant now = Instant.now(clock);
-		List<RoomCreatureInstance> roomCreatures =
-			creaturesByRoom.get(normalizeRoomCode(roomCode));
+	@Override
+	public List<RoomCreatureInstance> activeCreatures(String roomCode) {
+		String normalizedRoomCode = normalizeRoomCode(roomCode);
 
-		if (roomCreatures == null) {
-			return;
+		synchronized (roomLock(normalizedRoomCode)) {
+			expireRoomCreatures(normalizedRoomCode, Instant.now(clock));
+			return creaturesByRoom.getOrDefault(
+				normalizedRoomCode,
+				List.of()
+			).stream()
+				.filter((creature) ->
+					creature.getStatus() == RoomCreatureStatus.ACTIVE
+				)
+				.sorted(Comparator.comparing(RoomCreatureInstance::getSpawnedAt))
+				.toList();
 		}
+	}
 
-		roomCreatures.forEach(
-			(creature) -> expireCreature(normalizeRoomCode(roomCode), creature, now)
+	public int activeCount(String roomCode) {
+		return activeCreatures(roomCode).size();
+	}
+
+	@Override
+	public Optional<RoomCreatureInstance> createAutomaticCreature(
+		String roomCode,
+		long generation,
+		GeoPoint snappedPoint,
+		String anchorPlayerId
+	) {
+		return createForCurrentRound(
+			normalizeRoomCode(roomCode),
+			generation,
+			snappedPoint,
+			spawnProperties.creatureTtl(),
+			"system",
+			requiredCatalog()
 		);
+	}
+
+	@Override
+	public void clearRoom(String roomCode) {
+		String normalizedRoomCode = normalizeRoomCode(roomCode);
+
+		synchronized (roomLock(normalizedRoomCode)) {
+			creaturesByRoom.remove(normalizedRoomCode);
+		}
+	}
+
+	public void clearExpiredCreatures(String roomCode) {
+		String normalizedRoomCode = normalizeRoomCode(roomCode);
+
+		synchronized (roomLock(normalizedRoomCode)) {
+			expireRoomCreatures(normalizedRoomCode, Instant.now(clock));
+		}
 	}
 
 	@Scheduled(fixedDelay = 1000L)
@@ -359,14 +381,113 @@ public class RoomCreatureService {
 		expireDueCreaturesNow();
 	}
 
-	public synchronized void expireDueCreaturesNow() {
-		creaturesByRoom
-			.keySet()
-			.forEach((roomCode) -> clearExpiredCreatures(roomCode));
+	public void expireDueCreaturesNow() {
+		for (String roomCode : List.copyOf(creaturesByRoom.keySet())) {
+			clearExpiredCreatures(roomCode);
+		}
+	}
+
+	private Optional<RoomCreatureInstance> createForCurrentRound(
+		String normalizedRoomCode,
+		long generation,
+		GeoPoint coordinate,
+		Duration ttl,
+		String actorId,
+		List<CreatureDefinition> catalog
+	) {
+		if (coordinate == null || !coordinate.isValid()) {
+			return Optional.empty();
+		}
+
+		return roomService.withCurrentRoundRunning(
+			normalizedRoomCode,
+			generation,
+			() -> addCreatureIfAllowed(
+				normalizedRoomCode,
+				coordinate,
+				ttl,
+				actorId,
+				catalog
+			)
+		).flatMap((created) -> created);
+	}
+
+	private Optional<RoomCreatureInstance> addCreatureIfAllowed(
+		String roomCode,
+		GeoPoint coordinate,
+		Duration ttl,
+		String actorId,
+		List<CreatureDefinition> catalog
+	) {
+		synchronized (roomLock(roomCode)) {
+			Instant now = Instant.now(clock);
+			expireRoomCreatures(roomCode, now);
+			List<RoomCreatureInstance> active = activeCreaturesWithoutExpiry(
+				roomCode
+			);
+
+			if (
+				active.size() >= spawnProperties.maxActiveCount() ||
+				!spawnPolicy.isSeparatedFromCreatures(
+					coordinate,
+					active,
+					spawnProperties.minCreatureSeparationMeters()
+				) ||
+				active.stream().anyMatch((creature) ->
+					Double.compare(creature.getLatitude(), coordinate.latitude()) == 0
+					&& Double.compare(
+						creature.getLongitude(),
+						coordinate.longitude()
+					) == 0
+				)
+			) {
+				return Optional.empty();
+			}
+
+			CreatureDefinition definition = catalog.get(
+				random.nextInt(catalog.size())
+			);
+			RoomCreatureInstance creature = new RoomCreatureInstance(
+				UUID.randomUUID(),
+				roomCode,
+				definition.creatureId(),
+				definition.creatureName(),
+				definition.rarity(),
+				definition.scoreValue(),
+				coordinate.latitude(),
+				coordinate.longitude(),
+				now,
+				now.plus(ttl)
+			);
+			creaturesByRoom.computeIfAbsent(
+				roomCode,
+				(ignored) -> new ArrayList<>()
+			).add(creature);
+			publishEvent(
+				RoomCreatureEventType.CREATED,
+				roomCode,
+				actorId,
+				creature,
+				now
+			);
+			return Optional.of(creature);
+		}
+	}
+
+	private void expireRoomCreatures(String roomCode, Instant now) {
+		List<RoomCreatureInstance> creatures = creaturesByRoom.get(roomCode);
+
+		if (creatures == null) {
+			return;
+		}
+
+		creatures.forEach((creature) ->
+			expireCreature(roomCode, creature, now)
+		);
 	}
 
 	private void expireCreature(
-		String normalizedRoomCode,
+		String roomCode,
 		RoomCreatureInstance creature,
 		Instant now
 	) {
@@ -378,35 +499,87 @@ public class RoomCreatureService {
 		}
 
 		creature.markExpired();
-		LOGGER.info(
-			"creature expired roomCode={} creatureId={} playerId={} catalogCreatureId={}",
-			normalizedRoomCode,
-			creature.getInstanceId(),
-			"system",
-			creature.getCreatureId()
-		);
 		publishEvent(
 			RoomCreatureEventType.EXPIRED,
-			normalizedRoomCode,
+			roomCode,
 			"system",
 			creature,
 			now
 		);
 	}
 
+	private List<RoomCreatureInstance> activeCreaturesWithoutExpiry(
+		String roomCode
+	) {
+		return creaturesByRoom.getOrDefault(roomCode, List.of())
+			.stream()
+			.filter((creature) ->
+				creature.getStatus() == RoomCreatureStatus.ACTIVE
+			)
+			.toList();
+	}
+
+	private RoomCreatureInstance findCreature(
+		String roomCode,
+		UUID instanceId
+	) {
+		return creaturesByRoom.getOrDefault(roomCode, List.of())
+			.stream()
+			.filter((creature) -> creature.getInstanceId().equals(instanceId))
+			.findFirst()
+			.orElseThrow(() -> new RoomCreatureNotFoundException(instanceId));
+	}
+
+	private List<CreatureDefinition> requiredCatalog() {
+		List<CreatureDefinition> catalog =
+			creatureCatalogService.getAllCreatures();
+
+		if (catalog.isEmpty()) {
+			throw new RoomCreatureCatalogEmptyException();
+		}
+
+		return catalog;
+	}
+
+	private boolean hasCandidateRoute(
+		SpawnRoomCreaturesRequest request,
+		GeoPoint coordinate
+	) {
+		if (routingService == null) {
+			return true;
+		}
+
+		try {
+			routingService.fetchRoute(new RouteRequest(
+				request.centerLat(),
+				request.centerLon(),
+				coordinate.latitude(),
+				coordinate.longitude()
+			));
+			return true;
+		} catch (RoutingEngineException exception) {
+			return !List.of(
+				"NoRoute",
+				"NoSegment",
+				"ROUTE_NOT_FOUND",
+				"ROUTE_UNAVAILABLE"
+			).contains(exception.getErrorCode());
+		}
+	}
+
 	private void publishEvent(
 		RoomCreatureEventType eventType,
-		String normalizedRoomCode,
-		String playerId,
+		String roomCode,
+		String actorId,
 		RoomCreatureInstance creature,
 		Instant now
 	) {
 		eventPublisher.publish(
-			normalizedRoomCode,
+			roomCode,
 			new RoomCreatureEvent(
 				eventType,
-				normalizedRoomCode,
-				playerId,
+				roomCode,
+				actorId,
 				RoomCreatureResponse.from(creature, now)
 			)
 		);
@@ -434,124 +607,37 @@ public class RoomCreatureService {
 		}
 	}
 
-	private int activeUncaughtCount(
-		List<RoomCreatureInstance> roomCreatures,
-		Instant now
-	) {
-		return (int) roomCreatures.stream()
-			.filter((creature) -> !creature.isCaught())
-			.filter((creature) -> !creature.isExpired(now))
-			.count();
+	private Object roomLock(String roomCode) {
+		return roomLocks[Math.floorMod(roomCode.hashCode(), roomLocks.length)];
 	}
 
-	private RoomCreatureInstance findCreature(
-		String normalizedRoomCode,
-		UUID instanceId
-	) {
-		return creaturesByRoom.getOrDefault(normalizedRoomCode, List.of())
-			.stream()
-			.filter((creature) -> creature.getInstanceId().equals(instanceId))
-			.findFirst()
-			.orElseThrow(() -> new RoomCreatureNotFoundException(instanceId));
-	}
+	private Object[] createLocks(int count) {
+		Object[] locks = new Object[count];
 
-	private double distanceMeters(
-		double startLatitude,
-		double startLongitude,
-		double endLatitude,
-		double endLongitude
-	) {
-		double startLatitudeRadians = Math.toRadians(startLatitude);
-		double endLatitudeRadians = Math.toRadians(endLatitude);
-		double latitudeDelta = Math.toRadians(endLatitude - startLatitude);
-		double longitudeDelta = Math.toRadians(endLongitude - startLongitude);
-
-		double haversine = Math.sin(latitudeDelta / 2.0)
-			* Math.sin(latitudeDelta / 2.0)
-			+ Math.cos(startLatitudeRadians)
-			* Math.cos(endLatitudeRadians)
-			* Math.sin(longitudeDelta / 2.0)
-			* Math.sin(longitudeDelta / 2.0);
-
-		return EARTH_RADIUS_METERS * 2.0 * Math.atan2(
-			Math.sqrt(haversine),
-			Math.sqrt(1.0 - haversine)
-		);
-	}
-
-	private CreatureDefinition randomCreature(List<CreatureDefinition> catalog) {
-		return catalog.get(random.nextInt(catalog.size()));
-	}
-
-	private Coordinate randomCoordinate(
-		double centerLat,
-		double centerLon,
-		double radiusMeters
-	) {
-		double angle = random.nextDouble(0.0, Math.PI * 2.0);
-		double distanceMeters = radiusMeters * Math.sqrt(random.nextDouble());
-		double northMeters = Math.cos(angle) * distanceMeters;
-		double eastMeters = Math.sin(angle) * distanceMeters;
-		double latitude = centerLat + (northMeters / METERS_PER_DEGREE_LATITUDE);
-		double longitude = centerLon + (
-			eastMeters / metersPerDegreeLongitude(centerLat)
-		);
-
-		return new Coordinate(
-			clamp(latitude, -90.0, 90.0),
-			clamp(longitude, -180.0, 180.0)
-		);
-	}
-
-	private boolean hasCandidateRoute(
-		SpawnRoomCreaturesRequest request,
-		Coordinate coordinate
-	) {
-		if (routingService == null) {
-			return true;
+		for (int index = 0; index < count; index += 1) {
+			locks[index] = new Object();
 		}
 
-		try {
-			routingService.fetchRoute(new RouteRequest(
-				request.centerLat(),
-				request.centerLon(),
-				coordinate.latitude(),
-				coordinate.longitude()
-			));
-			return true;
-		} catch (RoutingEngineException exception) {
-			return !isRouteUnavailable(exception);
-		}
-	}
-
-	private boolean isRouteUnavailable(RoutingEngineException exception) {
-		return List.of(
-			"NoRoute",
-			"NoSegment",
-			"ROUTE_NOT_FOUND",
-			"ROUTE_UNAVAILABLE"
-		)
-			.contains(exception.getErrorCode());
-	}
-
-	private double metersPerDegreeLongitude(double latitude) {
-		double cosine = Math.cos(Math.toRadians(latitude));
-
-		if (Math.abs(cosine) < 0.000001) {
-			return METERS_PER_DEGREE_LATITUDE * 0.000001;
-		}
-
-		return METERS_PER_DEGREE_LATITUDE * Math.abs(cosine);
-	}
-
-	private double clamp(double value, double min, double max) {
-		return Math.max(min, Math.min(max, value));
+		return locks;
 	}
 
 	private String normalizeRoomCode(String roomCode) {
 		return roomCode.trim().toUpperCase();
 	}
 
-	private record Coordinate(double latitude, double longitude) {
+	private static RoomCreatureSpawnProperties defaultProperties() {
+		return new RoomCreatureSpawnProperties(
+			true,
+			Duration.ofSeconds(5),
+			4,
+			2,
+			30,
+			5,
+			150.0,
+			1200.0,
+			100.0,
+			8,
+			Duration.ofMinutes(2)
+		);
 	}
 }

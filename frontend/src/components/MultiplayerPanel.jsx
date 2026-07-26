@@ -730,7 +730,9 @@ function MultiplayerPanel({
   const gameStatus = gameState?.gameStatus || 'WAITING'
   const roomStatus = gameState?.roomStatus || activeRoom?.status
   const canStartRoomGame = Boolean(
-    isHost && roomStatus === 'OPEN' && gameStatus === 'WAITING',
+    isHost &&
+    roomStatus === 'OPEN' &&
+    (gameStatus === 'WAITING' || gameStatus === 'ENDED'),
   )
   const canEndRoomGame = Boolean(isHost && gameStatus === 'RUNNING')
   const canCloseRoom = Boolean(isHost && gameStatus !== 'RUNNING')
@@ -1181,7 +1183,7 @@ function MultiplayerPanel({
                   >
                     {isSpawningRoomCreatures
                       ? 'Spawning'
-                      : 'Spawn Room Creatures'}
+                      : 'Manual Spawn Override'}
                   </button>
                 )}
                 {isHost && !isManualCreatureSpawnAllowed && (
