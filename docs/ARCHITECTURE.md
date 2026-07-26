@@ -122,11 +122,74 @@ websocket sessionId -> userId + joined rooms
 
 It is not persisted and remains the temporary remote-marker fallback.
 
+### Authoritative Multiplayer Round Finalization
+
+Each room game start creates a UUID `roundId`, increments its room-local
+generation, records `startedAt`/`endsAt`, and freezes the participant roster
+from current room membership. The lifecycle is:
+
+```text
+WAITING/ENDED
+     |
+     | host start (new UUID + generation)
+     v
+  RUNNING
+     |
+     | host end / deadline / room close
+     v
+ FINALIZING
+     |
+     | freeze + immutable snapshot + store
+     v
+   ENDED ----> room OPEN for a later generation
+      \
+       +-----> room CLOSED when reason is ROOM_CLOSED
+```
+
+`RoomRoundCoordinator` supplies one lock per room, rather than one global
+service lock. Catch transition, score/history update, finalization, creature
+expiry/creation, and movement commit/freeze cross the same boundary. OSRM
+routing and road snapping remain outside it; movement captures round UUID and
+generation before routing and rechecks both when committing.
+
+`RoomRoundFinalizationService` is the single finalization path. Under the room
+boundary it rechecks expected identity, moves `RUNNING -> FINALIZING`, freezes
+active plans at their interpolated position, invalidates active creatures,
+stops the generation's spawn loop, and snapshots every start-time participant.
+Movement completion callbacks carry round identity and cannot complete a
+cancelled plan or a newer generation. Creature creation rechecks running
+generation at commit, so an OSRM call already in progress cannot add a creature
+after the freeze. Whichever coordinated catch/finalization operation enters
+first wins completely; a catch cannot be half reflected in score or history.
+
+Every successful catch creates an immutable `CaughtCreatureRecord` in the same
+critical section as `ACTIVE -> CAUGHT`, score award, and caught-event state.
+The record contains instance/catalog identity, name, rarity, awarded score,
+catch time, catcher, and round identity. Expired, failed, and losing concurrent
+catches create no record.
+
+Final ranking is competition ranking: score descending determines numeric
+rank, ties share rank, and positions after ties are skipped. Catch count
+descending, case-insensitive display name, and player UUID provide stable
+display order without changing rank. The public result exposes only leaderboard
+totals. Per-participant personal results add rarity counts and that
+participant's caught-creature records.
+
+The immutable result is saved through `RoomRoundResultStore` before one
+sequenced `GAME_ENDED` envelope is published to
+`/topic/rooms/{roomCode}/events`. REST retrieval by round UUID and latest round
+is the recovery path for reconnects or missed WebSocket delivery. Authorization
+uses the frozen participant roster, not mutable current membership.
+
+The in-memory store retains 100 completed rounds per room and survives room
+restart but not process restart. It is the explicit future PostgreSQL
+replacement boundary; no multiplayer-result tables or migrations exist.
+
 ### Automatic Shared-Creature Population
 
 Multiplayer shared-creature spawning is backend-controlled. A room lifecycle
 event starts exactly one fixed-delay `RoomCreatureSpawnCoordinator` loop when a
-round enters `RUNNING`; `ENDED` and `CLOSED` events cancel it and clear the
+round enters `RUNNING`; `FINALIZING`, `ENDED`, and `CLOSED` events cancel it and clear the
 room's creature state. Every round start increments a generation token. Both
 scheduled work and the final authoritative creation check that token, so an
 old OSRM request cannot mutate or clear a restarted round.

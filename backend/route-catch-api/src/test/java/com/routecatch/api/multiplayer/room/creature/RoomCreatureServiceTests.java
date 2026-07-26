@@ -27,6 +27,7 @@ import com.routecatch.api.multiplayer.room.dto.CreateRoomRequest;
 import com.routecatch.api.multiplayer.room.dto.RoomScoreboardResponse;
 import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
 import com.routecatch.api.multiplayer.room.exception.RoomForbiddenException;
+import com.routecatch.api.multiplayer.room.round.RoundLifecycleException;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
 import com.routecatch.api.multiplayer.room.service.RoomScoreService;
 
@@ -382,6 +383,16 @@ class RoomCreatureServiceTests {
 		assertEquals(host.getUserId().toString(), event.playerId());
 		assertEquals(creature.getInstanceId(), event.creature().instanceId());
 		assertEquals(RoomCreatureStatus.CAUGHT, event.creature().status());
+		var caughtHistory = scoreService
+			.snapshotRound(roomService.getRoom(roomCode))
+			.getFirst()
+			.caughtCreatures();
+		assertEquals(1, caughtHistory.size());
+		assertEquals(creature.getInstanceId(), caughtHistory.getFirst().instanceId());
+		assertEquals(
+			roomService.getRoom(roomCode).getGameState().getRoundId(),
+			caughtHistory.getFirst().roundId()
+		);
 	}
 
 	@Test
@@ -439,6 +450,13 @@ class RoomCreatureServiceTests {
 				.filter((event) -> event.eventType() == RoomCreatureEventType.CAUGHT)
 				.count()
 		);
+		assertEquals(
+			1,
+			scoreService.snapshotRound(roomService.getRoom(roomCode))
+				.stream()
+				.mapToInt(snapshot -> snapshot.caughtCreatures().size())
+				.sum()
+		);
 	}
 
 	@Test
@@ -488,6 +506,62 @@ class RoomCreatureServiceTests {
 		assertEquals(RoomCreatureEventType.EXPIRED, event.eventType());
 		assertEquals("system", event.playerId());
 		assertEquals(RoomCreatureStatus.EXPIRED, event.creature().status());
+		assertTrue(
+			scoreService.snapshotRound(roomService.getRoom(roomCode))
+				.getFirst()
+				.caughtCreatures()
+				.isEmpty()
+		);
+	}
+
+	@Test
+	void catchIsRejectedDuringFinalizationWithoutScoreOrHistory() {
+		MutableClock clock = new MutableClock(Instant.parse(
+			"2026-06-25T10:00:00Z"
+		));
+		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomScoreService scoreService = new RoomScoreService(roomService);
+		RoomCreatureService creatureService = new RoomCreatureService(
+			roomService,
+			scoreService,
+			new StubCreatureCatalogService(),
+			clock
+		);
+		UserEntity host = user("host", "Host");
+		String roomCode = roomService
+			.createRoom(host, new CreateRoomRequest("Delhi Room"))
+			.getRoomCode();
+		roomService.startGame(roomCode, host, new StartRoomGameRequest(60));
+		RoomCreatureInstance creature = creatureService.spawnCreatures(
+			roomCode,
+			host,
+			new SpawnRoomCreaturesRequest(28.6139, 77.2090, 1, 120, 20.0)
+		).getFirst();
+		var state = roomService.getRoom(roomCode).getGameState();
+		assertTrue(state.beginFinalizing(
+			state.getRoundId(),
+			state.getGeneration()
+		));
+
+		RoundLifecycleException exception = assertThrows(
+			RoundLifecycleException.class,
+			() -> creatureService.catchCreature(
+				roomCode,
+				creature.getInstanceId(),
+				host,
+				catchRequest(creature)
+			)
+		);
+
+		assertEquals("ROUND_FINALIZING", exception.getErrorCode());
+		assertFalse(creature.isCaught());
+		assertScoreboardTotals(scoreService, roomCode, host, 0, 0);
+		assertTrue(
+			scoreService.snapshotRound(roomService.getRoom(roomCode))
+				.getFirst()
+				.caughtCreatures()
+				.isEmpty()
+		);
 	}
 
 	@Test

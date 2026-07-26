@@ -568,6 +568,106 @@ class MultiplayerRoomApiTests {
 	}
 
 	@Test
+	void participantCanRecoverFinalizedResultByRoundAndLatestEndpoints()
+		throws Exception {
+		AuthFixture host = registerUser("resulthost", "resulthost@example.com", "Host");
+		AuthFixture member = registerUser(
+			"resultmember",
+			"resultmember@example.com",
+			"Member"
+		);
+		String roomCode = createRoom(host.token(), "Result Room");
+		joinRoom(member.token(), roomCode);
+		startRoomGame(host.token(), roomCode, 60);
+		String gameState = mockMvc.perform(
+				get("/api/multiplayer/rooms/{roomCode}/game", roomCode)
+					.header("Authorization", "Bearer " + member.token())
+			)
+			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+		String roundId = JsonPath.read(gameState, "$.roundId");
+		endRoomGame(host.token(), roomCode);
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/rounds/{roundId}/result",
+				roomCode,
+				roundId
+			)
+				.header("Authorization", "Bearer " + member.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.publicResult.roundId").value(roundId))
+			.andExpect(jsonPath("$.publicResult.leaderboard", hasSize(2)))
+			.andExpect(jsonPath("$.publicResult.leaderboard[0].caughtCreatures")
+				.doesNotExist())
+			.andExpect(jsonPath("$.personalResult.playerId").value(member.userId()))
+			.andExpect(jsonPath("$.personalResult.caughtCreatures", hasSize(0)));
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/rounds/latest/result",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + member.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.publicResult.roundId").value(roundId));
+	}
+
+	@Test
+	void resultRetrievalRejectsNonParticipant() throws Exception {
+		AuthFixture host = registerUser("privatehost", "privatehost@example.com", "Host");
+		AuthFixture outsider = registerUser(
+			"privateoutsider",
+			"privateoutsider@example.com",
+			"Outsider"
+		);
+		String roomCode = createRoom(host.token(), "Private Result Room");
+		startRoomGame(host.token(), roomCode, 60);
+		String gameState = mockMvc.perform(
+				get("/api/multiplayer/rooms/{roomCode}/game", roomCode)
+					.header("Authorization", "Bearer " + host.token())
+			)
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+		String roundId = JsonPath.read(gameState, "$.roundId");
+		endRoomGame(host.token(), roomCode);
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/rounds/{roundId}/result",
+				roomCode,
+				roundId
+			)
+				.header("Authorization", "Bearer " + outsider.token()))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.errorCode").value("ROUND_RESULT_FORBIDDEN"));
+	}
+
+	@Test
+	void runningRoundResultIsNotReady() throws Exception {
+		AuthFixture host = registerUser("readyhost", "readyhost@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Not Ready Room");
+		startRoomGame(host.token(), roomCode, 60);
+		String gameState = mockMvc.perform(
+				get("/api/multiplayer/rooms/{roomCode}/game", roomCode)
+					.header("Authorization", "Bearer " + host.token())
+			)
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+		String roundId = JsonPath.read(gameState, "$.roundId");
+
+		mockMvc.perform(get(
+				"/api/multiplayer/rooms/{roomCode}/rounds/{roundId}/result",
+				roomCode,
+				roundId
+			)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.errorCode").value("ROUND_RESULT_NOT_READY"));
+	}
+
+	@Test
 	void nonHostCannotEndRoomGame() throws Exception {
 		AuthFixture host = registerUser("host", "host@example.com", "Host");
 		AuthFixture other = registerUser("other", "other@example.com", "Other");

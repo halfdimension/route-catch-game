@@ -2,6 +2,7 @@ package com.routecatch.api.multiplayer.room.dto;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.UUID;
 
 import com.routecatch.api.multiplayer.room.model.MultiplayerRoom;
 import com.routecatch.api.multiplayer.room.model.MultiplayerRoomStatus;
@@ -18,6 +19,7 @@ public record RoomGameStateResponse(
 	Instant endedAt,
 	long remainingSeconds,
 	long generation,
+	UUID roundId,
 	String startedByUserId,
 	String startedByDisplayName
 ) {
@@ -38,6 +40,7 @@ public record RoomGameStateResponse(
 			gameState.getEndedAt(),
 			remainingSeconds(gameState, now),
 			gameState.getGeneration(),
+			gameState.getRoundId(),
 			gameState.getStartedByUserId() == null
 				? null
 				: gameState.getStartedByUserId().toString(),
@@ -47,7 +50,10 @@ public record RoomGameStateResponse(
 
 	private static long remainingSeconds(RoomGameState gameState, Instant now) {
 		if (
-			gameState.getStatus() != RoomGameStatus.RUNNING ||
+			(
+				gameState.getStatus() != RoomGameStatus.RUNNING &&
+				gameState.getStatus() != RoomGameStatus.FINALIZING
+			) ||
 			gameState.getEndsAt() == null ||
 			!gameState.getEndsAt().isAfter(now)
 		) {

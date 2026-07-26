@@ -161,6 +161,53 @@ class InMemoryRoomMovementServiceTests {
 	}
 
 	@Test
+	void finalizationFreezesInterpolatedPositionAndLateCompletionCannotMoveIt() {
+		Fixture fixture = fixture(true);
+		RoomMovementPlanResponse movement = fixture.service.startMovement(
+			fixture.roomCode,
+			fixture.host,
+			startRequest(0.001, 10.0, UUID.randomUUID(), 0L)
+		);
+		fixture.clock.advance(Duration.ofSeconds(5));
+		var state = fixture.roomService.getRoom(
+			fixture.roomCode
+		).getGameState();
+		state.beginFinalizing(state.getRoundId(), state.getGeneration());
+
+		int frozen = fixture.service.freezeRound(
+			fixture.roomCode,
+			state.getRoundId(),
+			state.getGeneration(),
+			START_TIME.plusSeconds(5)
+		);
+		RoomMovementPlanResponse frozenMovement = fixture.service
+			.getSnapshot(fixture.roomCode, fixture.host)
+			.movements()
+			.getFirst();
+
+		assertEquals(1, frozen);
+		assertEquals(MovementStatus.CANCELLED, frozenMovement.status());
+		assertCoordinate(frozenMovement.currentPosition(), 0.0, 0.0005);
+		assertThrows(
+			MovementRejectedException.class,
+			() -> fixture.service.startMovement(
+				fixture.roomCode,
+				fixture.host,
+				startRequest(0.002, 10.0, UUID.randomUUID(), movement.version())
+			)
+		);
+
+		fixture.clock.advance(Duration.ofSeconds(10));
+		fixture.scheduler.run(0);
+		RoomMovementPlanResponse afterLateCallback = fixture.service
+			.getSnapshot(fixture.roomCode, fixture.host)
+			.movements()
+			.getFirst();
+		assertEquals(MovementStatus.CANCELLED, afterLateCallback.status());
+		assertCoordinate(afterLateCallback.currentPosition(), 0.0, 0.0005);
+	}
+
+	@Test
 	void speedAboveRoomMaximumIsRejectedBeforeRouting() {
 		Fixture fixture = fixture(true);
 

@@ -364,9 +364,115 @@ curl --fail \
   "$API_URL/api/multiplayer/rooms/A8F3KQ/game/start"
 ```
 
-The response includes a monotonically increasing `generation`. Ending a round
-sets the game to `ENDED` and reopens the room so the host may start a new
-generation. Explicit room closure remains final.
+The response includes a unique `roundId` and a monotonically increasing,
+room-local `generation`. The authoritative lifecycle is
+`WAITING -> RUNNING -> FINALIZING -> ENDED`. `FINALIZING` is normally brief:
+gameplay is frozen atomically and the room reopens only after an immutable
+result has been stored. Explicit room closure remains final.
+
+Players present when `game/start` commits are the round participants. A member
+who joins an already-running room may observe it but cannot move, catch, or
+appear in that round's result. Every participant is ranked, including players
+with zero score.
+
+Host end, deadline expiry, and running-room closure all use the same
+generation-guarded finalizer. The first request changes `RUNNING` to
+`FINALIZING`; duplicate requests reuse the stored result, and delayed work for
+an older round cannot affect a restart. At the freeze boundary the backend:
+
+- rejects new/replacement movement and catch commands;
+- cancels active movement at its interpolated authoritative position;
+- prevents late movement completions from changing that position;
+- stops automatic spawning and invalidates remaining active creatures; and
+- snapshots scores and caught-creature history before publishing the result.
+
+Competition ranking uses score descending. Equal scores share a rank and later
+positions are skipped (`180, 150, 150, 90` becomes `1, 2, 2, 4`). Equal-score
+display order is catch count descending, display name case-insensitive
+ascending, then player UUID. These secondary fields do not change the shared
+rank.
+
+### Multiplayer Round Results
+
+An authenticated participant can recover a completed result even if its
+WebSocket event was missed:
+
+```bash
+curl --fail \
+  --header "Authorization: Bearer $TOKEN" \
+  "$API_URL/api/multiplayer/rooms/A8F3KQ/rounds/$ROUND_ID/result"
+
+curl --fail \
+  --header "Authorization: Bearer $TOKEN" \
+  "$API_URL/api/multiplayer/rooms/A8F3KQ/rounds/latest/result"
+```
+
+The response separates the public leaderboard from the requester's private
+catch details:
+
+```json
+{
+  "publicResult": {
+    "roundId": "UUID",
+    "roomCode": "A8F3KQ",
+    "startedAt": "2026-07-26T10:00:00Z",
+    "endedAt": "2026-07-26T10:05:00Z",
+    "endReason": "HOST_ENDED",
+    "playerCount": 2,
+    "leaderboard": [
+      {
+        "playerId": "UUID",
+        "displayName": "Harsh",
+        "score": 180,
+        "rank": 1,
+        "creaturesCaught": 2
+      }
+    ]
+  },
+  "personalResult": {
+    "roundId": "UUID",
+    "roomCode": "A8F3KQ",
+    "playerId": "UUID",
+    "displayName": "Harsh",
+    "score": 180,
+    "rank": 1,
+    "playerCount": 2,
+    "creaturesCaught": 2,
+    "rarityCounts": {"rare": 1, "legendary": 1},
+    "caughtCreatures": [
+      {
+        "instanceId": "UUID",
+        "creatureId": "catalog-id",
+        "name": "Creature",
+        "rarity": "rare",
+        "scoreAwarded": 80,
+        "caughtAt": "2026-07-26T10:01:00Z"
+      }
+    ],
+    "startedAt": "2026-07-26T10:00:00Z",
+    "endedAt": "2026-07-26T10:05:00Z",
+    "endReason": "HOST_ENDED"
+  }
+}
+```
+
+Other players' caught-creature lists are never included in `publicResult`.
+End reasons are `HOST_ENDED`, `TIME_EXPIRED`, or `ROOM_CLOSED`.
+
+The public event is published exactly once after the result is retrievable:
+
+```text
+/topic/rooms/{roomCode}/events
+```
+
+It uses the existing room envelope and sequence with `eventType: "GAME_ENDED"`;
+the payload is `publicResult`. Movement and `GAME_ENDED` therefore share the
+same monotonic `roomSequence`, even though they use their respective room
+topics.
+
+Completed multiplayer results are currently single-JVM and in memory. The
+replaceable `RoomRoundResultStore` retains the latest 100 rounds per room.
+Process restart loses them; PostgreSQL persistence is not implemented.
 
 While a generation is `RUNNING`, the backend automatically maintains active
 shared creatures:
@@ -621,3 +727,7 @@ Common statuses:
 - `409`: invalid session state
 - `502`: OSRM unavailable or invalid routing response
 - `500`: unexpected server error with no raw exception details
+
+Round-specific error codes include `ROUND_NOT_RUNNING`, `ROUND_FINALIZING`,
+`ROUND_ALREADY_ENDED`, `ROUND_NOT_FOUND`, `ROUND_RESULT_NOT_READY`,
+`ROUND_RESULT_FORBIDDEN`, and `STALE_ROUND_GENERATION`.

@@ -49,11 +49,15 @@ import com.routecatch.api.multiplayer.room.movement.routing.MovementRoute;
 import com.routecatch.api.multiplayer.room.movement.routing.MovementRouteClient;
 import com.routecatch.api.multiplayer.room.movement.routing.Polyline6Codec;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
+import com.routecatch.api.multiplayer.room.round.RoomRoundCoordinator;
 import com.routecatch.api.multiplayer.service.PresenceService;
 
 @Service
 public class InMemoryRoomMovementService
-	implements RoomMovementService, RoomPlayerPositionResolver {
+	implements
+		RoomMovementService,
+		RoomPlayerPositionResolver,
+		RoomMovementRoundControl {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(
 		InMemoryRoomMovementService.class
@@ -69,10 +73,13 @@ public class InMemoryRoomMovementService
 	private final MovementCompletionScheduler completionScheduler;
 	private final Clock clock;
 	private final MovementCoordinate initialPosition;
+	private final RoomRoundCoordinator roundCoordinator;
 	private final Object[] roomLocks = createLocks(ROOM_LOCK_COUNT);
 	private final Map<PlayerKey, RoomMovementPlan> latestPlans =
 		new ConcurrentHashMap<>();
 	private final Map<UUID, RoomMovementPlan> plansById =
+		new ConcurrentHashMap<>();
+	private final Map<UUID, RoundIdentity> planRounds =
 		new ConcurrentHashMap<>();
 	private final Map<PlayerKey, Long> movementVersions =
 		new ConcurrentHashMap<>();
@@ -140,6 +147,7 @@ public class InMemoryRoomMovementService
 		this.completionScheduler = completionScheduler;
 		this.clock = clock;
 		this.initialPosition = initialPosition;
+		this.roundCoordinator = roomService.getRoundCoordinator();
 	}
 
 	@Override
@@ -148,7 +156,10 @@ public class InMemoryRoomMovementService
 		UserEntity currentUser,
 		StartRoomMovementRequest request
 	) {
-		MultiplayerRoom initialRoom = requireRunningRoom(roomCode, currentUser);
+		MultiplayerRoom initialRoom = roundCoordinator.withRoom(
+			roomCode,
+			() -> requireRunningRoom(roomCode, currentUser)
+		);
 		String normalizedRoomCode = initialRoom.getRoomCode();
 		PlayerKey playerKey = new PlayerKey(
 			normalizedRoomCode,
@@ -156,47 +167,59 @@ public class InMemoryRoomMovementService
 		);
 
 		synchronized (playerStartLock(playerKey)) {
-			StartPreparation preparation;
+			StartPreparation preparation = roundCoordinator.withRoom(
+				normalizedRoomCode,
+				() -> {
+					synchronized (roomLock(normalizedRoomCode)) {
+						MultiplayerRoom room = requireRunningRoom(
+							normalizedRoomCode,
+							currentUser
+						);
+						Instant commandTimestamp = Instant.now(clock);
+						settleCurrentPlanIfDue(playerKey, commandTimestamp);
+						flushPendingEvents(normalizedRoomCode);
 
-		synchronized (roomLock(normalizedRoomCode)) {
-				MultiplayerRoom room = requireRunningRoom(
-					normalizedRoomCode,
-					currentUser
-				);
-				Instant commandTimestamp = Instant.now(clock);
-				settleCurrentPlanIfDue(playerKey, commandTimestamp);
-				flushPendingEvents(normalizedRoomCode);
+						RoomMovementPlan duplicatePlan = duplicateStartPlan(
+							playerKey,
+							request
+						);
 
-				RoomMovementPlan duplicatePlan = duplicateStartPlan(
-					playerKey,
-					request
-				);
+						if (duplicatePlan != null) {
+							return StartPreparation.duplicate(
+								responseAt(duplicatePlan, commandTimestamp)
+							);
+						}
 
-				if (duplicatePlan != null) {
-					return responseAt(duplicatePlan, commandTimestamp);
+						validateStartRequest(request);
+						validateExpectedVersion(
+							playerKey,
+							request.expectedMovementVersion()
+						);
+						resolveSimulationSpeed(room, request);
+						MovementCoordinate source = resolveSourcePosition(
+							playerKey,
+							commandTimestamp
+						);
+						ResolvedDestination destination = resolveDestination(
+							normalizedRoomCode,
+							currentUser,
+							request
+						);
+						return new StartPreparation(
+							commandTimestamp,
+							source,
+							destination,
+							movementStateRevisions.getOrDefault(playerKey, 0L),
+							room.getGameState().getRoundId(),
+							room.getGameState().getGeneration(),
+							null
+						);
+					}
 				}
+			);
 
-				validateStartRequest(request);
-				validateExpectedVersion(
-					playerKey,
-					request.expectedMovementVersion()
-				);
-				resolveSimulationSpeed(room, request);
-				MovementCoordinate source = resolveSourcePosition(
-					playerKey,
-					commandTimestamp
-				);
-				ResolvedDestination destination = resolveDestination(
-					normalizedRoomCode,
-					currentUser,
-					request
-				);
-				preparation = new StartPreparation(
-					commandTimestamp,
-					source,
-					destination,
-					movementStateRevisions.getOrDefault(playerKey, 0L)
-				);
+			if (preparation.duplicateResponse() != null) {
+				return preparation.duplicateResponse();
 			}
 
 			MovementRoute route = routeClient.fetchRoute(
@@ -205,10 +228,13 @@ public class InMemoryRoomMovementService
 			);
 			validateRoute(route);
 
-			synchronized (roomLock(normalizedRoomCode)) {
-				MultiplayerRoom currentRoom = requireRunningRoom(
+			return roundCoordinator.withRoom(normalizedRoomCode, () -> {
+			  synchronized (roomLock(normalizedRoomCode)) {
+				MultiplayerRoom currentRoom = requireExpectedRunningRound(
 					normalizedRoomCode,
-					currentUser
+					currentUser,
+					preparation.roundId(),
+					preparation.generation()
 				);
 				Instant commitTimestamp = Instant.now(clock);
 				settleCurrentPlanIfDue(playerKey, commitTimestamp);
@@ -278,6 +304,13 @@ public class InMemoryRoomMovementService
 				movementVersions.put(playerKey, version);
 				latestPlans.put(playerKey, nextPlan);
 				plansById.put(nextPlan.getMovementId(), nextPlan);
+				planRounds.put(
+					nextPlan.getMovementId(),
+					new RoundIdentity(
+						preparation.roundId(),
+						preparation.generation()
+					)
+				);
 				processedStartCommands.put(
 					new CommandKey(playerKey, request.clientCommandId()),
 					new ProcessedStartCommand(request, nextPlan.getMovementId())
@@ -305,9 +338,14 @@ public class InMemoryRoomMovementService
 					eventTimestamp,
 					response.currentPosition()
 				);
-				scheduleCompletion(nextPlan);
+				scheduleCompletion(
+					nextPlan,
+					preparation.roundId(),
+					preparation.generation()
+				);
 				return response;
-			}
+			  }
+			});
 		}
 	}
 
@@ -317,11 +355,12 @@ public class InMemoryRoomMovementService
 		UserEntity currentUser,
 		CancelRoomMovementRequest request
 	) {
-		MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
-		String normalizedRoomCode = room.getRoomCode();
+		return roundCoordinator.withRoom(roomCode, () -> {
+			MultiplayerRoom room = requireRunningRoom(roomCode, currentUser);
+			String normalizedRoomCode = room.getRoomCode();
 
 			synchronized (roomLock(normalizedRoomCode)) {
-			roomService.getGameState(normalizedRoomCode, currentUser);
+			requireRunningRoom(normalizedRoomCode, currentUser);
 			validateCancelRequest(request);
 			PlayerKey playerKey = new PlayerKey(
 				normalizedRoomCode,
@@ -392,7 +431,8 @@ public class InMemoryRoomMovementService
 				currentPosition
 			);
 			return Optional.of(response);
-		}
+			}
+		});
 	}
 
 	@Override
@@ -400,34 +440,36 @@ public class InMemoryRoomMovementService
 		String roomCode,
 		UserEntity currentUser
 	) {
-		MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
-		String normalizedRoomCode = room.getRoomCode();
+		return roundCoordinator.withRoom(roomCode, () -> {
+			MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
+			String normalizedRoomCode = room.getRoomCode();
 
-		synchronized (roomLock(normalizedRoomCode)) {
-			roomService.getGameState(normalizedRoomCode, currentUser);
-			Instant now = Instant.now(clock);
-			settleDuePlansInRoom(normalizedRoomCode, now);
-			flushPendingEvents(normalizedRoomCode);
-			List<RoomMovementPlanResponse> movements = latestPlans
-				.entrySet()
-				.stream()
-				.filter((entry) ->
-					entry.getKey().roomCode().equals(normalizedRoomCode)
-				)
-				.map(Map.Entry::getValue)
-				.sorted(Comparator.comparing((plan) ->
-					plan.getPlayerId().toString()
-				))
-				.map((plan) -> responseAt(plan, now))
-				.toList();
+			synchronized (roomLock(normalizedRoomCode)) {
+				roomService.getGameState(normalizedRoomCode, currentUser);
+				Instant now = Instant.now(clock);
+				settleDuePlansInRoom(normalizedRoomCode, now);
+				flushPendingEvents(normalizedRoomCode);
+				List<RoomMovementPlanResponse> movements = latestPlans
+					.entrySet()
+					.stream()
+					.filter((entry) ->
+						entry.getKey().roomCode().equals(normalizedRoomCode)
+					)
+					.map(Map.Entry::getValue)
+					.sorted(Comparator.comparing((plan) ->
+						plan.getPlayerId().toString()
+					))
+					.map((plan) -> responseAt(plan, now))
+					.toList();
 
-			return new RoomMovementSnapshotResponse(
-				normalizedRoomCode,
-				eventSequencer.current(normalizedRoomCode),
-				now,
-				movements
-			);
-		}
+				return new RoomMovementSnapshotResponse(
+					normalizedRoomCode,
+					eventSequencer.current(normalizedRoomCode),
+					now,
+					movements
+				);
+			}
+		});
 	}
 
 	@Override
@@ -448,34 +490,36 @@ public class InMemoryRoomMovementService
 		String normalizedRoomCode = roomCode.trim().toUpperCase();
 		PlayerKey playerKey = new PlayerKey(normalizedRoomCode, playerId);
 
-		synchronized (roomLock(normalizedRoomCode)) {
-			settleCurrentPlanIfDue(playerKey, now);
-			RoomMovementPlan plan = latestPlans.get(playerKey);
+		return roundCoordinator.withRoom(normalizedRoomCode, () -> {
+			synchronized (roomLock(normalizedRoomCode)) {
+				settleCurrentPlanIfDue(playerKey, now);
+				RoomMovementPlan plan = latestPlans.get(playerKey);
 
-			if (plan != null && plan.getStatus() == MovementStatus.MOVING) {
-				MovementCoordinate position = positionAt(plan, now);
-				return Optional.of(
-					new GeoPoint(position.latitude(), position.longitude())
+				if (plan != null && plan.getStatus() == MovementStatus.MOVING) {
+					MovementCoordinate position = positionAt(plan, now);
+					return Optional.of(
+						new GeoPoint(position.latitude(), position.longitude())
+					);
+				}
+
+				MovementCoordinate storedPosition =
+					authoritativePositions.get(playerKey);
+
+				if (storedPosition != null) {
+					return Optional.of(new GeoPoint(
+						storedPosition.latitude(),
+						storedPosition.longitude()
+					));
+				}
+
+				return presenceService.findValidPlayerPosition(
+					normalizedRoomCode,
+					playerId
+				).map((position) ->
+					new GeoPoint(position.lat(), position.lon())
 				);
 			}
-
-			MovementCoordinate storedPosition =
-				authoritativePositions.get(playerKey);
-
-			if (storedPosition != null) {
-				return Optional.of(new GeoPoint(
-					storedPosition.latitude(),
-					storedPosition.longitude()
-				));
-			}
-
-			return presenceService.findValidPlayerPosition(
-				normalizedRoomCode,
-				playerId
-			).map((position) ->
-				new GeoPoint(position.lat(), position.lon())
-			);
-		}
+		});
 	}
 
 	@Scheduled(fixedDelay = 1000L)
@@ -488,11 +532,71 @@ public class InMemoryRoomMovementService
 		roomCodes.addAll(pendingEvents.keySet());
 
 		for (String roomCode : roomCodes) {
-			synchronized (roomLock(roomCode)) {
-				settleDuePlansInRoom(roomCode, Instant.now(clock));
-				flushPendingEvents(roomCode);
-			}
+			roundCoordinator.withRoom(roomCode, () -> {
+				synchronized (roomLock(roomCode)) {
+					settleDuePlansInRoom(roomCode, Instant.now(clock));
+					flushPendingEvents(roomCode);
+				}
+			});
 		}
+	}
+
+	@Override
+	public int freezeRound(
+		String roomCode,
+		UUID expectedRoundId,
+		long expectedGeneration,
+		Instant frozenAt
+	) {
+		String normalizedRoomCode = roomCode.trim().toUpperCase();
+		return roundCoordinator.withRoom(normalizedRoomCode, () -> {
+			synchronized (roomLock(normalizedRoomCode)) {
+				MultiplayerRoom room = roomService.getRoom(normalizedRoomCode);
+
+				if (
+					room.getGameState().getStatus() != RoomGameStatus.FINALIZING ||
+					room.getGameState().getGeneration() != expectedGeneration ||
+					!expectedRoundId.equals(room.getGameState().getRoundId())
+				) {
+					return 0;
+				}
+
+				int frozenCount = 0;
+
+				for (
+					Map.Entry<PlayerKey, RoomMovementPlan> entry
+						: latestPlans.entrySet()
+				) {
+					PlayerKey playerKey = entry.getKey();
+					RoomMovementPlan plan = entry.getValue();
+					RoundIdentity identity = planRounds.get(plan.getMovementId());
+
+					if (
+						!playerKey.roomCode().equals(normalizedRoomCode) ||
+						plan.getStatus() != MovementStatus.MOVING ||
+						identity == null ||
+						identity.generation() != expectedGeneration ||
+						!identity.roundId().equals(expectedRoundId)
+					) {
+						continue;
+					}
+
+					MovementCoordinate position = positionAt(plan, frozenAt);
+					plan.cancel(position, frozenAt);
+					authoritativePositions.put(playerKey, position);
+					incrementStateRevision(playerKey);
+					publishEvent(
+						RoomEventType.MOVEMENT_CANCELLED,
+						plan,
+						frozenAt,
+						position
+					);
+					frozenCount += 1;
+				}
+
+				return frozenCount;
+			}
+		});
 	}
 
 	private MultiplayerRoom requireRunningRoom(
@@ -501,10 +605,48 @@ public class InMemoryRoomMovementService
 	) {
 		MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
 
+		if (room.getGameState().getStatus() == RoomGameStatus.FINALIZING) {
+			throw new MovementRejectedException(
+				"ROUND_FINALIZING",
+				"Room round is finalizing",
+				HttpStatus.CONFLICT
+			);
+		}
+
 		if (room.getGameState().getStatus() != RoomGameStatus.RUNNING) {
 			throw new MovementRejectedException(
 				"ROOM_GAME_NOT_RUNNING",
 				"Room game is not running",
+				HttpStatus.CONFLICT
+			);
+		}
+
+		if (
+			!room.getGameState().hasParticipant(currentUser.getUserId())
+		) {
+			throw new RoomForbiddenException(
+				"Only players present when the round started can play this round"
+			);
+		}
+
+		return room;
+	}
+
+	private MultiplayerRoom requireExpectedRunningRound(
+		String roomCode,
+		UserEntity currentUser,
+		UUID expectedRoundId,
+		long expectedGeneration
+	) {
+		MultiplayerRoom room = requireRunningRoom(roomCode, currentUser);
+
+		if (
+			room.getGameState().getGeneration() != expectedGeneration ||
+			!expectedRoundId.equals(room.getGameState().getRoundId())
+		) {
+			throw new MovementRejectedException(
+				"STALE_ROUND_GENERATION",
+				"Movement command belongs to an older room round",
 				HttpStatus.CONFLICT
 			);
 		}
@@ -791,7 +933,11 @@ public class InMemoryRoomMovementService
 		return RoomMovementPlanResponse.from(plan, positionAt(plan, timestamp));
 	}
 
-	private void scheduleCompletion(RoomMovementPlan plan) {
+	private void scheduleCompletion(
+		RoomMovementPlan plan,
+		UUID roundId,
+		long generation
+	) {
 		try {
 			completionScheduler.schedule(
 				plan.getExpectedEndAt(),
@@ -799,7 +945,9 @@ public class InMemoryRoomMovementService
 					plan.getRoomCode(),
 					plan.getPlayerId(),
 					plan.getMovementId(),
-					plan.getVersion()
+					plan.getVersion(),
+					roundId,
+					generation
 				)
 			);
 		} catch (RuntimeException exception) {
@@ -818,9 +966,22 @@ public class InMemoryRoomMovementService
 		String roomCode,
 		UUID playerId,
 		UUID movementId,
-		long version
+		long version,
+		UUID roundId,
+		long generation
 	) {
-		synchronized (roomLock(roomCode)) {
+		roundCoordinator.withRoom(roomCode, () -> {
+		  synchronized (roomLock(roomCode)) {
+			MultiplayerRoom room = roomService.getRoom(roomCode);
+
+			if (
+				room.getGameState().getStatus() != RoomGameStatus.RUNNING ||
+				room.getGameState().getGeneration() != generation ||
+				!roundId.equals(room.getGameState().getRoundId())
+			) {
+				return;
+			}
+
 			PlayerKey playerKey = new PlayerKey(roomCode, playerId);
 			RoomMovementPlan currentPlan = latestPlans.get(playerKey);
 
@@ -836,12 +997,13 @@ public class InMemoryRoomMovementService
 			Instant now = Instant.now(clock);
 
 			if (now.isBefore(currentPlan.getExpectedEndAt())) {
-				scheduleCompletion(currentPlan);
+				scheduleCompletion(currentPlan, roundId, generation);
 				return;
 			}
 
 			completePlan(playerKey, currentPlan, now);
-		}
+		  }
+		});
 	}
 
 	private void settleCurrentPlanIfDue(PlayerKey playerKey, Instant now) {
@@ -1023,13 +1185,33 @@ public class InMemoryRoomMovementService
 		Instant commandTimestamp,
 		MovementCoordinate source,
 		ResolvedDestination destination,
-		long stateRevision
+		long stateRevision,
+		UUID roundId,
+		long generation,
+		RoomMovementPlanResponse duplicateResponse
 	) {
+
+		private static StartPreparation duplicate(
+			RoomMovementPlanResponse response
+		) {
+			return new StartPreparation(
+				null,
+				null,
+				null,
+				0L,
+				null,
+				0L,
+				response
+			);
+		}
 	}
 
 	private record ResolvedDestination(
 		MovementCoordinate coordinate,
 		UUID targetCreatureInstanceId
 	) {
+	}
+
+	private record RoundIdentity(UUID roundId, long generation) {
 	}
 }

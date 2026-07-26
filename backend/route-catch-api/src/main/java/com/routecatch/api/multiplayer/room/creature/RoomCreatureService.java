@@ -27,6 +27,9 @@ import com.routecatch.api.multiplayer.room.model.MultiplayerRoom;
 import com.routecatch.api.multiplayer.room.model.RoomGameStatus;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
 import com.routecatch.api.multiplayer.room.service.RoomScoreService;
+import com.routecatch.api.multiplayer.room.round.RoomRoundCoordinator;
+import com.routecatch.api.multiplayer.room.round.RoundLifecycleException;
+import org.springframework.http.HttpStatus;
 import com.routecatch.api.service.OsrmRoutingService;
 
 @Service
@@ -48,6 +51,7 @@ public class RoomCreatureService implements RoomCreaturePopulationStore {
 	private final RoomCreatureSpawnProperties spawnProperties;
 	private final SpawnRandomSource random;
 	private final Clock clock;
+	private final RoomRoundCoordinator roundCoordinator;
 	private final Map<String, List<RoomCreatureInstance>> creaturesByRoom =
 		new ConcurrentHashMap<>();
 	private final Object[] roomLocks = createLocks(ROOM_LOCK_COUNT);
@@ -153,6 +157,7 @@ public class RoomCreatureService implements RoomCreaturePopulationStore {
 		this.spawnProperties = spawnProperties;
 		this.random = random;
 		this.clock = clock;
+		this.roundCoordinator = roomService.getRoundCoordinator();
 	}
 
 	/**
@@ -259,71 +264,77 @@ public class RoomCreatureService implements RoomCreaturePopulationStore {
 		UserEntity currentUser,
 		CatchRoomCreatureRequest request
 	) {
-		MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
-		requireGameRunning(room);
-		String normalizedRoomCode = room.getRoomCode();
-		RoomCreatureInstance creature;
-		double distanceMeters;
-		Instant now = Instant.now(clock);
+		return roundCoordinator.withRoom(roomCode, () -> {
+			MultiplayerRoom room = roomService.getGameState(roomCode, currentUser);
+			requireGameRunning(room);
+			requireRoundParticipant(room, currentUser);
+			String normalizedRoomCode = room.getRoomCode();
+			Instant now = Instant.now(clock);
 
-		synchronized (roomLock(normalizedRoomCode)) {
-			creature = findCreature(normalizedRoomCode, instanceId);
-			LOGGER.info(
-				"catch attempt roomCode={} creatureId={} playerId={} playerLat={} playerLon={}",
-				normalizedRoomCode,
-				instanceId,
-				currentUser.getUserId(),
-				request.playerLat(),
-				request.playerLon()
-			);
-
-			if (creature.isExpired(now)) {
-				expireCreature(normalizedRoomCode, creature, now);
-				throw new RoomCreatureExpiredException(instanceId);
-			}
-			if (creature.isCaught()) {
-				throw new RoomCreatureAlreadyCaughtException(instanceId);
-			}
-
-			distanceMeters = spawnPolicy.distanceMeters(
-				new GeoPoint(request.playerLat(), request.playerLon()),
-				new GeoPoint(creature.getLatitude(), creature.getLongitude())
-			);
-			if (distanceMeters > CATCH_RADIUS_METERS) {
-				throw new RoomCreatureTooFarException(
-					instanceId,
-					distanceMeters,
-					CATCH_RADIUS_METERS
+			synchronized (roomLock(normalizedRoomCode)) {
+				RoomCreatureInstance creature = findCreature(
+					normalizedRoomCode,
+					instanceId
 				);
+				LOGGER.info(
+					"catch attempt roomCode={} creatureId={} playerId={} playerLat={} playerLon={}",
+					normalizedRoomCode,
+					instanceId,
+					currentUser.getUserId(),
+					request.playerLat(),
+					request.playerLon()
+				);
+
+				if (creature.isExpired(now)) {
+					expireCreature(normalizedRoomCode, creature, now);
+					throw new RoomCreatureExpiredException(instanceId);
+				}
+				if (creature.isCaught()) {
+					throw new RoomCreatureAlreadyCaughtException(instanceId);
+				}
+
+				double distanceMeters = spawnPolicy.distanceMeters(
+					new GeoPoint(request.playerLat(), request.playerLon()),
+					new GeoPoint(creature.getLatitude(), creature.getLongitude())
+				);
+				if (distanceMeters > CATCH_RADIUS_METERS) {
+					throw new RoomCreatureTooFarException(
+						instanceId,
+						distanceMeters,
+						CATCH_RADIUS_METERS
+					);
+				}
+
+				creature.markCaught(
+					currentUser.getUserId(),
+					currentUser.getDisplayName(),
+					now
+				);
+				scoreService.recordCatch(room, currentUser, creature);
+				publishEvent(
+					RoomCreatureEventType.CAUGHT,
+					normalizedRoomCode,
+					currentUser.getUserId().toString(),
+					creature,
+					now
+				);
+				return CatchRoomCreatureResponse.from(creature, distanceMeters);
 			}
-
-			creature.markCaught(
-				currentUser.getUserId(),
-				currentUser.getDisplayName(),
-				now
-			);
-		}
-
-		scoreService.awardCatch(
-			room,
-			currentUser,
-			creature.getScoreValue(),
-			creature.getCaughtAt()
-		);
-		publishEvent(
-			RoomCreatureEventType.CAUGHT,
-			normalizedRoomCode,
-			currentUser.getUserId().toString(),
-			creature,
-			now
-		);
-		return CatchRoomCreatureResponse.from(creature, distanceMeters);
+		});
 	}
 
 	@Override
 	public List<RoomCreatureInstance> activeCreatures(String roomCode) {
 		String normalizedRoomCode = normalizeRoomCode(roomCode);
+		return roundCoordinator.withRoom(
+			normalizedRoomCode,
+			() -> activeCreaturesCoordinated(normalizedRoomCode)
+		);
+	}
 
+	private List<RoomCreatureInstance> activeCreaturesCoordinated(
+		String normalizedRoomCode
+	) {
 		synchronized (roomLock(normalizedRoomCode)) {
 			expireRoomCreatures(normalizedRoomCode, Instant.now(clock));
 			return creaturesByRoom.getOrDefault(
@@ -383,7 +394,34 @@ public class RoomCreatureService implements RoomCreaturePopulationStore {
 
 	public void expireDueCreaturesNow() {
 		for (String roomCode : List.copyOf(creaturesByRoom.keySet())) {
-			clearExpiredCreatures(roomCode);
+			roundCoordinator.withRoom(
+				roomCode,
+				() -> clearExpiredCreatures(roomCode)
+			);
+		}
+	}
+
+	public int freezeRound(String roomCode, long expectedGeneration) {
+		String normalizedRoomCode = normalizeRoomCode(roomCode);
+		MultiplayerRoom room = roomService.getRoom(normalizedRoomCode);
+
+		if (
+			room.getGameState().getGeneration() != expectedGeneration ||
+			room.getGameState().getStatus() != RoomGameStatus.FINALIZING
+		) {
+			return 0;
+		}
+
+		synchronized (roomLock(normalizedRoomCode)) {
+			int activeCount = (int) creaturesByRoom
+				.getOrDefault(normalizedRoomCode, List.of())
+				.stream()
+				.filter(creature ->
+					creature.getStatus() == RoomCreatureStatus.ACTIVE
+				)
+				.count();
+			creaturesByRoom.remove(normalizedRoomCode);
+			return activeCount;
 		}
 	}
 
@@ -594,8 +632,26 @@ public class RoomCreatureService implements RoomCreaturePopulationStore {
 	}
 
 	private void requireGameRunning(MultiplayerRoom room) {
+		if (room.getGameState().getStatus() == RoomGameStatus.FINALIZING) {
+			throw new RoundLifecycleException(
+				"ROUND_FINALIZING",
+				"Room round is finalizing",
+				HttpStatus.CONFLICT
+			);
+		}
 		if (room.getGameState().getStatus() != RoomGameStatus.RUNNING) {
 			throw new RoomGameNotRunningException(room.getRoomCode());
+		}
+	}
+
+	private void requireRoundParticipant(
+		MultiplayerRoom room,
+		UserEntity currentUser
+	) {
+		if (!room.getGameState().hasParticipant(currentUser.getUserId())) {
+			throw new RoomForbiddenException(
+				"Only players present when the round started can play this round"
+			);
 		}
 	}
 
