@@ -18,3 +18,18 @@ export function startMovementForArchitecture({
 
   throw new RangeError(`Unsupported movement architecture: ${architecture}`)
 }
+
+export function createSharedCreatureMovementIntent(
+  creatureInstanceId,
+  requestedSpeedMps,
+) {
+  if (!creatureInstanceId) {
+    throw new TypeError('Shared creature instance id is required')
+  }
+
+  return {
+    requestedSpeedMps: Number(requestedSpeedMps),
+    destinationType: 'CREATURE',
+    targetCreatureInstanceId: creatureInstanceId,
+  }
+}

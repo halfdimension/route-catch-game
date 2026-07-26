@@ -39,6 +39,7 @@ import SoloPlayPage from './pages/SoloPlayPage'
 import StatsPage from './pages/StatsPage'
 import { playCatchSound } from './utils/soundEffects'
 import {
+  createSharedCreatureMovementIntent,
   MOVEMENT_ARCHITECTURE,
   startMovementForArchitecture,
 } from './utils/movementArchitecture'
@@ -917,9 +918,8 @@ function App() {
   const handleSharedRoomCreatureCatch = useCallback(
     (creature) => {
       const instanceId = creature?.instanceId
-      const creaturePosition = getSharedRoomCreaturePosition(creature)
 
-      if (!instanceId || !creaturePosition) {
+      if (!instanceId) {
         setSharedRoomCatchMessage({
           type: 'error',
           text: 'Could not catch creature.',
@@ -941,13 +941,9 @@ function App() {
 
       updateRoutingSharedRoomCreatureId(instanceId)
 
-      const commandId = startRoomMovement({
-        destinationLat: creaturePosition.lat,
-        destinationLon: creaturePosition.lon,
-        requestedSpeedMps: simulationSpeed,
-        destinationType: 'CREATURE',
-        targetCreatureInstanceId: instanceId,
-      })
+      const commandId = startRoomMovement(
+        createSharedCreatureMovementIntent(instanceId, simulationSpeed),
+      )
 
       if (!commandId) {
         updateRoutingSharedRoomCreatureId(null)

@@ -32,8 +32,6 @@ export function publishMovementStart(client, roomCode, intent) {
   }
 
   const payload = {
-    destinationLat: Number(intent.destinationLat),
-    destinationLon: Number(intent.destinationLon),
     requestedSpeedMps: Number(intent.requestedSpeedMps),
     destinationType: intent.destinationType,
     targetCreatureInstanceId: intent.targetCreatureInstanceId ?? null,
@@ -42,6 +40,11 @@ export function publishMovementStart(client, roomCode, intent) {
       intent.expectedMovementVersion === undefined
         ? null
         : intent.expectedMovementVersion,
+  }
+
+  if (intent.destinationType === 'MAP') {
+    payload.destinationLat = Number(intent.destinationLat)
+    payload.destinationLon = Number(intent.destinationLon)
   }
 
   client.publish({

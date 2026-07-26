@@ -474,7 +474,10 @@ public class InMemoryRoomMovementService implements RoomMovementService {
 			throw validationError("destinationType is required");
 		}
 
-		if (!isValidCoordinate(request.destinationLat(), request.destinationLon())) {
+		if (
+			request.destinationType() == MovementDestinationType.MAP &&
+			!isValidCoordinate(request.destinationLat(), request.destinationLon())
+		) {
 			throw validationError("Destination coordinates are invalid");
 		}
 

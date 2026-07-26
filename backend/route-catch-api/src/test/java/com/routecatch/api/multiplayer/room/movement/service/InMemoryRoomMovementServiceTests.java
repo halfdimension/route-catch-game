@@ -212,6 +212,32 @@ class InMemoryRoomMovementServiceTests {
 	}
 
 	@Test
+	void mapMovementWithoutDestinationIsRejectedBeforeRouting() {
+		Fixture fixture = fixture(true);
+		StartRoomMovementRequest request = new StartRoomMovementRequest(
+			null,
+			null,
+			10.0,
+			MovementDestinationType.MAP,
+			null,
+			UUID.randomUUID(),
+			0L
+		);
+
+		MovementRejectedException exception = assertThrows(
+			MovementRejectedException.class,
+			() -> fixture.service.startMovement(
+				fixture.roomCode,
+				fixture.host,
+				request
+			)
+		);
+
+		assertEquals("INVALID_MOVEMENT_COMMAND", exception.getErrorCode());
+		assertTrue(fixture.routeClient.calls.isEmpty());
+	}
+
+	@Test
 	void nonPositiveAndNonFiniteSpeedsAreRejectedBeforeRouting() {
 		Fixture fixture = fixture(true);
 

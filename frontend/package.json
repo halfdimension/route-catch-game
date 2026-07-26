@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test:movement": "node --test test/movementPlanTimeline.test.js test/movementPlanState.test.js test/movementPlanRenderer.test.js test/movementArchitecture.test.js test/multiplayerMovementClient.test.js",
+    "test:movement": "node --test test/movementPlanTimeline.test.js test/movementPlanState.test.js test/movementPlanRenderer.test.js test/movementArchitecture.test.js test/multiplayerMovementClient.test.js test/mapPaneConfig.test.js test/sharedCreatureIconCache.test.js test/sharedRoomCreatureMarkers.test.js",
     "test:presence": "node test/presenceSync.test.js",
     "preview": "vite preview"
   },

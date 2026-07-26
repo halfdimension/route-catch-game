@@ -4,6 +4,7 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import { INITIAL_MAP_CENTER, INITIAL_MAP_ZOOM } from '../config/mapConfig'
+import { MAP_PANE } from '../config/mapPaneConfig'
 import CatchMapEffect from './CatchMapEffect'
 import OtherPlayerMarkers from './OtherPlayerMarkers'
 import PlayerMarker from './PlayerMarker'
@@ -60,7 +61,7 @@ function GameMap({
       />
 
       <MapClickHandler onMapClick={onMapClick} />
-      <Pane name="route-pane" style={{ zIndex: 420 }}>
+      <Pane name={MAP_PANE.ROUTE.name} style={{ zIndex: MAP_PANE.ROUTE.zIndex }}>
         <RouteLine
           coordinates={routeCoordinates}
           isChaseActive={Boolean(
@@ -68,24 +69,35 @@ function GameMap({
           )}
         />
       </Pane>
-      <Pane name="creature-marker-pane" style={{ zIndex: 640 }}>
+      <Pane
+        name={MAP_PANE.CREATURE.name}
+        style={{ zIndex: MAP_PANE.CREATURE.zIndex }}
+      >
         <TargetLayer
           targets={targets}
           onTargetClick={onTargetClick}
           chasedTargetId={chasedTargetId}
           routingTargetId={routingTargetId}
         />
+        <CatchMapEffect caughtTarget={caughtTarget} />
+      </Pane>
+      <Pane
+        name={MAP_PANE.PLAYER.name}
+        style={{ zIndex: MAP_PANE.PLAYER.zIndex }}
+      >
+        <OtherPlayerMarkers players={otherPlayers} />
+        <PlayerMarker position={playerPosition} playerName={playerName} />
+      </Pane>
+      <Pane
+        name={MAP_PANE.SHARED_ROOM_CREATURE.name}
+        style={{ zIndex: MAP_PANE.SHARED_ROOM_CREATURE.zIndex }}
+      >
         <SharedRoomCreatureMarkers
           creatures={sharedRoomCreatures}
           onCatchCreature={onSharedRoomCreatureCatch}
           chasedCreatureId={chasedSharedRoomCreatureId}
           routingCreatureId={routingSharedRoomCreatureId}
         />
-        <CatchMapEffect caughtTarget={caughtTarget} />
-      </Pane>
-      <Pane name="player-marker-pane" style={{ zIndex: 660 }}>
-        <OtherPlayerMarkers players={otherPlayers} />
-        <PlayerMarker position={playerPosition} playerName={playerName} />
       </Pane>
 
       {pendingDestination && (

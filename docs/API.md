@@ -429,12 +429,25 @@ running:
 }
 ```
 
+`destinationLat` and `destinationLon` are required for `MAP`. For `CREATURE`,
+the browser omits them:
+
+```json
+{
+  "requestedSpeedMps": 80,
+  "destinationType": "CREATURE",
+  "targetCreatureInstanceId": "UUID",
+  "clientCommandId": "UUID",
+  "expectedMovementVersion": 0
+}
+```
+
 `expectedMovementVersion` is optional; when supplied, a stale command is
-rejected. `playerId`, source coordinates, and route geometry are never accepted
-as authority. For `CREATURE`, `targetCreatureInstanceId` is required and the
-server replaces the submitted destination with the active creature's
-authoritative coordinate. When player speed control is disabled, the server
-uses the room maximum speed.
+rejected. `playerId`, source coordinates, route geometry, and client-displayed
+creature coordinates are never accepted as authority. For `CREATURE`,
+`targetCreatureInstanceId` is required and the server resolves the active
+creature's authoritative coordinate. When player speed control is disabled, the
+server uses the room maximum speed.
 
 Cancel the current movement with its authoritative identity and version:
 

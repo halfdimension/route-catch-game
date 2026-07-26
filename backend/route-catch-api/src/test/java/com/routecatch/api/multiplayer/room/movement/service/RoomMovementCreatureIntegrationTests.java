@@ -16,6 +16,7 @@ import com.routecatch.api.multiplayer.room.creature.CatchRoomCreatureRequest;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureAlreadyCaughtException;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureExpiredException;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureInstance;
+import com.routecatch.api.multiplayer.room.creature.RoomCreatureNotFoundException;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureService;
 import com.routecatch.api.multiplayer.room.creature.SpawnRoomCreaturesRequest;
 import com.routecatch.api.multiplayer.room.dto.CreateRoomRequest;
@@ -34,7 +35,7 @@ import com.routecatch.api.multiplayer.service.PresenceService;
 class RoomMovementCreatureIntegrationTests {
 
 	@Test
-	void creatureChaseIgnoresRequestedCoordinatesAndUsesActiveTarget() {
+	void creatureChaseAcceptsOmittedCoordinatesAndUsesActiveTarget() {
 		Fixture fixture = fixture();
 		StartRoomMovementRequest request = creatureRequest(
 			fixture.creature().getInstanceId()
@@ -57,6 +58,37 @@ class RoomMovementCreatureIntegrationTests {
 			movement.targetCreatureInstanceId()
 		);
 		assertEquals(MovementDestinationType.CREATURE, movement.destinationType());
+	}
+
+	@Test
+	void replacementCreatureChaseCreatesHigherMovementVersion() {
+		Fixture fixture = fixture();
+		RoomCreatureInstance replacementCreature =
+			fixture.creatureService().spawnCreatures(
+				fixture.roomCode(),
+				fixture.host(),
+				new SpawnRoomCreaturesRequest(28.6149, 77.2190, 1, 120, 20.0)
+			).getFirst();
+
+		RoomMovementPlanResponse first = fixture.movementService().startMovement(
+			fixture.roomCode(),
+			fixture.host(),
+			creatureRequest(fixture.creature().getInstanceId(), 0L)
+		);
+		RoomMovementPlanResponse replacement =
+			fixture.movementService().startMovement(
+				fixture.roomCode(),
+				fixture.host(),
+				creatureRequest(replacementCreature.getInstanceId(), first.version())
+			);
+
+		assertEquals(1L, first.version());
+		assertEquals(2L, replacement.version());
+		assertEquals(
+			replacementCreature.getInstanceId(),
+			replacement.targetCreatureInstanceId()
+		);
+		assertEquals(2, fixture.routeClient().requestCount());
 	}
 
 	@Test
@@ -94,6 +126,21 @@ class RoomMovementCreatureIntegrationTests {
 				fixture.roomCode(),
 				fixture.host(),
 				creatureRequest(fixture.creature().getInstanceId())
+			)
+		);
+		assertEquals(0, fixture.routeClient().requestCount());
+	}
+
+	@Test
+	void missingCreatureChaseIsRejectedBeforeRouting() {
+		Fixture fixture = fixture();
+
+		assertThrows(
+			RoomCreatureNotFoundException.class,
+			() -> fixture.movementService().startMovement(
+				fixture.roomCode(),
+				fixture.host(),
+				creatureRequest(UUID.randomUUID())
 			)
 		);
 		assertEquals(0, fixture.routeClient().requestCount());
@@ -144,14 +191,21 @@ class RoomMovementCreatureIntegrationTests {
 	}
 
 	private StartRoomMovementRequest creatureRequest(UUID creatureInstanceId) {
+		return creatureRequest(creatureInstanceId, 0L);
+	}
+
+	private StartRoomMovementRequest creatureRequest(
+		UUID creatureInstanceId,
+		long expectedMovementVersion
+	) {
 		return new StartRoomMovementRequest(
-			0.0,
-			0.0,
+			null,
+			null,
 			40.0,
 			MovementDestinationType.CREATURE,
 			creatureInstanceId,
 			UUID.randomUUID(),
-			0L
+			expectedMovementVersion
 		);
 	}
 

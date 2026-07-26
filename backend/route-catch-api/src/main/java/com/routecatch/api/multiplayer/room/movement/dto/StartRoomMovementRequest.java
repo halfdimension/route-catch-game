@@ -11,12 +11,10 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 
 public record StartRoomMovementRequest(
-	@NotNull
 	@DecimalMin(value = "-90.0", message = "must be between -90 and 90")
 	@DecimalMax(value = "90.0", message = "must be between -90 and 90")
 	Double destinationLat,
 
-	@NotNull
 	@DecimalMin(value = "-180.0", message = "must be between -180 and 180")
 	@DecimalMax(value = "180.0", message = "must be between -180 and 180")
 	Double destinationLon,

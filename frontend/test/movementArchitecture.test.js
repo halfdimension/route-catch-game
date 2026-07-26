@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  createSharedCreatureMovementIntent,
   MOVEMENT_ARCHITECTURE,
   startMovementForArchitecture,
 } from '../src/utils/movementArchitecture.js'
@@ -33,4 +34,15 @@ test('multiplayer selects the authoritative plan path', () => {
 
   assert.equal(result, 'room-result')
   assert.deepEqual(calls, ['authoritative'])
+})
+
+test('shared creature click creates backend intent without browser coordinates', () => {
+  assert.deepEqual(
+    createSharedCreatureMovementIntent('creature-1', 12),
+    {
+      requestedSpeedMps: 12,
+      destinationType: 'CREATURE',
+      targetCreatureInstanceId: 'creature-1',
+    },
+  )
 })

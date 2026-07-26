@@ -154,6 +154,9 @@ room/player movement plan + version
 - Source priority is the interpolated active plan, the stored terminal
   authoritative position, a finite/range-valid presence position, then the
   configured initial position.
+- Map intents include a client-selected destination. Creature intents include
+  only the creature instance ID; the backend resolves its room-scoped active
+  coordinate before and after routing.
 - Position is derived from server elapsed time and speed as an OSRM-distance
   fraction, then applied to cumulative decoded-geometry length.
 - Replacements cancel the prior plan at the calculated route point and increase
