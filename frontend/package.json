@@ -10,11 +10,14 @@
     "test:movement": "node --test test/movementPlanTimeline.test.js test/movementPlanState.test.js test/movementPlanRenderer.test.js test/movementArchitecture.test.js test/multiplayerMovementClient.test.js test/mapPaneConfig.test.js test/sharedCreatureIconCache.test.js test/sharedRoomCreatureMarkers.test.js",
     "test:presence": "node test/presenceSync.test.js",
     "test:results": "node --test test/multiplayerRoundResultClient.test.js test/roomEventState.test.js test/multiplayerRoundResultState.test.js test/roundResultsViewModel.test.js",
+    "test:maplibre": "node --test test/mapLibrePrototype.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
     "@stomp/stompjs": "^7.3.0",
+    "@vis.gl/react-maplibre": "^8.1.1",
     "leaflet": "^1.9.4",
+    "maplibre-gl": "^6.0.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-leaflet": "^5.0.0",

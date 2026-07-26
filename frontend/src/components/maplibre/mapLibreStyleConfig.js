@@ -1,0 +1,128 @@
+export const DEFAULT_MAPLIBRE_STYLE_URL =
+  'https://tiles.openfreemap.org/styles/bright'
+
+const configuredStyleUrl =
+  import.meta.env?.VITE_MAPLIBRE_STYLE_URL?.trim()
+
+export const MAPLIBRE_STYLE_URL =
+  configuredStyleUrl || DEFAULT_MAPLIBRE_STYLE_URL
+
+const ROUTE_LAYOUT = Object.freeze({
+  'line-cap': 'round',
+  'line-join': 'round',
+})
+
+const ROUTE_LAYER_CONFIGURATIONS = Object.freeze({
+  standard: Object.freeze({
+    halo: Object.freeze({
+      id: 'prototype-route-halo',
+      type: 'line',
+      layout: ROUTE_LAYOUT,
+      paint: Object.freeze({
+        'line-color': '#111827',
+        'line-opacity': 0.58,
+        'line-width': 10,
+        'line-blur': 1,
+      }),
+    }),
+    core: Object.freeze({
+      id: 'prototype-route-core',
+      type: 'line',
+      layout: ROUTE_LAYOUT,
+      paint: Object.freeze({
+        'line-color': '#2563eb',
+        'line-opacity': 0.96,
+        'line-width': 5,
+      }),
+    }),
+  }),
+  chase: Object.freeze({
+    halo: Object.freeze({
+      id: 'prototype-route-halo',
+      type: 'line',
+      layout: ROUTE_LAYOUT,
+      paint: Object.freeze({
+        'line-color': '#27114f',
+        'line-opacity': 0.68,
+        'line-width': 13,
+        'line-blur': 1.2,
+      }),
+    }),
+    core: Object.freeze({
+      id: 'prototype-route-core',
+      type: 'line',
+      layout: ROUTE_LAYOUT,
+      paint: Object.freeze({
+        'line-color': '#8b5cf6',
+        'line-opacity': 1,
+        'line-width': 7,
+      }),
+    }),
+  }),
+})
+
+export function getRouteLayerConfigurations(isChaseActive = false) {
+  return isChaseActive
+    ? ROUTE_LAYER_CONFIGURATIONS.chase
+    : ROUTE_LAYER_CONFIGURATIONS.standard
+}
+
+function isCompatibleBuildingLayer(layer, sources) {
+  const sourceName = layer?.source
+  const sourceLayer = layer?.['source-layer']
+
+  return (
+    typeof sourceName === 'string' &&
+    typeof sourceLayer === 'string' &&
+    sources?.[sourceName]?.type === 'vector' &&
+    /building/i.test(`${layer.id} ${sourceLayer}`)
+  )
+}
+
+export function findBuildingSource(style) {
+  const layers = Array.isArray(style?.layers) ? style.layers : []
+  const compatibleLayer = layers.find((layer) =>
+    isCompatibleBuildingLayer(layer, style?.sources),
+  )
+
+  if (!compatibleLayer) {
+    return null
+  }
+
+  return {
+    source: compatibleLayer.source,
+    sourceLayer: compatibleLayer['source-layer'],
+    beforeId: layers.find((layer) => layer.type === 'symbol')?.id,
+  }
+}
+
+export function createBuildingExtrusionLayer(buildingSource) {
+  if (!buildingSource) {
+    return null
+  }
+
+  return {
+    id: 'prototype-3d-buildings',
+    type: 'fill-extrusion',
+    source: buildingSource.source,
+    'source-layer': buildingSource.sourceLayer,
+    minzoom: 15,
+    paint: {
+      'fill-extrusion-color': '#d4cbe6',
+      'fill-extrusion-height': [
+        'coalesce',
+        ['to-number', ['get', 'render_height']],
+        ['to-number', ['get', 'height']],
+        ['*', ['to-number', ['get', 'levels']], 2.6],
+        7,
+      ],
+      'fill-extrusion-base': [
+        'coalesce',
+        ['to-number', ['get', 'render_min_height']],
+        ['to-number', ['get', 'min_height']],
+        0,
+      ],
+      'fill-extrusion-opacity': 0.42,
+    },
+  }
+}

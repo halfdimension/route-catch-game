@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -43,6 +45,10 @@ import {
   MOVEMENT_ARCHITECTURE,
   startMovementForArchitecture,
 } from './utils/movementArchitecture'
+
+const MapLibrePrototypePage = import.meta.env.DEV
+  ? lazy(() => import('./pages/MapLibrePrototypePage'))
+  : null
 
 const TARGET_EXPIRED_MESSAGE = 'Target expired'
 
@@ -1197,6 +1203,16 @@ function App() {
         <Route path="/" element={<RootRedirect />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        {import.meta.env.DEV && MapLibrePrototypePage && (
+          <Route
+            path="/dev/maplibre"
+            element={(
+              <Suspense fallback={<main className="route-loading">Loading map lab…</main>}>
+                <MapLibrePrototypePage />
+              </Suspense>
+            )}
+          />
+        )}
         <Route element={<ProtectedRoutes />}>
           <Route path="/home" element={<HomePage />} />
           <Route
