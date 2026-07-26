@@ -14,6 +14,7 @@ import {
   startRoomGame,
   updateRoomSettings,
 } from '../api/multiplayerRoomClient'
+import MultiplayerRoundResults from './roundResults/MultiplayerRoundResults'
 import RoomSettingsPanel from './RoomSettingsPanel'
 
 const DEFAULT_ROOM_NAME = 'Delhi Room'
@@ -86,6 +87,7 @@ function MultiplayerPanel({
   connectionStatus,
   onlinePlayerCount,
   errorMessage,
+  roomEvent,
   playerPosition,
   sharedRoomCreatures = [],
   onConnectPresence,
@@ -542,7 +544,7 @@ function MultiplayerPanel({
 
   async function handleStartRoomGame() {
     if (!activeRoom?.roomCode) {
-      return
+      return false
     }
 
     setIsActionPending(true)
@@ -573,8 +575,10 @@ function MultiplayerPanel({
       }
 
       navigate(`/rooms/${startedRoomCode}/play`)
+      return true
     } catch (error) {
       handleRoomError(error, 'Could not start room game.')
+      return false
     } finally {
       setIsActionPending(false)
     }
@@ -594,7 +598,9 @@ function MultiplayerPanel({
       setGameState(nextGameState)
       setGameRemainingSeconds(nextGameState?.remainingSeconds ?? null)
       setRoomMessage('Room game ended.')
-      navigate(`/rooms/${activeRoom.roomCode}/lobby`)
+      if (!isPlayView) {
+        navigate(`/rooms/${activeRoom.roomCode}/lobby`)
+      }
     } catch (error) {
       handleRoomError(error, 'Could not end room game.')
     } finally {
@@ -754,7 +760,7 @@ function MultiplayerPanel({
     isPlayView &&
     activeRoomCode &&
     roomStatus !== 'CLOSED' &&
-    gameStatus === 'RUNNING',
+    ['RUNNING', 'FINALIZING', 'ENDED'].includes(gameStatus),
   )
   const presenceDecisionRoomCode = activeRoomCode || routeRoomCode
   const presenceDecisionReason = !isAuthenticated
@@ -765,9 +771,7 @@ function MultiplayerPanel({
         ? 'missing-room-code'
         : roomStatus === 'CLOSED'
           ? 'room-closed'
-          : gameStatus === 'ENDED'
-            ? 'game-ended'
-            : gameStatus !== 'RUNNING'
+          : !['RUNNING', 'FINALIZING', 'ENDED'].includes(gameStatus)
               ? `game-${String(gameStatus).toLowerCase()}`
               : 'room-play-running'
   const displayedConnectionStatus = presenceEnabled
@@ -1341,6 +1345,21 @@ function MultiplayerPanel({
             visibleConnectionMessage ||
             roomMessage}
         </p>
+      )}
+
+      {isPlayView && activeRoomCode && (
+        <MultiplayerRoundResults
+          roomCode={activeRoomCode}
+          token={token}
+          gameState={gameState}
+          roomEvent={roomEvent}
+          connectionStatus={connectionStatus}
+          isHost={isHost}
+          canPlayAgain={canStartRoomGame}
+          isActionPending={isActionPending}
+          onReturnToLobby={() => navigate(`/rooms/${activeRoomCode}/lobby`)}
+          onPlayAgain={handleStartRoomGame}
+        />
       )}
     </section>
   )
