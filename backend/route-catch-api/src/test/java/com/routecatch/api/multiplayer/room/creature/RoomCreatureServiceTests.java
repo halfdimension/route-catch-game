@@ -65,6 +65,82 @@ class RoomCreatureServiceTests {
 	}
 
 	@Test
+	void activePopulationExcludesCaughtAndExpiredCreatures() {
+		MutableClock clock = new MutableClock(Instant.parse(
+			"2026-06-25T10:00:00Z"
+		));
+		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomScoreService scoreService = new RoomScoreService(roomService);
+		RoomCreatureService creatureService = new RoomCreatureService(
+			roomService,
+			scoreService,
+			new StubCreatureCatalogService(),
+			clock
+		);
+		UserEntity host = user("host", "Host");
+		String roomCode = roomService
+			.createRoom(host, new CreateRoomRequest("Delhi Room"))
+			.getRoomCode();
+		roomService.startGame(roomCode, host, new StartRoomGameRequest(60));
+		List<RoomCreatureInstance> creatures = creatureService.spawnCreatures(
+			roomCode,
+			host,
+			new SpawnRoomCreaturesRequest(28.6139, 77.2090, 2, 30, 500.0)
+		);
+
+		assertEquals(2, creatureService.activeCount(roomCode));
+		creatureService.catchCreature(
+			roomCode,
+			creatures.getFirst().getInstanceId(),
+			host,
+			catchRequest(creatures.getFirst())
+		);
+		assertEquals(1, creatureService.activeCount(roomCode));
+
+		clock.advance(Duration.ofSeconds(31));
+
+		assertEquals(0, creatureService.activeCount(roomCode));
+	}
+
+	@Test
+	void authoritativeCreationPublishesCompatibleCreatedEvent() {
+		MutableClock clock = new MutableClock(Instant.parse(
+			"2026-06-25T10:00:00Z"
+		));
+		MultiplayerRoomService roomService = new MultiplayerRoomService();
+		RoomScoreService scoreService = new RoomScoreService(roomService);
+		RecordingRoomCreatureEventPublisher eventPublisher =
+			new RecordingRoomCreatureEventPublisher();
+		RoomCreatureService creatureService = new RoomCreatureService(
+			roomService,
+			scoreService,
+			new StubCreatureCatalogService(),
+			null,
+			eventPublisher,
+			clock
+		);
+		UserEntity host = user("host", "Host");
+		String roomCode = roomService
+			.createRoom(host, new CreateRoomRequest("Delhi Room"))
+			.getRoomCode();
+		roomService.startGame(roomCode, host, new StartRoomGameRequest(60));
+
+		RoomCreatureInstance creature = creatureService.spawnCreatures(
+			roomCode,
+			host,
+			new SpawnRoomCreaturesRequest(28.6139, 77.2090, 1, 30, 20.0)
+		).getFirst();
+
+		assertEquals(1, eventPublisher.events().size());
+		RoomCreatureEvent event = eventPublisher.events().getFirst();
+		assertEquals(RoomCreatureEventType.CREATED, event.eventType());
+		assertEquals(roomCode, event.roomCode());
+		assertEquals(host.getUserId().toString(), event.playerId());
+		assertEquals(creature.getInstanceId(), event.creature().instanceId());
+		assertEquals(RoomCreatureStatus.ACTIVE, event.creature().status());
+	}
+
+	@Test
 	void resolvesActiveCreatureAsAuthoritativeMovementTarget() {
 		MutableClock clock = new MutableClock(Instant.parse(
 			"2026-06-25T10:00:00Z"

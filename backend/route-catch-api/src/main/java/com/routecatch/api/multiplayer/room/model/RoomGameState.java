@@ -15,11 +15,13 @@ public class RoomGameState {
 	private Instant endedAt;
 	private UUID startedByUserId;
 	private String startedByDisplayName;
+	private long generation;
 
 	public RoomGameState(String roomCode) {
 		this.roomCode = roomCode;
 		this.status = RoomGameStatus.WAITING;
 		this.durationSeconds = 0;
+		this.generation = 0L;
 	}
 
 	public void start(
@@ -27,6 +29,7 @@ public class RoomGameState {
 		Instant now,
 		UserEntity currentUser
 	) {
+		generation += 1L;
 		status = RoomGameStatus.RUNNING;
 		durationSeconds = requestedDurationSeconds;
 		startedAt = now;
@@ -71,5 +74,9 @@ public class RoomGameState {
 
 	public String getStartedByDisplayName() {
 		return startedByDisplayName;
+	}
+
+	public long getGeneration() {
+		return generation;
 	}
 }

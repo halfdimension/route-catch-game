@@ -350,6 +350,83 @@ appear.
 Ordering is score descending, caught count descending, ended time ascending,
 then creation time descending.
 
+## Multiplayer Room Games and Shared Creatures
+
+Starting a room game is host-only and changes the room to `IN_PROGRESS` with a
+`RUNNING` game:
+
+```bash
+curl --fail \
+  --request POST \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/json" \
+  --data '{"durationSeconds": 300}' \
+  "$API_URL/api/multiplayer/rooms/A8F3KQ/game/start"
+```
+
+The response includes a monotonically increasing `generation`. Ending a round
+sets the game to `ENDED` and reopens the room so the host may start a new
+generation. Explicit room closure remains final.
+
+While a generation is `RUNNING`, the backend automatically maintains active
+shared creatures:
+
+```text
+desiredActiveCount =
+  clamp(baseActiveCount + activePlayerCount * perPlayerActiveCount,
+        0,
+        maxActiveCount)
+```
+
+Only non-expired `ACTIVE` creatures count. Each five-second cycle fills at most
+the configured deficit and never more than `maxSpawnsPerCycle`. For every
+placement, the backend prefers the eligible player with the fewest active
+creatures inside the spawn radius. An eligible position comes from the
+interpolated active movement plan first, a stored authoritative stationary
+position second, and valid presence only as a legacy fallback.
+
+The backend generates a bounded-distance geographic candidate around that
+player, snaps it through OSRM `/nearest`, and rejects failed/invalid snaps,
+points too close to the player, duplicates, and points within the configured
+minimum separation from another active creature. Browser coordinates are not
+used by the automatic cycle.
+
+Room members list active creatures with:
+
+```bash
+curl --fail \
+  --header "Authorization: Bearer $TOKEN" \
+  "$API_URL/api/multiplayer/rooms/A8F3KQ/creatures"
+```
+
+Clients may subscribe to compatible lifecycle events:
+
+```text
+/topic/rooms/{roomCode}/creatures
+```
+
+Event types remain `CREATED`, `CAUGHT`, and `EXPIRED`.
+
+The existing host-only endpoint below is retained only as a manual
+development/admin override. Normal gameplay does not call it, it does not
+start another scheduler, and authoritative active-count, lifecycle, catalog,
+event, and separation validation still applies:
+
+```bash
+curl --fail \
+  --request POST \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/json" \
+  --data \
+  '{"centerLat":28.6139,"centerLon":77.2090,"count":1,"ttlSeconds":120,"radiusMeters":500}' \
+  "$API_URL/api/multiplayer/rooms/A8F3KQ/creatures/spawn"
+```
+
+Automatic scheduling, room ownership, movement state, and shared-creature state
+are currently single-JVM and in memory. The scheduler/position/snapper
+abstractions are the boundary for future distributed room ownership; Redis or
+a broker is not implemented.
+
 ## WebSocket Multiplayer
 
 Endpoint:

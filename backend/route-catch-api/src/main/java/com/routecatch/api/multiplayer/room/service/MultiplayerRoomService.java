@@ -5,27 +5,34 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.multiplayer.room.dto.CreateRoomRequest;
 import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
 import com.routecatch.api.multiplayer.room.dto.UpdateRoomSettingsRequest;
+import com.routecatch.api.multiplayer.room.creature.RoomRoundAccess;
 import com.routecatch.api.multiplayer.room.exception.RoomClosedException;
 import com.routecatch.api.multiplayer.room.exception.RoomForbiddenException;
 import com.routecatch.api.multiplayer.room.exception.RoomGameAlreadyRunningException;
 import com.routecatch.api.multiplayer.room.exception.RoomNotFoundException;
+import com.routecatch.api.multiplayer.room.event.RoomGameLifecycleEvent;
+import com.routecatch.api.multiplayer.room.event.RoomGameLifecycleEvent.Type;
 import com.routecatch.api.multiplayer.room.model.MultiplayerRoom;
 import com.routecatch.api.multiplayer.room.model.MultiplayerRoomStatus;
 import com.routecatch.api.multiplayer.room.model.RoomGameState;
 import com.routecatch.api.multiplayer.room.model.RoomGameStatus;
 
 @Service
-public class MultiplayerRoomService {
+public class MultiplayerRoomService implements RoomRoundAccess {
 
 	private static final Logger log = LoggerFactory.getLogger(
 		MultiplayerRoomService.class
@@ -36,6 +43,16 @@ public class MultiplayerRoomService {
 
 	private final SecureRandom secureRandom = new SecureRandom();
 	private final Map<String, MultiplayerRoom> rooms = new ConcurrentHashMap<>();
+	private final ApplicationEventPublisher eventPublisher;
+
+	public MultiplayerRoomService() {
+		this((event) -> {});
+	}
+
+	@Autowired
+	public MultiplayerRoomService(ApplicationEventPublisher eventPublisher) {
+		this.eventPublisher = eventPublisher;
+	}
 
 	public synchronized MultiplayerRoom createRoom(
 		UserEntity currentUser,
@@ -79,6 +96,7 @@ public class MultiplayerRoomService {
 		room.removeMember(currentUser.getUserId());
 
 		if (hostLeaving && room.getMembers().isEmpty()) {
+			stopClosedRoom(room);
 			log.debug(
 				"no members left, room closed roomCode={}",
 				room.getRoomCode()
@@ -137,6 +155,7 @@ public class MultiplayerRoomService {
 			Instant.now(),
 			currentUser
 		);
+		publishLifecycle(room, Type.STARTED);
 		return room;
 	}
 
@@ -160,7 +179,8 @@ public class MultiplayerRoomService {
 
 		if (room.getGameState().getStatus() == RoomGameStatus.RUNNING) {
 			room.getGameState().end(Instant.now());
-			room.close();
+			room.markOpen();
+			publishLifecycle(room, Type.STOPPED);
 		}
 
 		return room;
@@ -182,8 +202,45 @@ public class MultiplayerRoomService {
 
 		requireHost(room, currentUser);
 
-		room.close();
+		stopClosedRoom(room);
 		return room;
+	}
+
+	@Override
+	public synchronized MultiplayerRoom refreshGameState(String roomCode) {
+		MultiplayerRoom room = getRoom(roomCode);
+		autoEndExpiredGame(room, Instant.now());
+		return room;
+	}
+
+	@Override
+	public synchronized boolean isCurrentRoundRunning(
+		String roomCode,
+		long generation
+	) {
+		MultiplayerRoom room = refreshGameState(roomCode);
+		return room.getStatus() == MultiplayerRoomStatus.IN_PROGRESS
+			&& room.getGameState().getStatus() == RoomGameStatus.RUNNING
+			&& room.getGameState().getGeneration() == generation;
+	}
+
+	public synchronized <T> Optional<T> withCurrentRoundRunning(
+		String roomCode,
+		long generation,
+		Supplier<T> action
+	) {
+		MultiplayerRoom room = getRoom(roomCode);
+		autoEndExpiredGame(room, Instant.now());
+
+		if (
+			room.getStatus() != MultiplayerRoomStatus.IN_PROGRESS ||
+			room.getGameState().getStatus() != RoomGameStatus.RUNNING ||
+			room.getGameState().getGeneration() != generation
+		) {
+			return Optional.empty();
+		}
+
+		return Optional.ofNullable(action.get());
 	}
 
 	public synchronized MultiplayerRoom updateSettings(
@@ -224,8 +281,29 @@ public class MultiplayerRoomService {
 			!gameState.getEndsAt().isAfter(now)
 		) {
 			gameState.end(gameState.getEndsAt());
-			room.close();
+			room.markOpen();
+			publishLifecycle(room, Type.STOPPED);
 		}
+	}
+
+	private void stopClosedRoom(MultiplayerRoom room) {
+		if (room.getGameState().getStatus() == RoomGameStatus.RUNNING) {
+			room.getGameState().end(Instant.now());
+		}
+
+		room.close();
+		publishLifecycle(room, Type.CLOSED);
+	}
+
+	private void publishLifecycle(
+		MultiplayerRoom room,
+		RoomGameLifecycleEvent.Type type
+	) {
+		eventPublisher.publishEvent(new RoomGameLifecycleEvent(
+			room.getRoomCode(),
+			room.getGameState().getGeneration(),
+			type
+		));
 	}
 
 	private String generateRoomCode() {

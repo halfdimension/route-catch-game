@@ -17,6 +17,7 @@ public record RoomGameStateResponse(
 	Instant endsAt,
 	Instant endedAt,
 	long remainingSeconds,
+	long generation,
 	String startedByUserId,
 	String startedByDisplayName
 ) {
@@ -36,6 +37,7 @@ public record RoomGameStateResponse(
 			gameState.getEndsAt(),
 			gameState.getEndedAt(),
 			remainingSeconds(gameState, now),
+			gameState.getGeneration(),
 			gameState.getStartedByUserId() == null
 				? null
 				: gameState.getStartedByUserId().toString(),

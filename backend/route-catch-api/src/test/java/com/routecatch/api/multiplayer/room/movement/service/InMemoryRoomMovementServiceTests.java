@@ -28,6 +28,7 @@ import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.exception.RoutingEngineException;
 import com.routecatch.api.game.creature.CreatureCatalogService;
 import com.routecatch.api.multiplayer.dto.PresenceUpdateRequest;
+import com.routecatch.api.multiplayer.room.creature.GeoPoint;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureService;
 import com.routecatch.api.multiplayer.room.dto.CreateRoomRequest;
 import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
@@ -315,6 +316,50 @@ class InMemoryRoomMovementServiceTests {
 		assertEquals(first.movementId(), cancelled.movementId());
 		assertEquals(MovementStatus.CANCELLED, cancelled.status());
 		assertCoordinate(cancelled.currentPosition(), 0.0, 0.0005);
+	}
+
+	@Test
+	void spawnPositionPrefersActivePlanThenStoredPositionOverPresence() {
+		Fixture fixture = fixture(true);
+		RoomMovementPlanResponse movement = fixture.service.startMovement(
+			fixture.roomCode,
+			fixture.host,
+			startRequest(0.001, 10.0, UUID.randomUUID(), 0L)
+		);
+		fixture.clock.advance(Duration.ofSeconds(5));
+		updatePresence(fixture, 9.0, 9.0);
+
+		GeoPoint movingPosition = fixture.service
+			.resolveAuthoritativePosition(
+				fixture.roomCode,
+				fixture.host.getUserId(),
+				fixture.clock.instant()
+			)
+			.orElseThrow();
+
+		assertEquals(0.0, movingPosition.latitude(), COORDINATE_TOLERANCE);
+		assertEquals(0.0005, movingPosition.longitude(), COORDINATE_TOLERANCE);
+
+		fixture.service.cancelMovement(
+			fixture.roomCode,
+			fixture.host,
+			cancelRequest(movement, UUID.randomUUID())
+		);
+		updatePresence(fixture, 8.0, 8.0);
+		GeoPoint stationaryPosition = fixture.service
+			.resolveAuthoritativePosition(
+				fixture.roomCode,
+				fixture.host.getUserId(),
+				fixture.clock.instant()
+			)
+			.orElseThrow();
+
+		assertEquals(0.0, stationaryPosition.latitude(), COORDINATE_TOLERANCE);
+		assertEquals(
+			0.0005,
+			stationaryPosition.longitude(),
+			COORDINATE_TOLERANCE
+		);
 	}
 
 	@Test
@@ -975,6 +1020,21 @@ class InMemoryRoomMovementServiceTests {
 			username + "@example.com",
 			displayName,
 			"hashed-password"
+		);
+	}
+
+	private void updatePresence(
+		Fixture fixture,
+		double latitude,
+		double longitude
+	) {
+		String socketSessionId = "replacement-" + UUID.randomUUID();
+		fixture.presenceService.registerSocketSession(socketSessionId);
+		fixture.presenceService.updatePresence(
+			fixture.roomCode,
+			fixture.host,
+			new PresenceUpdateRequest(latitude, longitude, "IDLE"),
+			socketSessionId
 		);
 	}
 

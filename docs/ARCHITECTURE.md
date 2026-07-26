@@ -122,6 +122,66 @@ websocket sessionId -> userId + joined rooms
 
 It is not persisted and remains the temporary remote-marker fallback.
 
+### Automatic Shared-Creature Population
+
+Multiplayer shared-creature spawning is backend-controlled. A room lifecycle
+event starts exactly one fixed-delay `RoomCreatureSpawnCoordinator` loop when a
+round enters `RUNNING`; `ENDED` and `CLOSED` events cancel it and clear the
+room's creature state. Every round start increments a generation token. Both
+scheduled work and the final authoritative creation check that token, so an
+old OSRM request cannot mutate or clear a restarted round.
+
+```text
+room RUNNING event
+        |
+        v
+per-room generation-guarded coordinator
+        |
+        +--> authoritative player positions
+        +--> fair anchor policy
+        +--> bounded geographic candidates
+        +--> backend OSRM /nearest snapping
+        |
+        v
+RoomCreatureService authoritative creation
+        |
+        +--> in-memory active instance
+        +--> existing CREATED event
+        +--> existing expiry/catch lifecycle
+```
+
+The configured target is:
+
+```text
+clamp(baseActiveCount + activePlayerCount * perPlayerActiveCount,
+      0,
+      maxActiveCount)
+```
+
+Only `ACTIVE`, non-expired instances count, and a cycle creates no more than
+`maxSpawnsPerCycle`. Eligible room members are resolved from an interpolated
+active movement plan, then the stored authoritative stationary position, then
+finite/range-valid presence as a legacy fallback. The fair anchor policy counts
+active creatures within the spawn maximum radius and deterministically chooses
+the player with the fewest.
+
+Candidate bearings and distances stay within the configured minimum and maximum
+radii before snapping. OSRM `/nearest` supplies the authoritative routable
+coordinate. Failed or invalid snaps, candidates too close to the anchor,
+duplicates, and candidates inside the active-creature separation distance are
+retried only up to the configured attempt limit. OSRM calls occur outside room
+and creature mutation locks.
+
+The host-only manual spawn REST command remains available as a clearly labelled
+development/admin override. It uses the same catalog, active-count,
+separation, lifecycle, creation, and event path and never creates a scheduler.
+
+Coordinator state and shared creatures are in memory and safe for the current
+single-JVM deployment. The scheduler, authoritative-position resolver, road
+snapper, lifecycle event, and generation guard form the intended future
+distributed room-ownership boundary. Redis, RabbitMQ, and other broker/storage
+coordination are not implemented.
+
 ### Multiplayer Movement Plans
 
 Phase A1 added the single-JVM authoritative movement foundation. Phase A2 now

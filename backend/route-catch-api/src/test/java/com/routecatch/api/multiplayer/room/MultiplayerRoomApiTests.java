@@ -561,7 +561,7 @@ class MultiplayerRoomApiTests {
 			)
 				.header("Authorization", "Bearer " + host.token()))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.roomStatus").value("CLOSED"))
+			.andExpect(jsonPath("$.roomStatus").value("OPEN"))
 			.andExpect(jsonPath("$.gameStatus").value("ENDED"))
 			.andExpect(jsonPath("$.remainingSeconds").value(0))
 			.andExpect(jsonPath("$.endedAt").isNotEmpty());
@@ -964,7 +964,7 @@ class MultiplayerRoomApiTests {
 			)
 				.header("Authorization", "Bearer " + host.token()))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.roomStatus").value("CLOSED"))
+			.andExpect(jsonPath("$.roomStatus").value("OPEN"))
 			.andExpect(jsonPath("$.gameStatus").value("ENDED"))
 			.andExpect(jsonPath("$.entries", hasSize(1)))
 			.andExpect(jsonPath("$.entries[0].score").value(0));

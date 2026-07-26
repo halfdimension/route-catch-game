@@ -27,6 +27,8 @@ import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.dto.CoordinateDto;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureMovementTarget;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureService;
+import com.routecatch.api.multiplayer.room.creature.GeoPoint;
+import com.routecatch.api.multiplayer.room.creature.RoomPlayerPositionResolver;
 import com.routecatch.api.multiplayer.room.event.RoomEventEnvelope;
 import com.routecatch.api.multiplayer.room.event.RoomEventSequencer;
 import com.routecatch.api.multiplayer.room.event.RoomEventType;
@@ -50,7 +52,8 @@ import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
 import com.routecatch.api.multiplayer.service.PresenceService;
 
 @Service
-public class InMemoryRoomMovementService implements RoomMovementService {
+public class InMemoryRoomMovementService
+	implements RoomMovementService, RoomPlayerPositionResolver {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(
 		InMemoryRoomMovementService.class
@@ -423,6 +426,54 @@ public class InMemoryRoomMovementService implements RoomMovementService {
 				eventSequencer.current(normalizedRoomCode),
 				now,
 				movements
+			);
+		}
+	}
+
+	@Override
+	public Optional<GeoPoint> resolveAuthoritativePosition(
+		String roomCode,
+		UUID playerId,
+		Instant now
+	) {
+		if (
+			roomCode == null ||
+			roomCode.isBlank() ||
+			playerId == null ||
+			now == null
+		) {
+			return Optional.empty();
+		}
+
+		String normalizedRoomCode = roomCode.trim().toUpperCase();
+		PlayerKey playerKey = new PlayerKey(normalizedRoomCode, playerId);
+
+		synchronized (roomLock(normalizedRoomCode)) {
+			settleCurrentPlanIfDue(playerKey, now);
+			RoomMovementPlan plan = latestPlans.get(playerKey);
+
+			if (plan != null && plan.getStatus() == MovementStatus.MOVING) {
+				MovementCoordinate position = positionAt(plan, now);
+				return Optional.of(
+					new GeoPoint(position.latitude(), position.longitude())
+				);
+			}
+
+			MovementCoordinate storedPosition =
+				authoritativePositions.get(playerKey);
+
+			if (storedPosition != null) {
+				return Optional.of(new GeoPoint(
+					storedPosition.latitude(),
+					storedPosition.longitude()
+				));
+			}
+
+			return presenceService.findValidPlayerPosition(
+				normalizedRoomCode,
+				playerId
+			).map((position) ->
+				new GeoPoint(position.lat(), position.lon())
 			);
 		}
 	}
