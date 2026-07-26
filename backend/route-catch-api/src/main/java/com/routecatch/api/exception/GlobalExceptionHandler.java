@@ -31,6 +31,7 @@ import com.routecatch.api.multiplayer.room.exception.RoomForbiddenException;
 import com.routecatch.api.multiplayer.room.exception.RoomGameAlreadyRunningException;
 import com.routecatch.api.multiplayer.room.exception.RoomNotFoundException;
 import com.routecatch.api.multiplayer.room.movement.exception.MovementRejectedException;
+import com.routecatch.api.multiplayer.room.round.RoundLifecycleException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -274,6 +275,19 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(MovementRejectedException.class)
 	public ResponseEntity<ApiErrorResponse> handleMovementRejected(
 		MovementRejectedException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			exception.getStatus(),
+			exception.getErrorCode(),
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(RoundLifecycleException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoundLifecycle(
+		RoundLifecycleException exception,
 		HttpServletRequest request
 	) {
 		return errorResponse(

@@ -30,6 +30,9 @@ import com.routecatch.api.multiplayer.room.model.MultiplayerRoom;
 import com.routecatch.api.multiplayer.room.model.MultiplayerRoomStatus;
 import com.routecatch.api.multiplayer.room.model.RoomGameState;
 import com.routecatch.api.multiplayer.room.model.RoomGameStatus;
+import com.routecatch.api.multiplayer.room.round.RoomRoundCoordinator;
+import com.routecatch.api.multiplayer.room.round.RoomRoundFinalizationGateway;
+import com.routecatch.api.multiplayer.room.round.RoundEndReason;
 
 @Service
 public class MultiplayerRoomService implements RoomRoundAccess {
@@ -44,6 +47,9 @@ public class MultiplayerRoomService implements RoomRoundAccess {
 	private final SecureRandom secureRandom = new SecureRandom();
 	private final Map<String, MultiplayerRoom> rooms = new ConcurrentHashMap<>();
 	private final ApplicationEventPublisher eventPublisher;
+	private final RoomRoundCoordinator roundCoordinator =
+		new RoomRoundCoordinator();
+	private volatile RoomRoundFinalizationGateway finalizationGateway;
 
 	public MultiplayerRoomService() {
 		this((event) -> {});
@@ -67,50 +73,53 @@ public class MultiplayerRoomService implements RoomRoundAccess {
 		return room;
 	}
 
-	public synchronized MultiplayerRoom joinRoom(
+	public MultiplayerRoom joinRoom(
 		String roomCode,
 		UserEntity currentUser
 	) {
 		MultiplayerRoom room = getRoom(roomCode);
+		return roundCoordinator.withRoom(room.getRoomCode(), () -> {
+			if (room.getStatus() == MultiplayerRoomStatus.CLOSED) {
+				throw new RoomClosedException(normalizeRoomCode(roomCode));
+			}
 
-		if (room.getStatus() == MultiplayerRoomStatus.CLOSED) {
-			throw new RoomClosedException(normalizeRoomCode(roomCode));
-		}
-
-		room.addMember(currentUser);
-		return room;
+			room.addMember(currentUser);
+			return room;
+		});
 	}
 
-	public synchronized MultiplayerRoom leaveRoom(
+	public MultiplayerRoom leaveRoom(
 		String roomCode,
 		UserEntity currentUser
 	) {
 		MultiplayerRoom room = getRoom(roomCode);
-		boolean hostLeaving = room.isHost(currentUser.getUserId());
-		log.debug(
-			"leave room request roomCode={} userId={} hostLeaving={}",
-			room.getRoomCode(),
-			currentUser.getUserId(),
-			hostLeaving
-		);
-		room.removeMember(currentUser.getUserId());
-
-		if (hostLeaving && room.getMembers().isEmpty()) {
-			stopClosedRoom(room);
+		return roundCoordinator.withRoom(room.getRoomCode(), () -> {
+			boolean hostLeaving = room.isHost(currentUser.getUserId());
 			log.debug(
-				"no members left, room closed roomCode={}",
-				room.getRoomCode()
-			);
-		} else if (hostLeaving) {
-			log.debug(
-				"new host selected roomCode={} hostUserId={} hostDisplayName={}",
+				"leave room request roomCode={} userId={} hostLeaving={}",
 				room.getRoomCode(),
-				room.getHostUserId(),
-				room.getHostDisplayName()
+				currentUser.getUserId(),
+				hostLeaving
 			);
-		}
+			room.removeMember(currentUser.getUserId());
 
-		return room;
+			if (hostLeaving && room.getMembers().isEmpty()) {
+				closeAuthoritatively(room);
+				log.debug(
+					"no members left, room closed roomCode={}",
+					room.getRoomCode()
+				);
+			} else if (hostLeaving) {
+				log.debug(
+					"new host selected roomCode={} hostUserId={} hostDisplayName={}",
+					room.getRoomCode(),
+					room.getHostUserId(),
+					room.getHostDisplayName()
+				);
+			}
+
+			return room;
+		});
 	}
 
 	public MultiplayerRoom getRoom(String roomCode) {
@@ -123,67 +132,71 @@ public class MultiplayerRoomService implements RoomRoundAccess {
 		return room;
 	}
 
-	public synchronized MultiplayerRoom startGame(
+	public MultiplayerRoom startGame(
 		String roomCode,
 		UserEntity currentUser,
 		StartRoomGameRequest request
 	) {
 		MultiplayerRoom room = getRoom(roomCode);
-		autoEndExpiredGame(room, Instant.now());
+		return roundCoordinator.withRoom(room.getRoomCode(), () -> {
+			autoEndExpiredGame(room, Instant.now());
 
-		if (room.getStatus() == MultiplayerRoomStatus.CLOSED) {
-			throw new RoomClosedException(normalizeRoomCode(roomCode));
-		}
+			if (room.getStatus() == MultiplayerRoomStatus.CLOSED) {
+				throw new RoomClosedException(normalizeRoomCode(roomCode));
+			}
 
-		requireHost(room, currentUser);
+			requireHost(room, currentUser);
 
-		if (room.getGameState().getStatus() == RoomGameStatus.RUNNING) {
-			throw new RoomGameAlreadyRunningException(room.getRoomCode());
-		}
+			if (
+				room.getGameState().getStatus() == RoomGameStatus.RUNNING ||
+				room.getGameState().getStatus() == RoomGameStatus.FINALIZING
+			) {
+				throw new RoomGameAlreadyRunningException(room.getRoomCode());
+			}
 
-		if (room.getStatus() != MultiplayerRoomStatus.OPEN) {
-			throw new RoomClosedException(normalizeRoomCode(roomCode));
-		}
+			if (room.getStatus() != MultiplayerRoomStatus.OPEN) {
+				throw new RoomClosedException(normalizeRoomCode(roomCode));
+			}
 
-		if (room.getMembers().isEmpty()) {
-			throw new RoomClosedException(normalizeRoomCode(roomCode));
-		}
+			if (room.getMembers().isEmpty()) {
+				throw new RoomClosedException(normalizeRoomCode(roomCode));
+			}
 
-		room.markInProgress();
-		room.getGameState().start(
-			request.durationSeconds(),
-			Instant.now(),
-			currentUser
-		);
-		publishLifecycle(room, Type.STARTED);
-		return room;
+			room.markInProgress();
+			room.getGameState().start(
+				request.durationSeconds(),
+				Instant.now(),
+				currentUser,
+				room.getMembers()
+			);
+			publishLifecycle(room, Type.STARTED);
+			return room;
+		});
 	}
 
-	public synchronized MultiplayerRoom getGameState(
+	public MultiplayerRoom getGameState(
 		String roomCode,
 		UserEntity currentUser
 	) {
 		MultiplayerRoom room = getRoom(roomCode);
-		requireMember(room, currentUser);
-		autoEndExpiredGame(room, Instant.now());
-		return room;
+		return roundCoordinator.withRoom(room.getRoomCode(), () -> {
+			requireMember(room, currentUser);
+			autoEndExpiredGame(room, Instant.now());
+			return room;
+		});
 	}
 
-	public synchronized MultiplayerRoom endGame(
+	public MultiplayerRoom endGame(
 		String roomCode,
 		UserEntity currentUser
 	) {
 		MultiplayerRoom room = getRoom(roomCode);
-		autoEndExpiredGame(room, Instant.now());
-		requireHost(room, currentUser);
-
-		if (room.getGameState().getStatus() == RoomGameStatus.RUNNING) {
-			room.getGameState().end(Instant.now());
-			room.markOpen();
-			publishLifecycle(room, Type.STOPPED);
-		}
-
-		return room;
+		return roundCoordinator.withRoom(room.getRoomCode(), () -> {
+			autoEndExpiredGame(room, Instant.now());
+			requireHost(room, currentUser);
+			finalizeOrLegacy(room, RoundEndReason.HOST_ENDED);
+			return room;
+		});
 	}
 
 	public List<MultiplayerRoom> listMyRooms(UserEntity currentUser) {
@@ -194,27 +207,29 @@ public class MultiplayerRoomService implements RoomRoundAccess {
 			.toList();
 	}
 
-	public synchronized MultiplayerRoom closeRoom(
+	public MultiplayerRoom closeRoom(
 		String roomCode,
 		UserEntity currentUser
 	) {
 		MultiplayerRoom room = getRoom(roomCode);
-
-		requireHost(room, currentUser);
-
-		stopClosedRoom(room);
-		return room;
+		return roundCoordinator.withRoom(room.getRoomCode(), () -> {
+			requireHost(room, currentUser);
+			closeAuthoritatively(room);
+			return room;
+		});
 	}
 
 	@Override
-	public synchronized MultiplayerRoom refreshGameState(String roomCode) {
+	public MultiplayerRoom refreshGameState(String roomCode) {
 		MultiplayerRoom room = getRoom(roomCode);
-		autoEndExpiredGame(room, Instant.now());
-		return room;
+		return roundCoordinator.withRoom(room.getRoomCode(), () -> {
+			autoEndExpiredGame(room, Instant.now());
+			return room;
+		});
 	}
 
 	@Override
-	public synchronized boolean isCurrentRoundRunning(
+	public boolean isCurrentRoundRunning(
 		String roomCode,
 		long generation
 	) {
@@ -224,38 +239,52 @@ public class MultiplayerRoomService implements RoomRoundAccess {
 			&& room.getGameState().getGeneration() == generation;
 	}
 
-	public synchronized <T> Optional<T> withCurrentRoundRunning(
+	public <T> Optional<T> withCurrentRoundRunning(
 		String roomCode,
 		long generation,
 		Supplier<T> action
 	) {
 		MultiplayerRoom room = getRoom(roomCode);
-		autoEndExpiredGame(room, Instant.now());
+		return roundCoordinator.withRoom(room.getRoomCode(), () -> {
+			autoEndExpiredGame(room, Instant.now());
 
-		if (
-			room.getStatus() != MultiplayerRoomStatus.IN_PROGRESS ||
-			room.getGameState().getStatus() != RoomGameStatus.RUNNING ||
-			room.getGameState().getGeneration() != generation
-		) {
-			return Optional.empty();
-		}
+			if (
+				room.getStatus() != MultiplayerRoomStatus.IN_PROGRESS ||
+				room.getGameState().getStatus() != RoomGameStatus.RUNNING ||
+				room.getGameState().getGeneration() != generation
+			) {
+				return Optional.empty();
+			}
 
-		return Optional.ofNullable(action.get());
+			return Optional.ofNullable(action.get());
+		});
 	}
 
-	public synchronized MultiplayerRoom updateSettings(
+	public MultiplayerRoom updateSettings(
 		String roomCode,
 		UserEntity currentUser,
 		UpdateRoomSettingsRequest request
 	) {
 		MultiplayerRoom room = getRoom(roomCode);
-		requireHost(room, currentUser);
-		room.getGameplaySettings().update(
-			request.maxSpeedMps(),
-			request.allowPlayerSpeedControl(),
-			request.allowManualCreatureSpawn()
-		);
-		return room;
+		return roundCoordinator.withRoom(room.getRoomCode(), () -> {
+			requireHost(room, currentUser);
+			room.getGameplaySettings().update(
+				request.maxSpeedMps(),
+				request.allowPlayerSpeedControl(),
+				request.allowManualCreatureSpawn()
+			);
+			return room;
+		});
+	}
+
+	public RoomRoundCoordinator getRoundCoordinator() {
+		return roundCoordinator;
+	}
+
+	public void registerFinalizationGateway(
+		RoomRoundFinalizationGateway finalizationGateway
+	) {
+		this.finalizationGateway = finalizationGateway;
 	}
 
 	private void requireHost(MultiplayerRoom room, UserEntity currentUser) {
@@ -280,28 +309,65 @@ public class MultiplayerRoomService implements RoomRoundAccess {
 			gameState.getEndsAt() != null &&
 			!gameState.getEndsAt().isAfter(now)
 		) {
-			gameState.end(gameState.getEndsAt());
-			room.markOpen();
-			publishLifecycle(room, Type.STOPPED);
+			finalizeOrLegacy(room, RoundEndReason.TIME_EXPIRED);
 		}
 	}
 
-	private void stopClosedRoom(MultiplayerRoom room) {
-		if (room.getGameState().getStatus() == RoomGameStatus.RUNNING) {
-			room.getGameState().end(Instant.now());
+	private void closeAuthoritatively(MultiplayerRoom room) {
+		if (
+			room.getGameState().getStatus() == RoomGameStatus.RUNNING ||
+			room.getGameState().getStatus() == RoomGameStatus.FINALIZING
+		) {
+			finalizeOrLegacy(room, RoundEndReason.ROOM_CLOSED);
+			return;
 		}
 
 		room.close();
 		publishLifecycle(room, Type.CLOSED);
 	}
 
-	private void publishLifecycle(
+	private void finalizeOrLegacy(
+		MultiplayerRoom room,
+		RoundEndReason reason
+	) {
+		RoomGameState state = room.getGameState();
+
+		if (finalizationGateway != null && state.getRoundId() != null) {
+			finalizationGateway.finalizeRound(
+				room.getRoomCode(),
+				state.getRoundId(),
+				state.getGeneration(),
+				reason
+			);
+			return;
+		}
+
+		if (state.getStatus() == RoomGameStatus.RUNNING) {
+			state.beginFinalizing(state.getRoundId(), state.getGeneration());
+			state.end(
+				reason == RoundEndReason.TIME_EXPIRED
+					? state.getEndsAt()
+					: Instant.now()
+			);
+			if (reason == RoundEndReason.ROOM_CLOSED) {
+				room.close();
+				publishLifecycle(room, Type.CLOSED);
+			} else {
+				room.markOpen();
+				publishLifecycle(room, Type.STOPPED);
+			}
+		}
+	}
+
+	public void publishLifecycle(
 		MultiplayerRoom room,
 		RoomGameLifecycleEvent.Type type
 	) {
 		eventPublisher.publishEvent(new RoomGameLifecycleEvent(
 			room.getRoomCode(),
 			room.getGameState().getGeneration(),
+			room.getGameState().getRoundId(),
+			room.getGameState().getEndsAt(),
 			type
 		));
 	}

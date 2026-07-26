@@ -1,9 +1,11 @@
 package com.routecatch.api.multiplayer.room.model;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import com.routecatch.api.auth.persistence.UserEntity;
+import com.routecatch.api.multiplayer.room.round.RoundParticipant;
 
 public class RoomGameState {
 
@@ -16,6 +18,8 @@ public class RoomGameState {
 	private UUID startedByUserId;
 	private String startedByDisplayName;
 	private long generation;
+	private UUID roundId;
+	private List<RoundParticipant> participants = List.of();
 
 	public RoomGameState(String roomCode) {
 		this.roomCode = roomCode;
@@ -27,9 +31,11 @@ public class RoomGameState {
 	public void start(
 		int requestedDurationSeconds,
 		Instant now,
-		UserEntity currentUser
+		UserEntity currentUser,
+		List<RoomMember> members
 	) {
 		generation += 1L;
+		roundId = UUID.randomUUID();
 		status = RoomGameStatus.RUNNING;
 		durationSeconds = requestedDurationSeconds;
 		startedAt = now;
@@ -37,6 +43,20 @@ public class RoomGameState {
 		endedAt = null;
 		startedByUserId = currentUser.getUserId();
 		startedByDisplayName = currentUser.getDisplayName();
+		participants = members.stream().map(RoundParticipant::from).toList();
+	}
+
+	public boolean beginFinalizing(UUID expectedRoundId, long expectedGeneration) {
+		if (
+			status != RoomGameStatus.RUNNING ||
+			generation != expectedGeneration ||
+			!roundId.equals(expectedRoundId)
+		) {
+			return false;
+		}
+
+		status = RoomGameStatus.FINALIZING;
+		return true;
 	}
 
 	public void end(Instant endedAt) {
@@ -78,5 +98,19 @@ public class RoomGameState {
 
 	public long getGeneration() {
 		return generation;
+	}
+
+	public UUID getRoundId() {
+		return roundId;
+	}
+
+	public List<RoundParticipant> getParticipants() {
+		return participants;
+	}
+
+	public boolean hasParticipant(UUID playerId) {
+		return participants.stream().anyMatch(participant ->
+			participant.playerId().equals(playerId)
+		);
 	}
 }

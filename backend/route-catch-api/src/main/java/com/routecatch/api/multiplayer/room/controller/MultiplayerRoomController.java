@@ -1,6 +1,7 @@
 package com.routecatch.api.multiplayer.room.controller;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +24,8 @@ import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
 import com.routecatch.api.multiplayer.room.dto.UpdateRoomSettingsRequest;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
 import com.routecatch.api.multiplayer.room.service.RoomScoreService;
+import com.routecatch.api.multiplayer.room.round.RoomRoundResultResponse;
+import com.routecatch.api.multiplayer.room.round.RoomRoundResultService;
 
 import jakarta.validation.Valid;
 
@@ -37,15 +40,18 @@ public class MultiplayerRoomController {
 	private final MultiplayerRoomService roomService;
 	private final RoomScoreService scoreService;
 	private final CurrentUserService currentUserService;
+	private final RoomRoundResultService roundResultService;
 
 	public MultiplayerRoomController(
 		MultiplayerRoomService roomService,
 		RoomScoreService scoreService,
-		CurrentUserService currentUserService
+		CurrentUserService currentUserService,
+		RoomRoundResultService roundResultService
 	) {
 		this.roomService = roomService;
 		this.scoreService = scoreService;
 		this.currentUserService = currentUserService;
+		this.roundResultService = roundResultService;
 	}
 
 	@PostMapping
@@ -177,5 +183,28 @@ public class MultiplayerRoomController {
 			authentication
 		);
 		return scoreService.getScoreboard(roomCode, currentUser);
+	}
+
+	@GetMapping("/{roomCode}/rounds/{roundId}/result")
+	public RoomRoundResultResponse getRoundResult(
+		@PathVariable String roomCode,
+		@PathVariable UUID roundId,
+		Authentication authentication
+	) {
+		UserEntity currentUser = currentUserService.getCurrentUserEntity(
+			authentication
+		);
+		return roundResultService.getResult(roomCode, roundId, currentUser);
+	}
+
+	@GetMapping("/{roomCode}/rounds/latest/result")
+	public RoomRoundResultResponse getLatestRoundResult(
+		@PathVariable String roomCode,
+		Authentication authentication
+	) {
+		UserEntity currentUser = currentUserService.getCurrentUserEntity(
+			authentication
+		);
+		return roundResultService.getLatestResult(roomCode, currentUser);
 	}
 }
