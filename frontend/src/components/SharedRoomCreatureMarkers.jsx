@@ -1,6 +1,11 @@
 import { DomEvent, divIcon } from 'leaflet'
-import { Marker, Popup, Tooltip } from 'react-leaflet'
+import { Marker, Tooltip } from 'react-leaflet'
+import { MAP_PANE } from '../config/mapPaneConfig'
 import { getRarityClassName } from '../utils/rarityStyles'
+import { createSharedCreatureIconCache } from '../utils/sharedCreatureIconCache'
+
+const SHARED_CREATURE_ICON_SIZE = 36
+const SHARED_CREATURE_ICON_ANCHOR = SHARED_CREATURE_ICON_SIZE / 2
 
 function escapeHtml(value) {
   return String(value).replace(
@@ -20,7 +25,38 @@ function getCreatureInitial(name) {
   return String(name || 'S').trim().charAt(0).toUpperCase() || 'S'
 }
 
-function SharedRoomCreatureMarkers({ creatures = [], onCatchCreature }) {
+const getSharedCreatureIcon = createSharedCreatureIconCache(({
+  initial,
+  rarityClassName,
+  isChased,
+  isRouting,
+}) => {
+  const chaseClassName = isChased
+    ? ` is-chased${isRouting ? ' is-routing' : ''}`
+    : ''
+
+  return divIcon({
+    className: 'shared-room-creature-marker-icon',
+    html: `
+      <span class="shared-room-creature-marker ${rarityClassName}${chaseClassName}">
+        <span class="shared-room-creature-marker-core">
+          <span class="shared-room-creature-marker-symbol">
+            ${escapeHtml(initial)}
+          </span>
+        </span>
+      </span>
+    `,
+    iconAnchor: [SHARED_CREATURE_ICON_ANCHOR, SHARED_CREATURE_ICON_ANCHOR],
+    iconSize: [SHARED_CREATURE_ICON_SIZE, SHARED_CREATURE_ICON_SIZE],
+  })
+})
+
+function SharedRoomCreatureMarkers({
+  creatures = [],
+  onCatchCreature,
+  chasedCreatureId,
+  routingCreatureId,
+}) {
   return creatures.map((creature) => {
     const latitude = Number(creature.latitude)
     const longitude = Number(creature.longitude)
@@ -30,17 +66,13 @@ function SharedRoomCreatureMarkers({ creatures = [], onCatchCreature }) {
     }
 
     const rarityClassName = getRarityClassName(creature.rarity)
-    const icon = divIcon({
-      className: `shared-room-creature-marker ${rarityClassName}`,
-      html: `
-        <span class="shared-room-creature-marker-core">
-          <span class="shared-room-creature-marker-symbol">
-            ${escapeHtml(getCreatureInitial(creature.name))}
-          </span>
-        </span>
-      `,
-      iconAnchor: [16, 16],
-      iconSize: [32, 32],
+    const isChased = creature.instanceId === chasedCreatureId
+    const isRouting = creature.instanceId === routingCreatureId
+    const icon = getSharedCreatureIcon({
+      initial: getCreatureInitial(creature.name),
+      rarityClassName,
+      isChased,
+      isRouting,
     })
 
     return (
@@ -48,10 +80,14 @@ function SharedRoomCreatureMarkers({ creatures = [], onCatchCreature }) {
         key={creature.instanceId}
         position={[latitude, longitude]}
         icon={icon}
+        pane={MAP_PANE.SHARED_ROOM_CREATURE.name}
+        bubblingMouseEvents={false}
+        zIndexOffset={350}
         title={`${creature.name}, ${creature.rarity} shared creature`}
         eventHandlers={{
           click(event) {
             DomEvent.stop(event.originalEvent)
+            onCatchCreature?.(creature)
           },
         }}
       >
@@ -63,22 +99,6 @@ function SharedRoomCreatureMarkers({ creatures = [], onCatchCreature }) {
             <span>{creature.remainingSeconds}s left</span>
           </span>
         </Tooltip>
-        <Popup closeButton={false} minWidth={156}>
-          <div className="shared-room-creature-popup">
-            <strong>{creature.name}</strong>
-            <span>Shared room catch</span>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={(event) => {
-                event.stopPropagation()
-                onCatchCreature?.(creature)
-              }}
-            >
-              Catch shared creature
-            </button>
-          </div>
-        </Popup>
       </Marker>
     )
   })

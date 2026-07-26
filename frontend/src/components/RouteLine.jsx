@@ -8,6 +8,7 @@ function RouteLine({ coordinates, isChaseActive = false }) {
   return (
     <Polyline
       positions={coordinates}
+      pane="route-pane"
       pathOptions={{
         color: isChaseActive ? '#7c3aed' : '#2563eb',
         dashArray: isChaseActive ? '10 8' : undefined,

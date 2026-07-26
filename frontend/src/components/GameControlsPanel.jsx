@@ -1,5 +1,8 @@
 import { useState } from 'react'
-import { MAX_SIMULATION_SPEED } from '../config/gameConfig'
+import {
+  MAX_SIMULATION_SPEED,
+  MIN_SIMULATION_SPEED,
+} from '../config/gameConfig'
 
 function GameControlsPanel({
   isSpawningPaused,
@@ -17,7 +20,7 @@ function GameControlsPanel({
   function handleSpeedChange(event) {
     const nextSpeed = Number(event.target.value)
     onSimulationSpeedChange(
-      Math.min(maxSimulationSpeed, Math.max(10, nextSpeed)),
+      Math.min(maxSimulationSpeed, Math.max(MIN_SIMULATION_SPEED, nextSpeed)),
     )
   }
 
@@ -50,7 +53,7 @@ function GameControlsPanel({
               <div className="speed-control-inputs">
                 <input
                   type="range"
-                  min="10"
+                  min={MIN_SIMULATION_SPEED}
                   max={maxSimulationSpeed}
                   step="10"
                   value={simulationSpeed}
@@ -58,7 +61,7 @@ function GameControlsPanel({
                 />
                 <input
                   type="number"
-                  min="10"
+                  min={MIN_SIMULATION_SPEED}
                   max={maxSimulationSpeed}
                   step="10"
                   value={simulationSpeed}

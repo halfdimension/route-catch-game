@@ -13,7 +13,11 @@ const EMPTY_REGISTER_FORM = {
   password: '',
 }
 
-function AuthPanel() {
+function AuthPanel({
+  initialMode = 'login',
+  isPage = false,
+  onAuthenticated,
+}) {
   const {
     currentUser,
     isAuthenticated,
@@ -24,7 +28,7 @@ function AuthPanel() {
   } = useAuth()
   const [isAuthOverlayOpen, setIsAuthOverlayOpen] = useState(false)
   const [isAccountOverlayOpen, setIsAccountOverlayOpen] = useState(false)
-  const [mode, setMode] = useState('login')
+  const [mode, setMode] = useState(initialMode)
   const [loginForm, setLoginForm] = useState(EMPTY_LOGIN_FORM)
   const [registerForm, setRegisterForm] = useState(EMPTY_REGISTER_FORM)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -45,6 +49,10 @@ function AuthPanel() {
   }
 
   function toggleMode() {
+    if (isPage) {
+      return
+    }
+
     setMode((currentMode) =>
       currentMode === 'login' ? 'register' : 'login',
     )
@@ -86,6 +94,7 @@ function AuthPanel() {
       })
       setLoginForm(EMPTY_LOGIN_FORM)
       closeAuthOverlay()
+      onAuthenticated?.()
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -107,6 +116,7 @@ function AuthPanel() {
       })
       setRegisterForm(EMPTY_REGISTER_FORM)
       closeAuthOverlay()
+      onAuthenticated?.()
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -116,13 +126,24 @@ function AuthPanel() {
 
   if (loadingAuth) {
     return (
-      <section className="auth-panel" aria-label="Account">
+      <section
+        className={isPage ? 'auth-page-panel' : 'auth-panel'}
+        aria-label="Account"
+      >
         <p className="auth-muted">Checking account...</p>
       </section>
     )
   }
 
   if (isAuthenticated) {
+    if (isPage) {
+      return (
+        <section className="auth-page-panel" aria-label="Account">
+          <p className="auth-muted">You are already signed in.</p>
+        </section>
+      )
+    }
+
     return (
       <section className="auth-panel" aria-label="Account">
         <button
@@ -168,6 +189,116 @@ function AuthPanel() {
     : isLoginMode
       ? 'Login'
       : 'Register'
+  const authForm = isLoginMode ? (
+    <form className="auth-form" onSubmit={handleLoginSubmit}>
+      <label>
+        <span>Username or email</span>
+        <input
+          name="usernameOrEmail"
+          type="text"
+          value={loginForm.usernameOrEmail}
+          onChange={updateLoginField}
+          autoComplete="username"
+          required
+          disabled={isSubmitting}
+        />
+      </label>
+      <label>
+        <span>Password</span>
+        <input
+          name="password"
+          type="password"
+          value={loginForm.password}
+          onChange={updateLoginField}
+          autoComplete="current-password"
+          required
+          disabled={isSubmitting}
+        />
+      </label>
+      <button
+        type="submit"
+        className="primary-button"
+        disabled={isSubmitting}
+      >
+        {submitLabel}
+      </button>
+    </form>
+  ) : (
+    <form className="auth-form" onSubmit={handleRegisterSubmit}>
+      <label>
+        <span>Username</span>
+        <input
+          name="username"
+          type="text"
+          value={registerForm.username}
+          onChange={updateRegisterField}
+          autoComplete="username"
+          required
+          disabled={isSubmitting}
+        />
+      </label>
+      <label>
+        <span>Email optional</span>
+        <input
+          name="email"
+          type="email"
+          value={registerForm.email}
+          onChange={updateRegisterField}
+          autoComplete="email"
+          disabled={isSubmitting}
+        />
+      </label>
+      <label>
+        <span>Display name</span>
+        <input
+          name="displayName"
+          type="text"
+          value={registerForm.displayName}
+          onChange={updateRegisterField}
+          autoComplete="name"
+          required
+          disabled={isSubmitting}
+        />
+      </label>
+      <label>
+        <span>Password</span>
+        <input
+          name="password"
+          type="password"
+          value={registerForm.password}
+          onChange={updateRegisterField}
+          autoComplete="new-password"
+          required
+          disabled={isSubmitting}
+        />
+      </label>
+      <button
+        type="submit"
+        className="primary-button"
+        disabled={isSubmitting}
+      >
+        {submitLabel}
+      </button>
+    </form>
+  )
+
+  if (isPage) {
+    return (
+      <section className="auth-page-panel" aria-label="Account">
+        <div className="auth-panel-header">
+          <p className="auth-panel-title">
+            {isLoginMode ? 'Login' : 'Register'}
+          </p>
+        </div>
+        {authForm}
+        {errorMessage && (
+          <p className="auth-error" role="alert">
+            {errorMessage}
+          </p>
+        )}
+      </section>
+    )
+  }
 
   return (
     <section className="auth-panel" aria-label="Account">
@@ -204,98 +335,7 @@ function AuthPanel() {
               </div>
             </div>
 
-            {isLoginMode ? (
-              <form className="auth-form" onSubmit={handleLoginSubmit}>
-                <label>
-                  <span>Username or email</span>
-                  <input
-                    name="usernameOrEmail"
-                    type="text"
-                    value={loginForm.usernameOrEmail}
-                    onChange={updateLoginField}
-                    autoComplete="username"
-                    required
-                    disabled={isSubmitting}
-                  />
-                </label>
-                <label>
-                  <span>Password</span>
-                  <input
-                    name="password"
-                    type="password"
-                    value={loginForm.password}
-                    onChange={updateLoginField}
-                    autoComplete="current-password"
-                    required
-                    disabled={isSubmitting}
-                  />
-                </label>
-                <button
-                  type="submit"
-                  className="primary-button"
-                  disabled={isSubmitting}
-                >
-                  {submitLabel}
-                </button>
-              </form>
-            ) : (
-              <form className="auth-form" onSubmit={handleRegisterSubmit}>
-                <label>
-                  <span>Username</span>
-                  <input
-                    name="username"
-                    type="text"
-                    value={registerForm.username}
-                    onChange={updateRegisterField}
-                    autoComplete="username"
-                    required
-                    disabled={isSubmitting}
-                  />
-                </label>
-                <label>
-                  <span>Email optional</span>
-                  <input
-                    name="email"
-                    type="email"
-                    value={registerForm.email}
-                    onChange={updateRegisterField}
-                    autoComplete="email"
-                    disabled={isSubmitting}
-                  />
-                </label>
-                <label>
-                  <span>Display name</span>
-                  <input
-                    name="displayName"
-                    type="text"
-                    value={registerForm.displayName}
-                    onChange={updateRegisterField}
-                    autoComplete="name"
-                    required
-                    disabled={isSubmitting}
-                  />
-                </label>
-                <label>
-                  <span>Password</span>
-                  <input
-                    name="password"
-                    type="password"
-                    value={registerForm.password}
-                    onChange={updateRegisterField}
-                    autoComplete="new-password"
-                    required
-                    disabled={isSubmitting}
-                  />
-                </label>
-                <button
-                  type="submit"
-                  className="primary-button"
-                  disabled={isSubmitting}
-                >
-                  {submitLabel}
-                </button>
-              </form>
-            )}
+            {authForm}
 
             {errorMessage && (
               <p className="auth-error" role="alert">

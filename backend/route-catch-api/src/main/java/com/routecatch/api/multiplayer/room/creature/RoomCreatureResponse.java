@@ -14,8 +14,10 @@ public record RoomCreatureResponse(
 	double longitude,
 	Instant spawnedAt,
 	Instant expiresAt,
+	RoomCreatureStatus status,
 	long remainingSeconds,
 	boolean caught,
+	String caughtByUserId,
 	String caughtByDisplayName,
 	Instant caughtAt
 ) {
@@ -34,11 +36,29 @@ public record RoomCreatureResponse(
 			creature.getLongitude(),
 			creature.getSpawnedAt(),
 			creature.getExpiresAt(),
+			status(creature, now),
 			remainingSeconds(creature, now),
 			creature.isCaught(),
+			creature.getCaughtByUserId() == null
+				? null
+				: creature.getCaughtByUserId().toString(),
 			creature.getCaughtByDisplayName(),
 			creature.getCaughtAt()
 		);
+	}
+
+	private static RoomCreatureStatus status(
+		RoomCreatureInstance creature,
+		Instant now
+	) {
+		if (
+			creature.getStatus() == RoomCreatureStatus.ACTIVE &&
+			creature.isExpired(now)
+		) {
+			return RoomCreatureStatus.EXPIRED;
+		}
+
+		return creature.getStatus();
 	}
 
 	private static long remainingSeconds(

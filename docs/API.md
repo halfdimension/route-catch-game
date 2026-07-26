@@ -350,7 +350,7 @@ appear.
 Ordering is score descending, caught count descending, ended time ascending,
 then creation time descending.
 
-## WebSocket Multiplayer Presence
+## WebSocket Multiplayer
 
 Endpoint:
 
@@ -402,8 +402,125 @@ Broadcast payload:
 ]
 ```
 
-Presence is stored in memory for local/demo use. It does not synchronize shared
-targets, catches, scoring, or routes.
+Presence is stored in memory for local/demo use. After Phase A2 it supplies
+identity and socket liveness, while its coordinate is only a sparse legacy
+fallback for players that have no movement plan. Multiplayer route progression
+comes from authoritative movement plans; shared creatures and scoring retain
+their separate authoritative room services.
+
+### Authoritative Movement Commands
+
+Room members can start a backend-owned movement plan while the room game is
+running:
+
+```text
+/app/rooms/{roomCode}/movements/start
+```
+
+```json
+{
+  "destinationLat": 28.62,
+  "destinationLon": 77.215,
+  "requestedSpeedMps": 80,
+  "destinationType": "MAP",
+  "targetCreatureInstanceId": null,
+  "clientCommandId": "UUID",
+  "expectedMovementVersion": 0
+}
+```
+
+`destinationLat` and `destinationLon` are required for `MAP`. For `CREATURE`,
+the browser omits them:
+
+```json
+{
+  "requestedSpeedMps": 80,
+  "destinationType": "CREATURE",
+  "targetCreatureInstanceId": "UUID",
+  "clientCommandId": "UUID",
+  "expectedMovementVersion": 0
+}
+```
+
+`expectedMovementVersion` is optional; when supplied, a stale command is
+rejected. `playerId`, source coordinates, route geometry, and client-displayed
+creature coordinates are never accepted as authority. For `CREATURE`,
+`targetCreatureInstanceId` is required and the server resolves the active
+creature's authoritative coordinate. When player speed control is disabled, the
+server uses the room maximum speed.
+
+Cancel the current movement with its authoritative identity and version:
+
+```text
+/app/rooms/{roomCode}/movements/cancel
+```
+
+```json
+{
+  "movementId": "UUID",
+  "movementVersion": 1,
+  "clientCommandId": "UUID"
+}
+```
+
+Stale cancellation commands are harmless no-ops. Movement events are published
+to:
+
+```text
+/topic/rooms/{roomCode}/movements
+```
+
+Each `MOVEMENT_STARTED`, `MOVEMENT_CANCELLED`, or `MOVEMENT_COMPLETED` event
+uses this envelope:
+
+```json
+{
+  "eventId": "UUID",
+  "roomCode": "A8F3KQ",
+  "roomSequence": 1,
+  "eventType": "MOVEMENT_STARTED",
+  "serverTimestamp": "2026-07-18T08:00:00Z",
+  "payload": {
+    "movementId": "UUID",
+    "roomCode": "A8F3KQ",
+    "playerId": "UUID",
+    "version": 1,
+    "encodedPolyline6": "encoded route geometry",
+    "totalDistanceMeters": 1200.5,
+    "simulationSpeedMps": 80,
+    "startedAt": "2026-07-18T08:00:00Z",
+    "expectedEndAt": "2026-07-18T08:00:15.006250Z",
+    "source": {"latitude": 28.6139, "longitude": 77.209},
+    "destination": {"latitude": 28.62, "longitude": 77.215},
+    "currentPosition": {"latitude": 28.6139, "longitude": 77.209},
+    "destinationType": "MAP",
+    "targetCreatureInstanceId": null,
+    "status": "MOVING",
+    "createdAt": "2026-07-18T08:00:00Z",
+    "updatedAt": "2026-07-18T08:00:00Z"
+  }
+}
+```
+
+`roomSequence` increases for committed movement events, and `version` increases
+for each accepted plan belonging to a room/player pair. `encodedPolyline6`
+uses the encoded-polyline algorithm at six decimal places (1e-6 degree
+precision), and Java `Instant` values serialize as ISO-8601 UTC strings.
+
+### Movement Reconnect Snapshot
+
+After subscribing, clients can recover the latest plan for every player from:
+
+```bash
+curl --fail \
+  --header "Authorization: Bearer $TOKEN" \
+  "$API_URL/api/multiplayer/rooms/A8F3KQ/movements"
+```
+
+The response contains the canonical `roomCode`, current `roomSequence`, an ISO
+`serverTimestamp`, and a `movements` array using the payload shape above. The
+frontend subscribes before fetching this snapshot on room-play entry and every
+WebSocket reconnect, and fetches it again after a detected sequence gap.
 
 ## Error Responses
 

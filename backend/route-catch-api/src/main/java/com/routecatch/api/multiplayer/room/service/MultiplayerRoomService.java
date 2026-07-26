@@ -7,11 +7,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.multiplayer.room.dto.CreateRoomRequest;
 import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
+import com.routecatch.api.multiplayer.room.dto.UpdateRoomSettingsRequest;
 import com.routecatch.api.multiplayer.room.exception.RoomClosedException;
 import com.routecatch.api.multiplayer.room.exception.RoomForbiddenException;
 import com.routecatch.api.multiplayer.room.exception.RoomGameAlreadyRunningException;
@@ -24,6 +27,9 @@ import com.routecatch.api.multiplayer.room.model.RoomGameStatus;
 @Service
 public class MultiplayerRoomService {
 
+	private static final Logger log = LoggerFactory.getLogger(
+		MultiplayerRoomService.class
+	);
 	private static final String ROOM_CODE_ALPHABET =
 		"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 	private static final int ROOM_CODE_LENGTH = 6;
@@ -63,7 +69,29 @@ public class MultiplayerRoomService {
 		UserEntity currentUser
 	) {
 		MultiplayerRoom room = getRoom(roomCode);
+		boolean hostLeaving = room.isHost(currentUser.getUserId());
+		log.debug(
+			"leave room request roomCode={} userId={} hostLeaving={}",
+			room.getRoomCode(),
+			currentUser.getUserId(),
+			hostLeaving
+		);
 		room.removeMember(currentUser.getUserId());
+
+		if (hostLeaving && room.getMembers().isEmpty()) {
+			log.debug(
+				"no members left, room closed roomCode={}",
+				room.getRoomCode()
+			);
+		} else if (hostLeaving) {
+			log.debug(
+				"new host selected roomCode={} hostUserId={} hostDisplayName={}",
+				room.getRoomCode(),
+				room.getHostUserId(),
+				room.getHostDisplayName()
+			);
+		}
+
 		return room;
 	}
 
@@ -155,6 +183,21 @@ public class MultiplayerRoomService {
 		requireHost(room, currentUser);
 
 		room.close();
+		return room;
+	}
+
+	public synchronized MultiplayerRoom updateSettings(
+		String roomCode,
+		UserEntity currentUser,
+		UpdateRoomSettingsRequest request
+	) {
+		MultiplayerRoom room = getRoom(roomCode);
+		requireHost(room, currentUser);
+		room.getGameplaySettings().update(
+			request.maxSpeedMps(),
+			request.allowPlayerSpeedControl(),
+			request.allowManualCreatureSpawn()
+		);
 		return room;
 	}
 

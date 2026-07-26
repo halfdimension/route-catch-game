@@ -28,11 +28,17 @@ function OtherPlayerMarkers({ players }) {
       iconAnchor: [15, 15],
       iconSize: [30, 30],
     })
+    const latitude = Number(player.renderPosition?.lat ?? player.lat)
+    const longitude = Number(player.renderPosition?.lon ?? player.lon)
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return null
+    }
 
     return (
       <Marker
         key={player.userId}
-        position={[Number(player.lat), Number(player.lon)]}
+        position={[latitude, longitude]}
         icon={icon}
       >
         <Tooltip direction="top" offset={[0, -14]} opacity={0.95}>

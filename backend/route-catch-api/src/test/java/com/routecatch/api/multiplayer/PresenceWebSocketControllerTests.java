@@ -1,8 +1,11 @@
 package com.routecatch.api.multiplayer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -42,9 +45,11 @@ class PresenceWebSocketControllerTests {
 	@Test
 	void updatePresenceUsesAuthenticationPrincipal() {
 		PresenceService presenceService = new PresenceService();
+		presenceService.registerSocketSession("socket-1");
+		CapturingMessageChannel messageChannel = new CapturingMessageChannel();
 		PresenceWebSocketController controller = new PresenceWebSocketController(
 			presenceService,
-			new SimpMessagingTemplate(new NoopMessageChannel())
+			new SimpMessagingTemplate(messageChannel)
 		);
 		UserEntity user = new UserEntity(
 			UUID.randomUUID(),
@@ -66,6 +71,17 @@ class PresenceWebSocketControllerTests {
 			"harsh",
 			presenceService.listRoomPresence("delhi").getFirst().username()
 		);
+		assertEquals(1, messageChannel.messages.size());
+		Message<?> broadcast = messageChannel.messages.getFirst();
+		assertEquals(
+			"/topic/rooms/delhi/presence",
+			broadcast.getHeaders().get("simpDestination")
+		);
+		List<?> broadcastPresence = assertInstanceOf(
+			List.class,
+			broadcast.getPayload()
+		);
+		assertEquals(1, broadcastPresence.size());
 	}
 
 	private static class NoopMessageChannel implements MessageChannel {
@@ -77,6 +93,23 @@ class PresenceWebSocketControllerTests {
 
 		@Override
 		public boolean send(Message<?> message, long timeout) {
+			return true;
+		}
+	}
+
+	private static class CapturingMessageChannel extends NoopMessageChannel {
+
+		private final List<Message<?>> messages = new ArrayList<>();
+
+		@Override
+		public boolean send(Message<?> message) {
+			messages.add(message);
+			return true;
+		}
+
+		@Override
+		public boolean send(Message<?> message, long timeout) {
+			messages.add(message);
 			return true;
 		}
 	}

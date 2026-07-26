@@ -2,6 +2,7 @@ package com.routecatch.api.multiplayer.room.model;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.UUID;
@@ -17,6 +18,7 @@ public class MultiplayerRoom {
 	private MultiplayerRoomStatus status;
 	private final Instant createdAt;
 	private final RoomGameState gameState;
+	private final RoomGameplaySettings gameplaySettings;
 	private final LinkedHashMap<UUID, RoomMember> members = new LinkedHashMap<>();
 
 	public MultiplayerRoom(String roomCode, String roomName, UserEntity host) {
@@ -27,6 +29,7 @@ public class MultiplayerRoom {
 		this.status = MultiplayerRoomStatus.OPEN;
 		this.createdAt = Instant.now();
 		this.gameState = new RoomGameState(roomCode);
+		this.gameplaySettings = new RoomGameplaySettings();
 		this.members.put(host.getUserId(), new RoomMember(host, true));
 	}
 
@@ -48,7 +51,7 @@ public class MultiplayerRoom {
 	}
 
 	public boolean isHost(UUID userId) {
-		return hostUserId.equals(userId);
+		return hostUserId != null && hostUserId.equals(userId);
 	}
 
 	public boolean hasMember(UUID userId) {
@@ -95,14 +98,24 @@ public class MultiplayerRoom {
 		return gameState;
 	}
 
+	public RoomGameplaySettings getGameplaySettings() {
+		return gameplaySettings;
+	}
+
 	private void transferHostOrClose() {
 		members.values().forEach((member) -> member.setHost(false));
 
 		RoomMember nextHost = members.values().stream()
-			.findFirst()
+			.min(
+				Comparator
+					.comparing(RoomMember::getJoinedAt)
+					.thenComparing((member) -> member.getUserId().toString())
+			)
 			.orElse(null);
 
 		if (nextHost == null) {
+			hostUserId = null;
+			hostDisplayName = null;
 			close();
 			return;
 		}

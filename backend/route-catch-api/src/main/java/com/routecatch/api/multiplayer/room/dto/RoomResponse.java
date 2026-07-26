@@ -13,6 +13,7 @@ public record RoomResponse(
 	String hostDisplayName,
 	MultiplayerRoomStatus status,
 	Instant createdAt,
+	RoomGameplaySettingsResponse settings,
 	List<RoomMemberResponse> members
 ) {
 
@@ -20,10 +21,11 @@ public record RoomResponse(
 		return new RoomResponse(
 			room.getRoomCode(),
 			room.getRoomName(),
-			room.getHostUserId().toString(),
+			room.getHostUserId() == null ? null : room.getHostUserId().toString(),
 			room.getHostDisplayName(),
 			room.getStatus(),
 			room.getCreatedAt(),
+			RoomGameplaySettingsResponse.from(room.getGameplaySettings()),
 			room.getMembers().stream()
 				.map(RoomMemberResponse::from)
 				.toList()

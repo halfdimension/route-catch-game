@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:movement": "node --test test/movementPlanTimeline.test.js test/movementPlanState.test.js test/movementPlanRenderer.test.js test/movementArchitecture.test.js test/multiplayerMovementClient.test.js test/mapPaneConfig.test.js test/sharedCreatureIconCache.test.js test/sharedRoomCreatureMarkers.test.js",
+    "test:presence": "node test/presenceSync.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -14,7 +16,8 @@
     "leaflet": "^1.9.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-leaflet": "^5.0.0"
+    "react-leaflet": "^5.0.0",
+    "react-router-dom": "^7.18.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

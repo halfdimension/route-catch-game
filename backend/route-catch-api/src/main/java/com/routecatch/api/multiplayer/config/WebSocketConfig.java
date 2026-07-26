@@ -23,6 +23,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
 	@Override
 	public void registerStompEndpoints(StompEndpointRegistry registry) {
+		registry.setPreserveReceiveOrder(true);
 		registry
 			.addEndpoint("/ws")
 			.setAllowedOrigins("http://localhost:5173");
@@ -32,6 +33,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 	public void configureMessageBroker(MessageBrokerRegistry registry) {
 		registry.enableSimpleBroker("/topic");
 		registry.setApplicationDestinationPrefixes("/app");
+		registry.setPreservePublishOrder(true);
 	}
 
 	@Override

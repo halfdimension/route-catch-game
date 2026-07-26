@@ -2,7 +2,10 @@ package com.routecatch.api.multiplayer.room;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -72,6 +75,9 @@ class MultiplayerRoomApiTests {
 			.andExpect(jsonPath("$.roomName").value("Delhi Room"))
 			.andExpect(jsonPath("$.hostDisplayName").value("Host"))
 			.andExpect(jsonPath("$.status").value("OPEN"))
+			.andExpect(jsonPath("$.settings.maxSpeedMps").value(80))
+			.andExpect(jsonPath("$.settings.allowPlayerSpeedControl").value(false))
+			.andExpect(jsonPath("$.settings.allowManualCreatureSpawn").value(true))
 			.andExpect(jsonPath("$.members", hasSize(1)))
 			.andExpect(jsonPath("$.members[0].username").value("host"))
 			.andExpect(jsonPath("$.members[0].host").value(true));
@@ -87,6 +93,148 @@ class MultiplayerRoomApiTests {
 				.content("""
 					{
 						"roomName": " "
+					}
+					"""))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+	}
+
+	@Test
+	void hostCanUpdateRoomSettings() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(patch(
+				"/api/multiplayer/rooms/{roomCode}/settings",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"maxSpeedMps": 700,
+						"allowPlayerSpeedControl": true,
+						"allowManualCreatureSpawn": false
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.settings.maxSpeedMps").value(700))
+			.andExpect(jsonPath("$.settings.allowPlayerSpeedControl").value(true))
+			.andExpect(jsonPath("$.settings.allowManualCreatureSpawn").value(false));
+
+		mockMvc.perform(get("/api/multiplayer/rooms/{roomCode}", roomCode)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.settings.maxSpeedMps").value(700))
+			.andExpect(jsonPath("$.settings.allowPlayerSpeedControl").value(true))
+			.andExpect(jsonPath("$.settings.allowManualCreatureSpawn").value(false));
+	}
+
+	@Test
+	void roomSettingsPatchPreflightAllowsFrontendOriginAndHeaders()
+		throws Exception {
+		mockMvc.perform(options(
+				"/api/multiplayer/rooms/{roomCode}/settings",
+				"A8F3KQ"
+			)
+				.header("Origin", "http://localhost:5173")
+				.header("Access-Control-Request-Method", "PATCH")
+				.header(
+					"Access-Control-Request-Headers",
+					"authorization, content-type"
+				))
+			.andExpect(status().isOk())
+			.andExpect(header().string(
+				"Access-Control-Allow-Origin",
+				"http://localhost:5173"
+			))
+			.andExpect(header().string(
+				"Access-Control-Allow-Methods",
+				org.hamcrest.Matchers.containsString("PATCH")
+			))
+			.andExpect(header().string(
+				"Access-Control-Allow-Headers",
+				org.hamcrest.Matchers.allOf(
+					org.hamcrest.Matchers.containsString("authorization"),
+					org.hamcrest.Matchers.containsString("content-type")
+				)
+			));
+	}
+
+	@Test
+	void unauthenticatedUserCannotUpdateRoomSettings() throws Exception {
+		mockMvc.perform(patch(
+				"/api/multiplayer/rooms/{roomCode}/settings",
+				"A8F3KQ"
+			)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"maxSpeedMps": 700,
+						"allowPlayerSpeedControl": true,
+						"allowManualCreatureSpawn": false
+					}
+					"""))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"));
+	}
+
+	@Test
+	void nonHostCannotUpdateRoomSettings() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+		joinRoom(other.token(), roomCode);
+
+		mockMvc.perform(patch(
+				"/api/multiplayer/rooms/{roomCode}/settings",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + other.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"maxSpeedMps": 120,
+						"allowPlayerSpeedControl": true,
+						"allowManualCreatureSpawn": false
+					}
+					"""))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.errorCode").value("ROOM_FORBIDDEN"));
+	}
+
+	@Test
+	void invalidRoomSettingsMaxSpeedReturnsBadRequest() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(patch(
+				"/api/multiplayer/rooms/{roomCode}/settings",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"maxSpeedMps": 39,
+						"allowPlayerSpeedControl": true,
+						"allowManualCreatureSpawn": true
+					}
+					"""))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+
+		mockMvc.perform(patch(
+				"/api/multiplayer/rooms/{roomCode}/settings",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + host.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"maxSpeedMps": 701,
+						"allowPlayerSpeedControl": true,
+						"allowManualCreatureSpawn": true
 					}
 					"""))
 			.andExpect(status().isBadRequest())
@@ -131,24 +279,66 @@ class MultiplayerRoomApiTests {
 		mockMvc.perform(post("/api/multiplayer/rooms/{roomCode}/leave", roomCode)
 				.header("Authorization", "Bearer " + other.token()))
 			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("OPEN"))
+			.andExpect(jsonPath("$.hostDisplayName").value("Host"))
 			.andExpect(jsonPath("$.members", hasSize(1)))
-			.andExpect(jsonPath("$.members[0].username").value("host"));
+			.andExpect(jsonPath("$.members[0].username").value("host"))
+			.andExpect(jsonPath("$.members[0].host").value(true));
 	}
 
 	@Test
 	void hostLeavingTransfersHostToEarliestMember() throws Exception {
 		AuthFixture host = registerUser("host", "host@example.com", "Host");
 		AuthFixture other = registerUser("other", "other@example.com", "Other");
+		AuthFixture later = registerUser("later", "later@example.com", "Later");
 		String roomCode = createRoom(host.token(), "Delhi Room");
 		joinRoom(other.token(), roomCode);
+		joinRoom(later.token(), roomCode);
+		updateRoomSettings(host.token(), roomCode, 120, true, false);
 
 		mockMvc.perform(post("/api/multiplayer/rooms/{roomCode}/leave", roomCode)
 				.header("Authorization", "Bearer " + host.token()))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.members", hasSize(1)))
+			.andExpect(jsonPath("$.status").value("OPEN"))
 			.andExpect(jsonPath("$.hostDisplayName").value("Other"))
+			.andExpect(jsonPath("$.settings.maxSpeedMps").value(120))
+			.andExpect(jsonPath("$.settings.allowPlayerSpeedControl").value(true))
+			.andExpect(jsonPath("$.settings.allowManualCreatureSpawn").value(false))
+			.andExpect(jsonPath("$.members", hasSize(2)))
 			.andExpect(jsonPath("$.members[0].username").value("other"))
-			.andExpect(jsonPath("$.members[0].host").value(true));
+			.andExpect(jsonPath("$.members[0].host").value(true))
+			.andExpect(jsonPath("$.members[1].username").value("later"))
+			.andExpect(jsonPath("$.members[1].host").value(false));
+
+		mockMvc.perform(post("/api/multiplayer/rooms/{roomCode}/game/start", roomCode)
+				.header("Authorization", "Bearer " + other.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+					  "durationSeconds": 60
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.startedByDisplayName").value("Other"));
+
+		mockMvc.perform(post("/api/multiplayer/rooms/{roomCode}/close", roomCode)
+				.header("Authorization", "Bearer " + other.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("CLOSED"));
+	}
+
+	@Test
+	void lastMemberLeavingClosesRoom() throws Exception {
+		AuthFixture host = registerUser("host", "host@example.com", "Host");
+		String roomCode = createRoom(host.token(), "Delhi Room");
+
+		mockMvc.perform(post("/api/multiplayer/rooms/{roomCode}/leave", roomCode)
+				.header("Authorization", "Bearer " + host.token()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("CLOSED"))
+			.andExpect(jsonPath("$.hostUserId").isEmpty())
+			.andExpect(jsonPath("$.hostDisplayName").isEmpty())
+			.andExpect(jsonPath("$.members", hasSize(0)));
 	}
 
 	@Test
@@ -476,8 +666,10 @@ class MultiplayerRoomApiTests {
 			.andExpect(jsonPath("$[0].longitude").isNumber())
 			.andExpect(jsonPath("$[0].spawnedAt").isNotEmpty())
 			.andExpect(jsonPath("$[0].expiresAt").isNotEmpty())
+			.andExpect(jsonPath("$[0].status").value("ACTIVE"))
 			.andExpect(jsonPath("$[0].remainingSeconds").isNumber())
 			.andExpect(jsonPath("$[0].caught").value(false))
+			.andExpect(jsonPath("$[0].caughtByUserId").doesNotExist())
 			.andExpect(jsonPath("$[0].caughtByDisplayName").doesNotExist())
 			.andExpect(jsonPath("$[0].caughtAt").doesNotExist());
 	}
@@ -1140,6 +1332,33 @@ class MultiplayerRoomApiTests {
 	private void closeRoom(String token, String roomCode) throws Exception {
 		mockMvc.perform(post("/api/multiplayer/rooms/{roomCode}/close", roomCode)
 				.header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk());
+	}
+
+	private void updateRoomSettings(
+		String token,
+		String roomCode,
+		int maxSpeedMps,
+		boolean allowPlayerSpeedControl,
+		boolean allowManualCreatureSpawn
+	) throws Exception {
+		mockMvc.perform(patch(
+				"/api/multiplayer/rooms/{roomCode}/settings",
+				roomCode
+			)
+				.header("Authorization", "Bearer " + token)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"maxSpeedMps": %d,
+						"allowPlayerSpeedControl": %s,
+						"allowManualCreatureSpawn": %s
+					}
+					""".formatted(
+					maxSpeedMps,
+					allowPlayerSpeedControl,
+					allowManualCreatureSpawn
+				)))
 			.andExpect(status().isOk());
 	}
 

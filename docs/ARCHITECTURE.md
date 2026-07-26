@@ -50,7 +50,8 @@ The frontend is a React application under `frontend/`.
 - `data/` contains frontend creature presentation data and the mock profile.
 - `utils/` contains browser-generated sound and rarity styling helpers.
 
-Live gameplay remains frontend-controlled:
+Solo gameplay remains frontend-controlled, while multiplayer movement now
+uses backend-authoritative plans:
 
 - The local round timer controls spawning.
 - Target spawning asks the backend for nearest-road and route data.
@@ -59,8 +60,9 @@ Live gameplay remains frontend-controlled:
 - Catch detection updates local score, XP, inventory, and feedback immediately.
 - Catch submission to the backend is non-blocking; a sync failure does not
   roll back the local catch.
-- Authenticated users can join a presence room and see other online users on
-  the map. Presence does not affect target spawning, catches, or scoring.
+- Authenticated users can join a room and see other online users on the map.
+  Presence supplies identity and liveness, while Phase A2 sends movement
+  intent to Phase A1 and renders both local and remote plan timelines.
 
 ## Backend
 
@@ -118,8 +120,94 @@ roomId -> userId -> presence
 websocket sessionId -> userId + joined rooms
 ```
 
-It is not persisted and does not implement shared targets, shared catches,
-multiplayer scoring, or route synchronization.
+It is not persisted and remains the temporary remote-marker fallback.
+
+### Multiplayer Movement Plans
+
+Phase A1 added the single-JVM authoritative movement foundation. Phase A2 now
+uses it for multiplayer rendering without changing solo routing:
+
+```text
+authenticated STOMP movement intent
+          |
+          v
+room membership/game/speed/creature validation
+          |
+          v
+backend OSRM polyline6 route
+          |
+          v
+room/player movement plan + version
+          |
+          +--> scheduled guarded completion
+          +--> sequenced room movement events
+          +--> authenticated reconnect snapshot
+```
+
+- Start/cancel commands use `/app/rooms/{roomCode}/movements/...`; authenticated
+  principal identity is the only source of `playerId`.
+- `RoomMovementService` has an in-memory implementation behind replaceable
+  routing, event-publisher, event-sequencer, and completion-scheduler
+  abstractions.
+- The backend requests full polyline6 routes directly from OSRM. The public
+  GeoJSON route endpoint remains unchanged for solo and legacy browser play.
+- Source priority is the interpolated active plan, the stored terminal
+  authoritative position, a finite/range-valid presence position, then the
+  configured initial position.
+- Map intents include a client-selected destination. Creature intents include
+  only the creature instance ID; the backend resolves its room-scoped active
+  coordinate before and after routing.
+- Position is derived from server elapsed time and speed as an OSRM-distance
+  fraction, then applied to cumulative decoded-geometry length.
+- Replacements cancel the prior plan at the calculated route point and increase
+  the per-room/player version. Completion callbacks re-check movement ID,
+  version, current-plan identity, and status before changing state.
+- Movement events use UUID IDs, monotonically increasing per-room sequences,
+  ISO timestamps, and `MOVEMENT_STARTED`, `MOVEMENT_CANCELLED`, or
+  `MOVEMENT_COMPLETED` types on `/topic/rooms/{roomCode}/movements`.
+- `GET /api/multiplayer/rooms/{roomCode}/movements` returns the sequence and
+  latest plan per player for reconnect recovery.
+
+Movement state and event sequences are intentionally in memory for the current
+single-process deployment. The contracts isolate storage and publishing so a
+later Redis store or broker relay does not require a frontend event-shape
+change.
+
+The multiplayer frontend shares the existing authenticated STOMP connection
+for presence, creatures, and movements. Each connection generation subscribes
+once to the movement topic before fetching the snapshot. Events with duplicate
+IDs, old room sequences, or stale player versions are ignored; a sequence gap
+marks state stale and triggers snapshot reconciliation. Reconnects resubscribe
+and replace missed history with a snapshot rather than relying on broker replay.
+Concurrent snapshot requests are coalesced. Transient failures retry with an
+exponential delay capped at 10 seconds; visibility restoration and an
+unconfirmed-command timeout can force an immediate generation-guarded refresh.
+
+Polyline6 geometry is decoded once per movement ID at 1e-6 degree precision.
+The renderer caches Leaflet `[latitude, longitude]` coordinates, cumulative
+haversine segment lengths, measured geometry length, and the backend route
+distance. Position uses:
+
+```text
+routeFraction = clamp(elapsedSeconds * speedMps / backendDistance, 0, 1)
+geometryDistance = routeFraction * measuredGeometryDistance
+```
+
+The first accepted snapshot/event clock sample sets
+`serverOffsetMs = serverTimestampMs - clientReceiveTimeMs`; later samples with
+strictly newer server timestamps use a bounded EWMA adjustment.
+Rendering time is
+`Date.now() + serverOffsetMs`. This removes dependence on frame history: after
+a hidden tab becomes visible, the next render calculates the current timeline
+position immediately. The estimate still includes unknown one-way network
+latency and is not a precision clock-synchronization protocol.
+
+Presence now owns identity, display data, socket liveness, and a sparse legacy
+stationary-coordinate fallback. It publishes on connection and authoritative
+movement transitions, not on every animation frame. Movement plans own local
+and remote route progression. Players with no plan yet necessarily retain the
+presence coordinate fallback until the backend has a latest movement plan for
+them.
 
 Controllers remain thin and delegate to `OsrmRoutingService`,
 `CreatureCatalogService`, and `GameSessionService`. `GlobalExceptionHandler`
@@ -240,11 +328,20 @@ scripts/run-frontend.sh
 ## Security and Trust Boundaries
 
 - JWT authentication exists for current-user REST endpoints and WebSocket
-  presence. Gameplay remains playable as a guest.
+  room commands. Gameplay remains playable as a guest in solo mode.
 - Existing global history and leaderboard endpoints remain public.
 - CORS currently allows the local Vite origin.
 - The backend owns catalog score values and ignores legacy client score fields.
-- The browser still controls spawn timing, movement, and catch detection.
-- Multiplayer presence is local-process memory and is not authoritative game
-  state.
+- The browser still controls solo spawn timing, solo movement, and current
+  catch detection.
+- Multiplayer local and remote markers render backend movement plans. Presence
+  coordinates are only the fallback for an online player with no plan.
+- The current shared-creature catch endpoint still requires client coordinates;
+  Phase A2 supplies a position calculated on demand from the authoritative
+  movement timeline, but moving that derivation entirely into the backend is a
+  future hardening step.
+- Movement STOMP commands are fire-and-forget. The frontend confirms starts by
+  observing a higher authoritative movement version and falls back to a
+  snapshot after 15 seconds; Phase A1 does not provide command-correlated error
+  responses.
 - Broader anti-cheat and fully server-authoritative rounds are future work.
