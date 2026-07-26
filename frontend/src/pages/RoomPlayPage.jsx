@@ -130,6 +130,7 @@ function RoomPlayPage({ gameplay }) {
           connectionStatus={gameplay.multiplayerConnectionStatus}
           onlinePlayerCount={gameplay.onlinePlayers.length}
           errorMessage={gameplay.multiplayerErrorMessage}
+          roomEvent={gameplay.multiplayerRoomEvent}
           playerPosition={gameplay.roomPlayerPosition}
           sharedRoomCreatures={gameplay.sharedRoomCreatures}
           onConnectPresence={gameplay.connectPresence}

@@ -19,6 +19,11 @@ import {
   isCurrentMovementSubscription,
   reconcileMovementSnapshot,
 } from '../multiplayer/movementPlanState'
+import {
+  applyRoomEvent,
+  createRoomEventState,
+  replaceRoomEventSubscription,
+} from '../multiplayer/roomEventState'
 import { createServerClockOffsetEstimator } from '../utils/movementPlanTimeline'
 import {
   createPresencePublishScheduler,
@@ -60,6 +65,7 @@ export function useMultiplayerPresence({
   const subscriptionRef = useRef(null)
   const creatureSubscriptionRef = useRef(null)
   const movementSubscriptionRef = useRef(null)
+  const roomEventSubscriptionRef = useRef(null)
   const movementSnapshotAbortControllerRef = useRef(null)
   const movementSnapshotRequestIdRef = useRef(0)
   const movementSnapshotInFlightRef = useRef(null)
@@ -81,6 +87,7 @@ export function useMultiplayerPresence({
   const lastSentStatusRef = useRef('')
   const manualDisconnectRef = useRef(false)
   const roomCreatureEventHandlerRef = useRef(onRoomCreatureEvent)
+  const roomEventStateRef = useRef(createRoomEventState())
   const movementStateRef = useRef(createMovementPlanState())
   const movementClockEstimatorRef = useRef(
     createServerClockOffsetEstimator(),
@@ -95,6 +102,7 @@ export function useMultiplayerPresence({
     useState('idle')
   const [movementErrorMessage, setMovementErrorMessage] = useState('')
   const [movementCommandPending, setMovementCommandPending] = useState(false)
+  const [roomEvent, setRoomEvent] = useState(null)
   const [publishScheduler] = useState(() => createPresencePublishScheduler({
     now: () => performance.now(),
     setTimer: (callback, delay) => window.setTimeout(callback, delay),
@@ -205,6 +213,13 @@ export function useMultiplayerPresence({
     clearPendingMovementStart,
     updateMovementState,
   ])
+
+  const resetRoomEventState = useCallback((nextRoomId = '') => {
+    roomEventStateRef.current = createRoomEventState({
+      roomCode: nextRoomId || '',
+    })
+    setRoomEvent(null)
+  }, [])
 
   const observeServerTimestamp = useCallback(
     (serverTimestamp, clientReceiveTimeMs) => {
@@ -586,11 +601,13 @@ export function useMultiplayerPresence({
     const subscription = subscriptionRef.current
     const creatureSubscription = creatureSubscriptionRef.current
     const movementSubscription = movementSubscriptionRef.current
+    const roomEventSubscription = roomEventSubscriptionRef.current
     const currentRoomId = activeRoomIdRef.current
     const hadActivePresence = Boolean(
       client ||
       subscription ||
       movementSubscription ||
+      roomEventSubscription ||
       currentRoomId ||
       requestedRoomIdRef.current ||
       connectionStatusRef.current !== 'disconnected',
@@ -612,6 +629,7 @@ export function useMultiplayerPresence({
     subscriptionRef.current = null
     creatureSubscriptionRef.current = null
     movementSubscriptionRef.current = null
+    roomEventSubscriptionRef.current = null
     connectionIdRef.current += 1
     subscriptionGenerationRef.current += 1
     activeRoomIdRef.current = ''
@@ -625,6 +643,7 @@ export function useMultiplayerPresence({
     updateConnectionStatus('disconnected')
     setErrorMessage('')
     resetMovementState()
+    resetRoomEventState()
 
     if (subscription && client?.connected) {
       subscription.unsubscribe()
@@ -638,6 +657,10 @@ export function useMultiplayerPresence({
       movementSubscription.unsubscribe()
     }
 
+    if (roomEventSubscription && client?.connected) {
+      roomEventSubscription.unsubscribe()
+    }
+
     if (client?.active) {
       void client.deactivate()
     }
@@ -645,6 +668,7 @@ export function useMultiplayerPresence({
     cancelRoomMovement,
     publishScheduler,
     resetMovementState,
+    resetRoomEventState,
     updateConnectionStatus,
   ])
 
@@ -680,11 +704,13 @@ export function useMultiplayerPresence({
     setOnlinePlayers([])
     setErrorMessage('')
     resetMovementState(nextRoomId)
+    resetRoomEventState(nextRoomId)
     updateConnectionStatus('connecting')
   }, [
     currentUser?.userId,
     disconnectPresence,
     resetMovementState,
+    resetRoomEventState,
     token,
     updateConnectionStatus,
   ])
@@ -872,6 +898,50 @@ export function useMultiplayerPresence({
           },
         )
 
+        roomEventSubscriptionRef.current = replaceRoomEventSubscription({
+          client,
+          currentSubscription: roomEventSubscriptionRef.current,
+          roomCode: nextRoomId,
+          onMessage: (message) => {
+            if (!isCurrentPresenceSubscription({
+              client,
+              currentClient: clientRef.current,
+              connectionId,
+              currentConnectionId: connectionIdRef.current,
+              subscriptionGeneration,
+              currentSubscriptionGeneration:
+                subscriptionGenerationRef.current,
+              roomId: nextRoomId,
+              currentRoomId: activeRoomIdRef.current,
+            })) {
+              return
+            }
+
+            try {
+              const nextRoomEvent = JSON.parse(message.body)
+              const eventResult = applyRoomEvent(
+                roomEventStateRef.current,
+                nextRoomEvent,
+              )
+
+              if (!eventResult.accepted) {
+                return
+              }
+
+              roomEventStateRef.current = eventResult.state
+              setRoomEvent(nextRoomEvent)
+            } catch (error) {
+              console.warn('Ignored an invalid room lifecycle event.', {
+                roomCode: nextRoomId,
+                playerId: currentUser?.userId,
+                connectionId,
+                subscriptionGeneration,
+                error,
+              })
+            }
+          },
+        })
+
         void refreshMovementSnapshot({
           client,
           connectionGeneration: connectionId,
@@ -916,6 +986,7 @@ export function useMultiplayerPresence({
         subscriptionRef.current = null
         creatureSubscriptionRef.current = null
         movementSubscriptionRef.current = null
+        roomEventSubscriptionRef.current = null
         subscriptionGenerationRef.current += 1
         movementSnapshotRequestIdRef.current += 1
         movementSnapshotAbortControllerRef.current?.abort()
@@ -944,6 +1015,7 @@ export function useMultiplayerPresence({
       const subscription = subscriptionRef.current
       const creatureSubscription = creatureSubscriptionRef.current
       const movementSubscription = movementSubscriptionRef.current
+      const roomEventSubscription = roomEventSubscriptionRef.current
 
       if (ownsClient && subscription && client.connected) {
         subscription.unsubscribe()
@@ -957,10 +1029,15 @@ export function useMultiplayerPresence({
         movementSubscription.unsubscribe()
       }
 
+      if (ownsClient && roomEventSubscription && client.connected) {
+        roomEventSubscription.unsubscribe()
+      }
+
       if (ownsClient) {
         subscriptionRef.current = null
         creatureSubscriptionRef.current = null
         movementSubscriptionRef.current = null
+        roomEventSubscriptionRef.current = null
         clientRef.current = null
         activeRoomIdRef.current = ''
         lastSentPositionRef.current = null
@@ -969,6 +1046,7 @@ export function useMultiplayerPresence({
         connectionIdRef.current += 1
         subscriptionGenerationRef.current += 1
         resetMovementState()
+        resetRoomEventState()
       }
 
       if (client.active) {
@@ -985,6 +1063,7 @@ export function useMultiplayerPresence({
     refreshMovementSnapshot,
     requestedRoomId,
     resetMovementState,
+    resetRoomEventState,
     token,
     updateMovementState,
     updateConnectionStatus,
@@ -1039,6 +1118,7 @@ export function useMultiplayerPresence({
     movementServerOffsetMs,
     movementSnapshotStatus,
     onlinePlayers,
+    roomEvent,
     errorMessage,
     setRoomId,
     connectPresence,
