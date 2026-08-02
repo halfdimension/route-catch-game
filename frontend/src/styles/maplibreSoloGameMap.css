@@ -1925,3 +1925,382 @@
     animation: none;
   }
 }
+
+/* Phase 2A renderer-only motion and feedback */
+.maplibre-solo-target:hover,
+.maplibre-solo-target:active {
+  transform: none;
+}
+
+.maplibre-solo-target-visual {
+  position: absolute;
+  inset: 0;
+  display: block;
+  transform-origin: center;
+  pointer-events: none;
+}
+
+.maplibre-solo-target.animation-common .maplibre-solo-target-visual {
+  animation:
+    maplibre-solo-target-spawn 320ms cubic-bezier(0.2, 0.8, 0.25, 1.15) both,
+    maplibre-solo-target-idle-common 3.8s ease-in-out 320ms infinite;
+}
+
+.maplibre-solo-target.animation-rare .maplibre-solo-target-visual {
+  animation:
+    maplibre-solo-target-spawn 340ms cubic-bezier(0.2, 0.8, 0.25, 1.15) both,
+    maplibre-solo-target-idle-rare 3.2s ease-in-out 340ms infinite;
+}
+
+.maplibre-solo-target.animation-legendary .maplibre-solo-target-visual {
+  animation:
+    maplibre-solo-target-spawn 380ms cubic-bezier(0.2, 0.8, 0.25, 1.15) both,
+    maplibre-solo-target-idle-legendary 2.8s ease-in-out 380ms infinite;
+}
+
+.maplibre-solo-target-core {
+  transition: transform 140ms ease;
+}
+
+.maplibre-solo-target:hover .maplibre-solo-target-core {
+  transform: translateY(-1px) scale(1.06);
+}
+
+.maplibre-solo-target:active .maplibre-solo-target-core {
+  transform: scale(0.94);
+}
+
+.maplibre-solo-target.rarity-rare .maplibre-solo-target-ring {
+  border-color: rgba(96, 165, 250, 0.78);
+  background: rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.1);
+  animation: maplibre-solo-rare-energy 2.5s ease-out infinite;
+}
+
+.maplibre-solo-target.rarity-legendary .maplibre-solo-target-ring {
+  border-color: rgba(251, 191, 36, 0.9);
+  background: rgba(124, 58, 237, 0.16);
+  box-shadow:
+    0 0 0 2px rgba(124, 58, 237, 0.2),
+    0 0 12px rgba(251, 191, 36, 0.36);
+  animation: maplibre-solo-legendary-energy 2.9s ease-in-out infinite;
+}
+
+.maplibre-solo-target.is-chased::after,
+.maplibre-solo-target.is-routing::after {
+  display: none;
+}
+
+.maplibre-solo-target-lock,
+.maplibre-solo-target-routing {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.maplibre-solo-target-lock {
+  inset: -1px;
+  border: 2px solid transparent;
+  border-top-color: #5eead4;
+  border-right-color: #5eead4;
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.32);
+}
+
+.maplibre-solo-target-routing {
+  inset: 0;
+  border: 2px dashed #c4b5fd;
+  box-shadow: 0 0 0 2px rgba(76, 29, 149, 0.18);
+}
+
+.maplibre-solo-target.is-chased:not(.is-routing)
+  .maplibre-solo-target-lock {
+  opacity: 1;
+  animation: maplibre-solo-lock-on 4s linear infinite;
+}
+
+.maplibre-solo-target.is-routing .maplibre-solo-target-routing {
+  opacity: 1;
+  animation: maplibre-solo-routing 1.15s linear infinite;
+}
+
+.maplibre-solo-destination-marker {
+  width: 28px;
+  height: 34px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.maplibre-solo-destination-beacon,
+.maplibre-solo-destination-core,
+.maplibre-solo-destination-stem {
+  position: absolute;
+  left: 50%;
+  display: block;
+  pointer-events: none;
+}
+
+.maplibre-solo-destination-beacon {
+  top: 2px;
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(245, 158, 11, 0.84);
+  border-radius: 50%;
+  background: rgba(245, 158, 11, 0.12);
+  transform: translateX(-50%);
+  animation: maplibre-solo-destination-pulse 1.8s ease-out infinite;
+}
+
+.maplibre-solo-destination-stem {
+  top: 17px;
+  width: 2px;
+  height: 15px;
+  background: linear-gradient(#f59e0b, rgba(245, 158, 11, 0));
+  transform: translateX(-50%);
+}
+
+.maplibre-solo-destination-core {
+  top: 9px;
+  width: 14px;
+  height: 14px;
+  border: 3px solid #fff7d6;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 5px 12px rgba(15, 23, 42, 0.32);
+  transform: translateX(-50%);
+}
+
+.maplibre-solo-catch-ring.is-secondary {
+  inset: 14px;
+  border-width: 2px;
+  animation-delay: 100ms;
+}
+
+.maplibre-solo-catch-effect,
+.maplibre-solo-catch-effect * {
+  pointer-events: none;
+}
+
+.maplibre-hud-value-feedback {
+  display: inline-block;
+  transform-origin: center;
+  animation: maplibre-hud-value-pop 340ms ease-out both;
+}
+
+.maplibre-round-status.is-warning .maplibre-round-time {
+  transform-origin: center;
+  animation: maplibre-low-time-warning 1s ease-in-out infinite;
+}
+
+.maplibre-target-panel {
+  transition:
+    width 160ms ease,
+    border-color 160ms ease;
+}
+
+.maplibre-target-panel-content,
+.maplibre-recent-catches {
+  transform-origin: top right;
+  animation: maplibre-hud-panel-open 180ms ease-out both;
+}
+
+.maplibre-game-hud button {
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease,
+    transform 80ms ease;
+}
+
+.maplibre-game-hud button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+@keyframes maplibre-solo-target-spawn {
+  0% {
+    opacity: 0;
+    transform: translateY(5px) scale(0.72);
+  }
+
+  70% {
+    opacity: 1;
+    transform: translateY(-1px) scale(1.04);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes maplibre-solo-target-idle-common {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-1px) scale(0.985);
+  }
+}
+
+@keyframes maplibre-solo-target-idle-rare {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-1.5px) scale(1.015);
+  }
+}
+
+@keyframes maplibre-solo-target-idle-legendary {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-2px) scale(1.025);
+  }
+}
+
+@keyframes maplibre-solo-rare-energy {
+  0% {
+    opacity: 0.76;
+    transform: scale(0.9);
+  }
+
+  72%,
+  100% {
+    opacity: 0;
+    transform: scale(1.16);
+  }
+}
+
+@keyframes maplibre-solo-legendary-energy {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(0.92);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+@keyframes maplibre-solo-lock-on {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes maplibre-solo-routing {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@keyframes maplibre-solo-destination-pulse {
+  0% {
+    opacity: 0.8;
+    transform: translateX(-50%) scale(0.6);
+  }
+
+  75%,
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) scale(1.35);
+  }
+}
+
+@keyframes maplibre-hud-value-pop {
+  0% {
+    opacity: 0.72;
+    transform: scale(0.84);
+  }
+
+  58% {
+    opacity: 1;
+    transform: scale(1.14);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes maplibre-low-time-warning {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.76;
+    transform: scale(1.035);
+  }
+}
+
+@keyframes maplibre-hud-panel-open {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maplibre-solo-target-visual,
+  .maplibre-solo-target-ring,
+  .maplibre-solo-target-lock,
+  .maplibre-solo-target-routing,
+  .maplibre-solo-destination-beacon,
+  .maplibre-hud-value-feedback,
+  .maplibre-round-status.is-warning .maplibre-round-time,
+  .maplibre-target-panel-content,
+  .maplibre-recent-catches {
+    animation: none;
+  }
+
+  .maplibre-solo-target-visual {
+    opacity: 1;
+    transform: none;
+  }
+
+  .maplibre-solo-target.is-chased:not(.is-routing)
+    .maplibre-solo-target-lock,
+  .maplibre-solo-target.is-routing .maplibre-solo-target-routing {
+    opacity: 1;
+    transform: none;
+  }
+
+  .maplibre-solo-destination-beacon {
+    opacity: 0.72;
+    transform: translateX(-50%) scale(1);
+  }
+
+  .maplibre-solo-catch-ring {
+    animation: none;
+    opacity: 0.68;
+    transform: scale(1);
+  }
+
+  .maplibre-solo-catch-effect > strong {
+    animation: none;
+    opacity: 1;
+    transform: translate(-50%, -8px);
+  }
+}

@@ -15,6 +15,7 @@ import {
   handleSoloTargetMarkerClick,
   recenterSoloMap,
   SOLO_MAP_INTERACTION_PROPS,
+  SOLO_TARGET_ANIMATION_CLASS_NAMES,
 } from '../src/components/maplibre/mapLibreSoloGameState.js'
 import {
   getNonChasedMapLibreTargets,
@@ -840,4 +841,177 @@ test('Leaflet solo components and multiplayer Leaflet map stay isolated', () => 
 
   assert.match(roomPageSource, /<GameMap/)
   assert.doesNotMatch(roomPageSource, /MapLibre/)
+})
+
+test('Common, Rare, and Legendary targets derive distinct animation classes', () => {
+  const rarityExpectations = [
+    ['common', SOLO_TARGET_ANIMATION_CLASS_NAMES.COMMON],
+    ['Rare', SOLO_TARGET_ANIMATION_CLASS_NAMES.RARE],
+    ['LEGENDARY', SOLO_TARGET_ANIMATION_CLASS_NAMES.LEGENDARY],
+  ]
+
+  for (const [rarity, expectedAnimationClass] of rarityExpectations) {
+    const viewState = getSoloTargetMarkerViewState(
+      { ...REAL_TARGET, rarity },
+      null,
+      null,
+      NOW,
+    )
+
+    assert.equal(viewState.animationClassName, expectedAnimationClass)
+    assert.match(viewState.className, new RegExp(expectedAnimationClass))
+  }
+})
+
+test('rarity identity remains present while chase and routing stay distinct', () => {
+  const chasedViewState = getSoloTargetMarkerViewState(
+    REAL_TARGET,
+    REAL_TARGET.id,
+    null,
+    NOW,
+  )
+  const routingViewState = getSoloTargetMarkerViewState(
+    REAL_TARGET,
+    REAL_TARGET.id,
+    REAL_TARGET.id,
+    NOW,
+  )
+
+  assert.match(chasedViewState.className, /rarity-rare/)
+  assert.match(chasedViewState.className, /animation-rare/)
+  assert.match(chasedViewState.className, /is-chased/)
+  assert.doesNotMatch(chasedViewState.className, /is-routing/)
+  assert.match(routingViewState.className, /rarity-rare/)
+  assert.match(routingViewState.className, /is-chased/)
+  assert.match(routingViewState.className, /is-routing/)
+})
+
+test('the pending destination beacon renders only for a valid destination', () => {
+  const markerSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMarkers.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.ok(getSoloDestinationMarkerViewState({ lat: 28.61, lon: 77.2 }))
+  assert.equal(
+    getSoloDestinationMarkerViewState({ lat: Number.NaN, lon: 77.2 }),
+    null,
+  )
+  assert.match(markerSource, /maplibre-solo-destination-beacon/)
+  assert.match(markerSource, /maplibre-solo-destination-core/)
+  assert.match(markerSource, /pendingDestination &&/)
+})
+
+test('catch feedback remains score-aware and pointer-transparent', () => {
+  const markerSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMarkers.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const mapLibreCss = readFileSync(
+    new URL('../src/styles/maplibreSoloGameMap.css', import.meta.url),
+    'utf8',
+  )
+  const viewState = getCaughtTargetEffectViewState(REAL_TARGET)
+
+  assert.equal(viewState.score, REAL_TARGET.score)
+  assert.match(viewState.className, /rarity-rare/)
+  assert.match(markerSource, /pointerEvents: 'none'/)
+  assert.match(markerSource, /<strong>\+\{viewState\.score\}<\/strong>/)
+  assert.match(
+    mapLibreCss,
+    /\.maplibre-solo-catch-effect,[\s\S]*pointer-events: none/,
+  )
+})
+
+test('continuous MapLibre motion has complete reduced-motion fallbacks', () => {
+  const mapLibreCss = readFileSync(
+    new URL('../src/styles/maplibreSoloGameMap.css', import.meta.url),
+    'utf8',
+  )
+  const finalReducedMotionBlock = mapLibreCss.slice(
+    mapLibreCss.lastIndexOf('@media (prefers-reduced-motion: reduce)'),
+  )
+
+  for (const selector of [
+    '.maplibre-solo-target-visual',
+    '.maplibre-solo-target-ring',
+    '.maplibre-solo-target-lock',
+    '.maplibre-solo-target-routing',
+    '.maplibre-solo-destination-beacon',
+    '.maplibre-round-status.is-warning .maplibre-round-time',
+  ]) {
+    assert.ok(finalReducedMotionBlock.includes(selector))
+  }
+
+  assert.match(finalReducedMotionBlock, /animation: none/)
+  assert.match(finalReducedMotionBlock, /\.maplibre-solo-catch-ring/)
+  assert.match(finalReducedMotionBlock, /opacity: 0\.68/)
+})
+
+test('animations stay on marker inner elements and avoid frame loops', () => {
+  const markerSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMarkers.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const mapLibreCss = readFileSync(
+    new URL('../src/styles/maplibreSoloGameMap.css', import.meta.url),
+    'utf8',
+  )
+  const projectPackage = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  )
+
+  assert.match(markerSource, /maplibre-solo-target-visual/)
+  assert.match(
+    mapLibreCss,
+    /\.maplibre-solo-target\.animation-common \.maplibre-solo-target-visual/,
+  )
+  assert.doesNotMatch(
+    mapLibreCss,
+    /\.maplibregl-marker[^}]*animation/,
+  )
+  assert.doesNotMatch(markerSource, /requestAnimationFrame/)
+  assert.doesNotMatch(mapLibreCss, /requestAnimationFrame/)
+  assert.equal(projectPackage.dependencies['framer-motion'], undefined)
+  assert.equal(projectPackage.dependencies['react-spring'], undefined)
+  assert.equal(projectPackage.dependencies['animejs'], undefined)
+})
+
+test('HUD value feedback remounts only value spans, never the map', () => {
+  const gameHudSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreGameHud.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const targetPanelSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreTargetPanel.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(gameHudSource, /key=\{`score-\$\{score\}`\}/)
+  assert.match(gameHudSource, /key=\{`caught-\$\{caughtCount\}`\}/)
+  assert.match(targetPanelSource, /key=\{`targets-\$\{targets\.length\}`\}/)
+  assert.doesNotMatch(soloMapSource, /\bkey=/)
+  assert.doesNotMatch(gameHudSource, /requestAnimationFrame/)
 })

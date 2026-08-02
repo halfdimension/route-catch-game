@@ -40,7 +40,12 @@ function MapLibreTargetPanel({
           <strong>Nearby creatures</strong>
         </div>
         <span className="maplibre-target-count" aria-label={`${targets.length} creatures`}>
-          {targets.length}
+          <span
+            key={`targets-${targets.length}`}
+            className="maplibre-hud-value-feedback"
+          >
+            {targets.length}
+          </span>
         </span>
         <button
           type="button"

@@ -43,10 +43,10 @@ function createRouteLayerConfigurations(sourceId) {
         type: 'line',
         layout: ROUTE_LAYOUT,
         paint: Object.freeze({
-          'line-color': '#27114f',
-          'line-opacity': 0.68,
-          'line-width': 13,
-          'line-blur': 1.2,
+          'line-color': '#321568',
+          'line-opacity': 0.74,
+          'line-width': 14,
+          'line-blur': 1.8,
         }),
       }),
       core: Object.freeze({
@@ -54,7 +54,7 @@ function createRouteLayerConfigurations(sourceId) {
         type: 'line',
         layout: ROUTE_LAYOUT,
         paint: Object.freeze({
-          'line-color': '#8b5cf6',
+          'line-color': '#a78bfa',
           'line-opacity': 1,
           'line-width': 7,
         }),

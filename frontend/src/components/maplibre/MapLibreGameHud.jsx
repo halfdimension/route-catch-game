@@ -48,7 +48,12 @@ export function MapLibrePlayerStatus({
         aria-expanded={isRecentCatchesOpen}
         aria-controls="maplibre-recent-catches-drawer"
       >
-        {caughtCount} caught
+        <span
+          key={`caught-${caughtCount}`}
+          className="maplibre-hud-value-feedback"
+        >
+          {caughtCount} caught
+        </span>
         <span aria-hidden="true">{isRecentCatchesOpen ? '−' : '＋'}</span>
       </button>
     </section>
@@ -78,7 +83,12 @@ export function MapLibreRoundStatus({
       <strong className="maplibre-round-time">{viewState.timeLabel}</strong>
       <span className="maplibre-round-score">
         <small>Score</small>
-        <strong>{score}</strong>
+        <strong
+          key={`score-${score}`}
+          className="maplibre-hud-value-feedback"
+        >
+          {score}
+        </strong>
       </span>
     </section>
   )
