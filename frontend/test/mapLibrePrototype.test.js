@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   fromMapLibreLngLat,
@@ -137,7 +137,7 @@ test('route layer configuration is stable and preserves halo/core ordering', () 
   )
 })
 
-test('Vite resolves the supported MapLibre worker export explicitly', () => {
+test('both maps rely on the supported built-in MapLibre worker', () => {
   const prototypeMapSource = readFileSync(
     new URL(
       '../src/components/maplibre/MapLibrePrototypeMap.jsx',
@@ -145,25 +145,39 @@ test('Vite resolves the supported MapLibre worker export explicitly', () => {
     ),
     'utf8',
   )
-
-  assert.match(
-    prototypeMapSource,
-    /maplibre-gl\/dist\/maplibre-gl-worker\.mjs\?worker&url/,
-  )
-  assert.match(prototypeMapSource, /workerUrl=\{mapLibreWorkerUrl\}/)
-  assert.ok(
-    existsSync(
-      new URL(
-        '../node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs',
-        import.meta.url,
-      ),
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
     ),
+    'utf8',
   )
+  const unsupportedReferences = [
+    ['mapLibre', 'RuntimeConfig'].join(''),
+    ['mapLibre', 'WorkerUrl'].join(''),
+    ['maplibre-gl-worker', '.mjs'].join(''),
+    ['.vite/deps/', 'maplibre-gl-worker', '.mjs'].join(''),
+  ]
+  const explicitWorkerProperty = ['worker', 'Url'].join('')
+
+  for (const mapSource of [prototypeMapSource, soloMapSource]) {
+    for (const unsupportedReference of unsupportedReferences) {
+      assert.equal(mapSource.includes(unsupportedReference), false)
+    }
+
+    assert.equal(
+      new RegExp(`\\b${explicitWorkerProperty}\\s*=`).test(mapSource),
+      false,
+    )
+  }
 })
 
-test('installed MapLibre versions and package exports remain compatible', () => {
+test('MapLibre v5 is pinned once and accepted by the React wrapper', () => {
   const projectPackage = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  )
+  const packageLock = JSON.parse(
+    readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'),
   )
   const mapLibrePackage = JSON.parse(
     readFileSync(
@@ -180,13 +194,43 @@ test('installed MapLibre versions and package exports remain compatible', () => 
       'utf8',
     ),
   )
+  const mapLibreLockEntries = Object.entries(packageLock.packages).filter(
+    ([packagePath]) => packagePath.endsWith('node_modules/maplibre-gl'),
+  )
+  const wrapperPeerRange =
+    reactMapLibrePackage.peerDependencies['maplibre-gl']
+  const minimumPeerMajor = Number(
+    wrapperPeerRange.match(/\d+/)?.[0],
+  )
+  const installedMapLibreMajor = Number(mapLibrePackage.version.split('.')[0])
 
-  assert.equal(projectPackage.dependencies['maplibre-gl'], '^6.0.0')
-  assert.equal(mapLibrePackage.version, '6.0.0')
-  assert.equal(mapLibrePackage.exports['./dist/*'], './dist/*')
+  assert.equal(projectPackage.dependencies['maplibre-gl'], '5.24.0')
+  assert.equal(mapLibrePackage.version, '5.24.0')
   assert.equal(
-    reactMapLibrePackage.peerDependencies['maplibre-gl'],
+    projectPackage.dependencies['@vis.gl/react-maplibre'],
+    '^8.1.1',
+  )
+  assert.equal(reactMapLibrePackage.version, '8.1.1')
+  assert.equal(
+    wrapperPeerRange,
     '>=4.0.0',
+  )
+  assert.ok(installedMapLibreMajor >= minimumPeerMajor)
+
+  assert.equal(
+    packageLock.packages[''].dependencies['maplibre-gl'],
+    '5.24.0',
+  )
+  assert.equal(
+    packageLock.packages['node_modules/maplibre-gl'].version,
+    '5.24.0',
+  )
+  assert.deepEqual(
+    mapLibreLockEntries.map(([packagePath, packageMetadata]) => ({
+      packagePath,
+      version: packageMetadata.version,
+    })),
+    [{ packagePath: 'node_modules/maplibre-gl', version: '5.24.0' }],
   )
 })
 
@@ -212,9 +256,7 @@ test('style-loaded transitions report building compatibility accurately', () => 
 })
 
 test('fatal initialization errors replace the loading style state', () => {
-  const error = new Error(
-    'Failed to fetch worker script (404): maplibre-gl-worker.mjs',
-  )
+  const error = new Error('Failed to initialize Web Worker')
   const fatalState = transitionStyleStateForError(
     createLoadingStyleState(),
     error,

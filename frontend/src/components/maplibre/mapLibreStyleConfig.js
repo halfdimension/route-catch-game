@@ -12,59 +12,71 @@ const ROUTE_LAYOUT = Object.freeze({
   'line-join': 'round',
 })
 
+function createRouteLayerConfigurations(sourceId) {
+  return Object.freeze({
+    standard: Object.freeze({
+      halo: Object.freeze({
+        id: `${sourceId}-halo`,
+        type: 'line',
+        layout: ROUTE_LAYOUT,
+        paint: Object.freeze({
+          'line-color': '#111827',
+          'line-opacity': 0.58,
+          'line-width': 10,
+          'line-blur': 1,
+        }),
+      }),
+      core: Object.freeze({
+        id: `${sourceId}-core`,
+        type: 'line',
+        layout: ROUTE_LAYOUT,
+        paint: Object.freeze({
+          'line-color': '#2563eb',
+          'line-opacity': 0.96,
+          'line-width': 5,
+        }),
+      }),
+    }),
+    chase: Object.freeze({
+      halo: Object.freeze({
+        id: `${sourceId}-halo`,
+        type: 'line',
+        layout: ROUTE_LAYOUT,
+        paint: Object.freeze({
+          'line-color': '#27114f',
+          'line-opacity': 0.68,
+          'line-width': 13,
+          'line-blur': 1.2,
+        }),
+      }),
+      core: Object.freeze({
+        id: `${sourceId}-core`,
+        type: 'line',
+        layout: ROUTE_LAYOUT,
+        paint: Object.freeze({
+          'line-color': '#8b5cf6',
+          'line-opacity': 1,
+          'line-width': 7,
+        }),
+      }),
+    }),
+  })
+}
+
 const ROUTE_LAYER_CONFIGURATIONS = Object.freeze({
-  standard: Object.freeze({
-    halo: Object.freeze({
-      id: 'prototype-route-halo',
-      type: 'line',
-      layout: ROUTE_LAYOUT,
-      paint: Object.freeze({
-        'line-color': '#111827',
-        'line-opacity': 0.58,
-        'line-width': 10,
-        'line-blur': 1,
-      }),
-    }),
-    core: Object.freeze({
-      id: 'prototype-route-core',
-      type: 'line',
-      layout: ROUTE_LAYOUT,
-      paint: Object.freeze({
-        'line-color': '#2563eb',
-        'line-opacity': 0.96,
-        'line-width': 5,
-      }),
-    }),
-  }),
-  chase: Object.freeze({
-    halo: Object.freeze({
-      id: 'prototype-route-halo',
-      type: 'line',
-      layout: ROUTE_LAYOUT,
-      paint: Object.freeze({
-        'line-color': '#27114f',
-        'line-opacity': 0.68,
-        'line-width': 13,
-        'line-blur': 1.2,
-      }),
-    }),
-    core: Object.freeze({
-      id: 'prototype-route-core',
-      type: 'line',
-      layout: ROUTE_LAYOUT,
-      paint: Object.freeze({
-        'line-color': '#8b5cf6',
-        'line-opacity': 1,
-        'line-width': 7,
-      }),
-    }),
-  }),
+  'prototype-route': createRouteLayerConfigurations('prototype-route'),
+  'solo-route': createRouteLayerConfigurations('solo-route'),
 })
 
-export function getRouteLayerConfigurations(isChaseActive = false) {
-  return isChaseActive
-    ? ROUTE_LAYER_CONFIGURATIONS.chase
-    : ROUTE_LAYER_CONFIGURATIONS.standard
+export function getRouteLayerConfigurations(
+  isChaseActive = false,
+  sourceId = 'prototype-route',
+) {
+  const configurations =
+    ROUTE_LAYER_CONFIGURATIONS[sourceId] ||
+    ROUTE_LAYER_CONFIGURATIONS['prototype-route']
+
+  return isChaseActive ? configurations.chase : configurations.standard
 }
 
 function isCompatibleBuildingLayer(layer, sources) {
@@ -102,7 +114,7 @@ export function createBuildingExtrusionLayer(buildingSource) {
   }
 
   return {
-    id: 'prototype-3d-buildings',
+    id: 'maplibre-3d-buildings',
     type: 'fill-extrusion',
     source: buildingSource.source,
     'source-layer': buildingSource.sourceLayer,

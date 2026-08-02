@@ -1,0 +1,508 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+import {
+  toRouteGeoJson,
+} from '../src/components/maplibre/mapLibreCoordinates.js'
+import {
+  createSoloDestinationFromMapClick,
+  createSoloDestinationFromMapEvent,
+  createSoloInitialViewState,
+  getCaughtTargetEffectViewState,
+  getSoloDestinationMarkerViewState,
+  getSoloPlayerMarkerViewState,
+  getSoloTargetMarkerViewState,
+  handleSoloTargetMarkerClick,
+  recenterSoloMap,
+  SOLO_MAP_INTERACTION_PROPS,
+} from '../src/components/maplibre/mapLibreSoloGameState.js'
+import {
+  getRouteLayerConfigurations,
+} from '../src/components/maplibre/mapLibreStyleConfig.js'
+import {
+  createLoadedStyleState,
+  isRouteEligible,
+} from '../src/components/maplibre/mapLibreStyleState.js'
+import {
+  resolveSoloMapRenderer,
+  SOLO_MAP_RENDERER,
+  SOLO_MAP_RENDERERS,
+} from '../src/config/soloMapRenderer.js'
+import {
+  INITIAL_MAP_CENTER,
+  INITIAL_MAP_ZOOM,
+} from '../src/config/mapConfig.js'
+
+const NOW = 1_800_000_000_000
+
+const REAL_TARGET = Object.freeze({
+  id: 'target-42',
+  name: 'Azure Jackal',
+  rarity: 'Rare',
+  symbol: 'J',
+  color: '#2563eb',
+  score: 30,
+  difficulty: 'Medium',
+  expiresAt: NOW + 12_400,
+  lat: 28.6107,
+  lon: 77.2057,
+})
+
+test('solo renderer defaults to Leaflet when the setting is absent', () => {
+  assert.equal(SOLO_MAP_RENDERER, SOLO_MAP_RENDERERS.LEAFLET)
+  assert.equal(
+    resolveSoloMapRenderer(undefined),
+    SOLO_MAP_RENDERERS.LEAFLET,
+  )
+})
+
+test('an explicit leaflet setting selects Leaflet', () => {
+  assert.equal(
+    resolveSoloMapRenderer('leaflet'),
+    SOLO_MAP_RENDERERS.LEAFLET,
+  )
+})
+
+test('an explicit maplibre setting selects MapLibre', () => {
+  assert.equal(
+    resolveSoloMapRenderer('maplibre'),
+    SOLO_MAP_RENDERERS.MAPLIBRE,
+  )
+})
+
+test('empty and invalid solo renderer settings safely select Leaflet', () => {
+  assert.equal(resolveSoloMapRenderer(''), SOLO_MAP_RENDERERS.LEAFLET)
+  assert.equal(
+    resolveSoloMapRenderer('openlayers'),
+    SOLO_MAP_RENDERERS.LEAFLET,
+  )
+  assert.equal(
+    resolveSoloMapRenderer('MAPLIBRE'),
+    SOLO_MAP_RENDERERS.LEAFLET,
+  )
+})
+
+test('the real player position uses the shared MapLibre coordinate boundary', () => {
+  assert.deepEqual(
+    getSoloPlayerMarkerViewState(
+      { lat: 28.6139, lon: 77.209 },
+      'Delhi Ranger',
+    ),
+    {
+      mapPosition: [77.209, 28.6139],
+      displayName: 'Delhi Ranger',
+      initial: 'D',
+      avatarUrl: '',
+      title: 'Delhi Ranger, local player',
+    },
+  )
+  assert.equal(
+    getSoloPlayerMarkerViewState({ lat: 95, lon: 77.209 }, 'Ranger'),
+    null,
+  )
+})
+
+test('the pending destination uses the same coordinate boundary', () => {
+  assert.deepEqual(
+    getSoloDestinationMarkerViewState({
+      lat: 28.6122,
+      lon: 77.2132,
+    }),
+    {
+      mapPosition: [77.2132, 28.6122],
+      title: 'Pending destination',
+    },
+  )
+  assert.equal(getSoloDestinationMarkerViewState(null), null)
+})
+
+test('initial camera center uses the first valid real player position', () => {
+  assert.deepEqual(
+    createSoloInitialViewState({ lat: 19.076, lon: 72.8777 }),
+    {
+      longitude: 72.8777,
+      latitude: 19.076,
+      zoom: INITIAL_MAP_ZOOM,
+      pitch: 40,
+      bearing: 0,
+    },
+  )
+})
+
+test('invalid player position falls back to INITIAL_MAP_CENTER', () => {
+  const initialViewState = createSoloInitialViewState({
+    lat: Number.NaN,
+    lon: 72.8777,
+  })
+
+  assert.equal(initialViewState.longitude, INITIAL_MAP_CENTER[1])
+  assert.equal(initialViewState.latitude, INITIAL_MAP_CENTER[0])
+})
+
+test('camera initialization remains stable after player position changes', () => {
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(
+    soloMapSource,
+    /useState\(\(\) =>\s*createSoloInitialViewState\(playerPosition\)/,
+  )
+  assert.doesNotMatch(soloMapSource, /setInitialViewState/)
+  assert.match(
+    soloMapSource,
+    /playerPositionRef\.current = playerPosition/,
+  )
+  assert.match(
+    soloMapSource,
+    /recenterSoloMap\(mapRef\.current, playerPositionRef\.current\)/,
+  )
+})
+
+test('free camera interaction settings keep every required handler enabled', () => {
+  assert.deepEqual(SOLO_MAP_INTERACTION_PROPS, {
+    interactive: true,
+    cooperativeGestures: false,
+    boxZoom: true,
+    doubleClickZoom: true,
+    dragPan: true,
+    dragRotate: true,
+    keyboard: true,
+    pitchWithRotate: true,
+    scrollZoom: true,
+    touchPitch: true,
+    touchZoomRotate: true,
+  })
+})
+
+test('solo map uses uncontrolled initialViewState without recycled camera state', () => {
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(soloMapSource, /initialViewState=\{initialViewState\}/)
+  assert.doesNotMatch(soloMapSource, /\bviewState=/)
+  assert.doesNotMatch(soloMapSource, /\breuseMaps\b/)
+  assert.doesNotMatch(soloMapSource, /\bkey=/)
+})
+
+test('recenter uses the latest player position and preserves usable zoom', () => {
+  const cameraUpdates = []
+  const map = {
+    getZoom() {
+      return 14
+    },
+    easeTo(nextCamera) {
+      cameraUpdates.push(nextCamera)
+    },
+  }
+
+  assert.equal(
+    recenterSoloMap(map, { lat: 19.082, lon: 72.891 }),
+    true,
+  )
+  assert.deepEqual(cameraUpdates[0].center, [72.891, 19.082])
+  assert.equal(cameraUpdates[0].zoom, 14)
+  assert.equal(cameraUpdates[0].essential, true)
+  assert.equal(recenterSoloMap(map, { lat: 100, lon: 72.891 }), false)
+  assert.equal(cameraUpdates.length, 1)
+})
+
+test('recenter raises an unusably low zoom to the initial game zoom', () => {
+  let cameraUpdate
+  const map = {
+    getZoom() {
+      return 4
+    },
+    easeTo(nextCamera) {
+      cameraUpdate = nextCamera
+    },
+  }
+
+  recenterSoloMap(map, { lat: 19.082, lon: 72.891 })
+
+  assert.equal(cameraUpdate.zoom, INITIAL_MAP_ZOOM)
+})
+
+test('the real target marker view model preserves production display data', () => {
+  const viewState = getSoloTargetMarkerViewState(
+    REAL_TARGET,
+    null,
+    null,
+    NOW,
+  )
+
+  assert.deepEqual(viewState.mapPosition, [77.2057, 28.6107])
+  assert.equal(viewState.name, REAL_TARGET.name)
+  assert.equal(viewState.rarityLabel, 'Rare')
+  assert.equal(viewState.score, 30)
+  assert.equal(viewState.remainingSeconds, 13)
+  assert.equal(viewState.difficultyLabel, 'Medium')
+  assert.match(viewState.className, /rarity-rare/)
+  assert.match(viewState.ariaLabel, /13 seconds remaining/)
+})
+
+test('the chased target state is represented without changing target data', () => {
+  const viewState = getSoloTargetMarkerViewState(
+    REAL_TARGET,
+    REAL_TARGET.id,
+    null,
+    NOW,
+  )
+
+  assert.equal(viewState.isChased, true)
+  assert.equal(viewState.isRouting, false)
+  assert.equal(viewState.difficultyLabel, 'Chasing')
+  assert.match(viewState.className, /is-chased/)
+  assert.doesNotMatch(viewState.className, /is-routing/)
+})
+
+test('the routing target state adds routing status and pulse state', () => {
+  const viewState = getSoloTargetMarkerViewState(
+    REAL_TARGET,
+    null,
+    REAL_TARGET.id,
+    NOW,
+  )
+
+  assert.equal(viewState.isChased, false)
+  assert.equal(viewState.isRouting, true)
+  assert.equal(viewState.difficultyLabel, 'Routing')
+  assert.match(viewState.className, /is-routing/)
+})
+
+test('a target click invokes the target callback exactly once', () => {
+  let targetClickCount = 0
+
+  handleSoloTargetMarkerClick(
+    { stopPropagation() {} },
+    REAL_TARGET,
+    (clickedTarget) => {
+      targetClickCount += 1
+      assert.equal(clickedTarget, REAL_TARGET)
+    },
+  )
+
+  assert.equal(targetClickCount, 1)
+})
+
+test('a target click stops propagation before a map click can run', () => {
+  let propagationStopped = false
+  let mapClickCount = 0
+
+  handleSoloTargetMarkerClick(
+    {
+      stopPropagation() {
+        propagationStopped = true
+      },
+    },
+    REAL_TARGET,
+    () => {},
+  )
+
+  if (!propagationStopped) {
+    mapClickCount += 1
+  }
+
+  assert.equal(propagationStopped, true)
+  assert.equal(mapClickCount, 0)
+})
+
+test('a valid two-point route creates the solo halo and core layers', () => {
+  const route = toRouteGeoJson([
+    [28.6139, 77.209],
+    [28.6145, 77.21],
+  ])
+  const layers = getRouteLayerConfigurations(false, 'solo-route')
+
+  assert.equal(route.geometry.coordinates.length, 2)
+  assert.equal(layers.halo.id, 'solo-route-halo')
+  assert.equal(layers.core.id, 'solo-route-core')
+  assert.equal(layers.halo.layout['line-cap'], 'round')
+  assert.equal(layers.core.layout['line-join'], 'round')
+  assert.ok(
+    layers.halo.paint['line-width'] > layers.core.paint['line-width'],
+  )
+})
+
+test('empty, short, and invalid route data clears the route view', () => {
+  assert.equal(toRouteGeoJson([]), null)
+  assert.equal(toRouteGeoJson([[28.6139, 77.209]]), null)
+  assert.equal(
+    toRouteGeoJson([
+      [28.6139, 77.209],
+      [Number.NaN, 77.21],
+    ]),
+    null,
+  )
+})
+
+test('the caught-target effect is visual-only and rejects invalid positions', () => {
+  assert.deepEqual(
+    getCaughtTargetEffectViewState(REAL_TARGET),
+    {
+      mapPosition: [77.2057, 28.6107],
+      score: 30,
+      className: 'maplibre-solo-catch-effect rarity-rare',
+    },
+  )
+  assert.equal(getCaughtTargetEffectViewState(null), null)
+  assert.equal(
+    getCaughtTargetEffectViewState({
+      ...REAL_TARGET,
+      lat: Number.NaN,
+    }),
+    null,
+  )
+})
+
+test('MapLibre map clicks return the application {lat, lon} contract', () => {
+  assert.deepEqual(
+    createSoloDestinationFromMapClick({
+      lng: 77.2132,
+      lat: 28.6122,
+    }),
+    { lat: 28.6122, lon: 77.2132 },
+  )
+  assert.equal(
+    createSoloDestinationFromMapClick({ lng: 190, lat: 28.6122 }),
+    null,
+  )
+})
+
+test('a drag interaction cannot produce a map-click destination', () => {
+  assert.equal(
+    createSoloDestinationFromMapEvent({
+      type: 'drag',
+      lngLat: { lng: 77.2132, lat: 28.6122 },
+    }),
+    null,
+  )
+  assert.deepEqual(
+    createSoloDestinationFromMapEvent({
+      type: 'click',
+      lngLat: { lng: 77.2132, lat: 28.6122 },
+    }),
+    { lat: 28.6122, lon: 77.2132 },
+  )
+})
+
+test('solo map relies on MapLibre responsive behavior without a duplicate resize path', () => {
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const soloStateSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/mapLibreSoloGameState.js',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const removedResizeHelper = ['observe', 'SoloMap', 'Resize'].join('')
+
+  for (const source of [soloMapSource, soloStateSource]) {
+    assert.equal(source.includes(removedResizeHelper), false)
+    assert.doesNotMatch(source, /\bResizeObserver\b/)
+    assert.doesNotMatch(source, /\.resize\s*\(/)
+  }
+})
+
+test('valid moving routes stay eligible above the basemap and below markers', () => {
+  const routeCoordinates = [
+    [19.076, 72.8777],
+    [19.078, 72.882],
+  ]
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const routeLayerSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreRouteLayer.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const basemapIndex = soloMapSource.indexOf('mapStyle=')
+  const routeIndex = soloMapSource.indexOf('<MapLibreRouteLayer')
+  const markersIndex = soloMapSource.indexOf('<MapLibreSoloGameMarkers')
+  const haloIndex = routeLayerSource.indexOf('layerConfigurations.halo')
+  const coreIndex = routeLayerSource.indexOf('layerConfigurations.core')
+
+  assert.equal(
+    isRouteEligible(createLoadedStyleState(true), routeCoordinates),
+    true,
+  )
+  assert.ok(basemapIndex >= 0)
+  assert.ok(basemapIndex < routeIndex)
+  assert.ok(routeIndex < markersIndex)
+  assert.ok(haloIndex < coreIndex)
+})
+
+test('solo route coordinates remain display-only map input', () => {
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(soloMapSource, /coordinates=\{routeCoordinates\}/)
+  assert.doesNotMatch(soloMapSource, /fetchRoute/)
+  assert.doesNotMatch(soloMapSource, /osrmClient/)
+})
+
+test('successful map load clears the loading notice without manual resizing', () => {
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const loadedTransitions =
+    soloMapSource.match(/setStyleState\(createLoadedStyleState\(/g) || []
+
+  assert.equal(loadedTransitions.length, 3)
+  assert.match(soloMapSource, /styleState\.status === 'loading'/)
+  assert.doesNotMatch(soloMapSource, /\.resize\s*\(/)
+})
+
+test('SoloPlayPage lazy-loads MapLibre without changing the GameMap contract', () => {
+  const soloPageSource = readFileSync(
+    new URL('../src/pages/SoloPlayPage.jsx', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(soloPageSource, /lazy\(/)
+  assert.match(soloPageSource, /MapLibreSoloGameMap/)
+  assert.match(soloPageSource, /<GameMap/)
+  assert.match(soloPageSource, /\{\.\.\.soloMapProps\}/)
+})
+
+test('multiplayer RoomPlayPage remains on the Leaflet GameMap', () => {
+  const roomPageSource = readFileSync(
+    new URL('../src/pages/RoomPlayPage.jsx', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(roomPageSource, /import GameMap from/)
+  assert.match(roomPageSource, /<GameMap/)
+  assert.doesNotMatch(roomPageSource, /MapLibre/)
+})

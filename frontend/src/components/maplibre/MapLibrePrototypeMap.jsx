@@ -5,7 +5,6 @@ import {
   useState,
 } from 'react'
 import Map, { NavigationControl } from '@vis.gl/react-maplibre'
-import mapLibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { fetchRoute } from '../../api/osrmClient'
 import { INITIAL_MAP_CENTER } from '../../config/mapConfig'
 import { toMapLibreCoordinate } from './mapLibreCoordinates'
@@ -211,7 +210,6 @@ function MapLibrePrototypeMap() {
           bearing: 0,
         }}
         mapStyle={MAPLIBRE_STYLE_URL}
-        workerUrl={mapLibreWorkerUrl}
         attributionControl
         boxZoom
         doubleClickZoom
