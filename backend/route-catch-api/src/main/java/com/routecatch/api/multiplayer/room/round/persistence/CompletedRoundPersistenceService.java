@@ -1,74 +1,66 @@
 package com.routecatch.api.multiplayer.room.round.persistence;
 
-import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class CompletedRoundPersistenceService {
 
-	private final GameRoundRepository roundRepository;
-	private final GameRoundPlayerRepository playerRepository;
-	private final GameRoundPlayerCatchRepository catchRepository;
-	private final CompletedRoundPersistenceMapper mapper;
+	private static final String ROUND_INSTANCE_CONSTRAINT =
+		"uk_game_rounds_round_instance_id";
+
+	private final CompletedRoundPersistenceWriter writer;
+	private final CompletedRoundPersistenceReader reader;
 
 	public CompletedRoundPersistenceService(
-		GameRoundRepository roundRepository,
-		GameRoundPlayerRepository playerRepository,
-		GameRoundPlayerCatchRepository catchRepository,
-		CompletedRoundPersistenceMapper mapper
+		CompletedRoundPersistenceWriter writer,
+		CompletedRoundPersistenceReader reader
 	) {
-		this.roundRepository = roundRepository;
-		this.playerRepository = playerRepository;
-		this.catchRepository = catchRepository;
-		this.mapper = mapper;
+		this.writer = writer;
+		this.reader = reader;
 	}
 
 	/**
 	 * Stores the public round UUID exactly once. Rankings, scores, aggregate
 	 * counts, and individual catches are copied from the finalized result.
-	 * GAME_ENDED integration is intentionally deferred to Phase 1B.
+	 * A unique-key loser is recovered only after its insert transaction has
+	 * rolled back, using a fresh read transaction.
 	 */
-	@Transactional
 	public CompletedRoundPersistenceOutcome persistIfAbsent(
 		CompletedRoundPersistenceCommand command
 	) {
 		UUID roundInstanceId = command.finalizedRound().publicResult().roundId();
-		GameRoundEntity existing = roundRepository
-			.findByRoundInstanceId(roundInstanceId)
-			.orElse(null);
 
-		if (existing != null) {
-			return outcome(false, existing);
+		try {
+			return writer.persistIfAbsent(command);
+		} catch (DataIntegrityViolationException exception) {
+			if (!isRoundInstanceDuplicate(exception)) {
+				throw exception;
+			}
+
+			return reader.findExisting(roundInstanceId).orElseThrow(() -> exception);
 		}
-
-		CompletedRoundPersistenceMapper.MappedCompletedRound mapped =
-			mapper.map(command);
-		roundRepository.saveAndFlush(mapped.round());
-		List<GameRoundPlayerEntity> players = mapped.players()
-			.stream()
-			.map(CompletedRoundPersistenceMapper.MappedCompletedRoundPlayer::player)
-			.toList();
-		playerRepository.saveAllAndFlush(players);
-		List<GameRoundPlayerCatchEntity> catches = mapped.players()
-			.stream()
-			.flatMap(player -> player.catches().stream())
-			.toList();
-		catchRepository.saveAllAndFlush(catches);
-
-		return outcome(true, mapped.round());
 	}
 
-	private CompletedRoundPersistenceOutcome outcome(
-		boolean created,
-		GameRoundEntity round
-	) {
-		return new CompletedRoundPersistenceOutcome(
-			created,
-			round.getGameRoundId(),
-			round.getRoundInstanceId()
-		);
+	private boolean isRoundInstanceDuplicate(Throwable failure) {
+		Throwable current = failure;
+
+		while (current != null) {
+			String message = current.getMessage();
+			if (
+				message != null &&
+				message.toLowerCase(Locale.ROOT).contains(
+					ROUND_INSTANCE_CONSTRAINT
+				)
+			) {
+				return true;
+			}
+			current = current.getCause();
+		}
+
+		return false;
 	}
 }

@@ -24,6 +24,7 @@ public class WebSocketRoomRoundEventPublisher
 
 	@Override
 	public void publish(RoomEventEnvelope<PublicRoundResult> event) {
+		messagingTemplate.convertAndSend(topic(event.roomCode()), event);
 		LOGGER.info(
 			"GAME_ENDED published roomCode={} roundId={} roomSequence={} topic={}",
 			event.roomCode(),
@@ -31,7 +32,6 @@ public class WebSocketRoomRoundEventPublisher
 			event.roomSequence(),
 			topic(event.roomCode())
 		);
-		messagingTemplate.convertAndSend(topic(event.roomCode()), event);
 	}
 
 	private String topic(String roomCode) {
