@@ -15,7 +15,17 @@ import {
   handleSoloTargetMarkerClick,
   recenterSoloMap,
   SOLO_MAP_INTERACTION_PROPS,
+  SOLO_TARGET_ANIMATION_CLASS_NAMES,
 } from '../src/components/maplibre/mapLibreSoloGameState.js'
+import {
+  getNonChasedMapLibreTargets,
+  getMapLibreRoundViewState,
+  getMapLibreTargetViewState,
+  handleMapLibreHudCancelChase,
+  handleMapLibreHudTargetClick,
+  resolveMapLibreDebugControlsEnabled,
+  stopMapLibreHudEvent,
+} from '../src/components/maplibre/mapLibreGameHudState.js'
 import {
   getRouteLayerConfigurations,
 } from '../src/components/maplibre/mapLibreStyleConfig.js'
@@ -505,4 +515,503 @@ test('multiplayer RoomPlayPage remains on the Leaflet GameMap', () => {
   assert.match(roomPageSource, /import GameMap from/)
   assert.match(roomPageSource, /<GameMap/)
   assert.doesNotMatch(roomPageSource, /MapLibre/)
+})
+
+test('MapLibre experience shell activates without changing the Leaflet default', () => {
+  const soloPageSource = readFileSync(
+    new URL('../src/pages/SoloPlayPage.jsx', import.meta.url),
+    'utf8',
+  )
+
+  assert.equal(SOLO_MAP_RENDERER, SOLO_MAP_RENDERERS.LEAFLET)
+  assert.match(soloPageSource, /isMapLibreExperience/)
+  assert.match(soloPageSource, /is-maplibre-experience/)
+  assert.match(soloPageSource, /<MapLibreGameHud gameplay=\{gameplay\}/)
+  assert.match(soloPageSource, /isMapLibreExperience \? \(/)
+  assert.match(soloPageSource, /<MovementStatusPanel/)
+  assert.match(soloPageSource, /<TargetInfoPanel/)
+})
+
+test('round HUD exposes player-facing timer, score state, and warning state', () => {
+  assert.deepEqual(
+    getMapLibreRoundViewState({
+      gameState: 'running',
+      remainingSeconds: 9,
+      selectedRoundSeconds: 120,
+    }),
+    {
+      timeLabel: '00:09',
+      stateLabel: 'Round live',
+      isWarning: true,
+    },
+  )
+  assert.equal(
+    getMapLibreRoundViewState({
+      gameState: 'ready',
+      remainingSeconds: 0,
+      selectedRoundSeconds: 125,
+    }).timeLabel,
+    '02:05',
+  )
+})
+
+test('target HUD view state preserves rarity, score data, and chase state', () => {
+  const viewState = getMapLibreTargetViewState(
+    REAL_TARGET,
+    REAL_TARGET.id,
+    null,
+    NOW,
+  )
+
+  assert.equal(viewState.rarityClassName, 'rarity-rare')
+  assert.equal(viewState.remainingSeconds, 13)
+  assert.equal(viewState.isChased, true)
+  assert.equal(viewState.isRouting, false)
+  assert.equal(viewState.statusLabel, 'Chasing')
+  assert.equal(REAL_TARGET.score, 30)
+})
+
+test('HUD interactions stop at the shell and target callbacks run once', () => {
+  let propagationStops = 0
+  let targetClicks = 0
+  const event = {
+    stopPropagation() {
+      propagationStops += 1
+    },
+  }
+
+  stopMapLibreHudEvent(event)
+  handleMapLibreHudTargetClick(event, REAL_TARGET, (target) => {
+    targetClicks += 1
+    assert.equal(target, REAL_TARGET)
+  })
+
+  assert.equal(propagationStops, 2)
+  assert.equal(targetClicks, 1)
+})
+
+test('target collapse remains local presentation state and keeps target props mounted', () => {
+  const targetPanelSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreTargetPanel.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(targetPanelSource, /useState\(false\)/)
+  assert.match(targetPanelSource, /aria-expanded=\{!isCollapsed\}/)
+  assert.match(targetPanelSource, /remainingTargets\.map/)
+  assert.doesNotMatch(targetPanelSource, /setTargets/)
+  assert.doesNotMatch(targetPanelSource, /useEffect/)
+})
+
+test('destination sheet delegates Confirm and Cancel to existing callbacks', () => {
+  const destinationSheetSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreDestinationSheet.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const gameHudSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreGameHud.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(destinationSheetSource, /onClick=\{onConfirm\}/)
+  assert.match(destinationSheetSource, /onClick=\{onCancel\}/)
+  assert.match(destinationSheetSource, /'Confirm'/)
+  assert.match(destinationSheetSource, />\s*Cancel\s*</)
+  assert.match(gameHudSource, /gameplay\.handleConfirmPendingMove/)
+  assert.match(gameHudSource, /gameplay\.clearPendingDestination/)
+})
+
+test('HUD remains presentational and MapLibre controls remain usable', () => {
+  const hudSources = [
+    'MapLibreGameHud.jsx',
+    'MapLibreTargetPanel.jsx',
+    'MapLibreDestinationSheet.jsx',
+    'MapLibreRecentCatchesDrawer.jsx',
+    'MapLibreSessionControls.jsx',
+    'MapLibreDevelopmentControls.jsx',
+  ].map((fileName) =>
+    readFileSync(
+      new URL(`../src/components/maplibre/${fileName}`, import.meta.url),
+      'utf8',
+    ),
+  )
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  for (const hudSource of hudSources) {
+    assert.doesNotMatch(hudSource, /fetch\s*\(/)
+    assert.doesNotMatch(hudSource, /osrmClient/)
+    assert.doesNotMatch(hudSource, /gameSessionClient/)
+  }
+
+  assert.match(soloMapSource, /<NavigationControl/)
+  assert.match(soloMapSource, /maplibre-solo-recenter-control/)
+  assert.doesNotMatch(soloMapSource, /\bviewState=/)
+  assert.doesNotMatch(soloMapSource, /\bResizeObserver\b/)
+  assert.doesNotMatch(soloMapSource, /\.resize\s*\(/)
+  assert.doesNotMatch(soloMapSource, /\bworkerUrl\b/)
+})
+
+test('Recent Catches is relocated away from the map-control corner', () => {
+  const gameHudSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreGameHud.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const recentCatchesSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreRecentCatchesDrawer.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(gameHudSource, /maplibre-left-rail/)
+  assert.match(gameHudSource, /<MapLibreRecentCatchesDrawer/)
+  assert.doesNotMatch(gameHudSource, /maplibre-hud-inventory/)
+  assert.doesNotMatch(recentCatchesSource, /bottom-right/)
+})
+
+test('recent-catches open and close state never copies or mutates catch data', () => {
+  const gameHudSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreGameHud.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const recentCatchesSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreRecentCatchesDrawer.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(gameHudSource, /useState\(false\)/)
+  assert.match(gameHudSource, /caughtTargets=\{gameplay\.caughtTargets\}/)
+  assert.match(recentCatchesSource, /caughtTargets\.slice\(0, 3\)/)
+  assert.doesNotMatch(gameHudSource, /setCaughtTargets/)
+  assert.doesNotMatch(recentCatchesSource, /setCaughtTargets/)
+})
+
+test('the chased target is pinned once and remaining targets stay listed', () => {
+  const secondTarget = { ...REAL_TARGET, id: 'target-43', name: 'Roadling' }
+  const targets = [REAL_TARGET, secondTarget]
+
+  assert.deepEqual(
+    getNonChasedMapLibreTargets(targets, REAL_TARGET.id),
+    [secondTarget],
+  )
+  assert.deepEqual(getNonChasedMapLibreTargets(targets, null), targets)
+})
+
+test('Cancel Chase stops HUD propagation and invokes its callback once', () => {
+  let propagationStops = 0
+  let cancelCalls = 0
+
+  handleMapLibreHudCancelChase(
+    {
+      stopPropagation() {
+        propagationStops += 1
+      },
+    },
+    () => {
+      cancelCalls += 1
+    },
+  )
+
+  assert.equal(propagationStops, 1)
+  assert.equal(cancelCalls, 1)
+})
+
+test('MapLibre development controls require the explicit environment flag', () => {
+  assert.equal(resolveMapLibreDebugControlsEnabled(undefined), false)
+  assert.equal(resolveMapLibreDebugControlsEnabled('false'), false)
+  assert.equal(resolveMapLibreDebugControlsEnabled('TRUE'), true)
+  assert.equal(resolveMapLibreDebugControlsEnabled(' true '), true)
+
+  const environmentExample = readFileSync(
+    new URL('../.env.example', import.meta.url),
+    'utf8',
+  )
+  assert.match(environmentExample, /VITE_ENABLE_DEBUG_CONTROLS=false/)
+})
+
+test('normal MapLibre session controls hide API diagnostics and retain End round', () => {
+  const gameHudSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreGameHud.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const sessionControlsSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSessionControls.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const developmentControlsSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreDevelopmentControls.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.doesNotMatch(sessionControlsSource, /backendSession/)
+  assert.doesNotMatch(sessionControlsSource, /backendScore/)
+  assert.doesNotMatch(sessionControlsSource, /API session/)
+  assert.match(sessionControlsSource, /gameplay\.handleEndGame/)
+  assert.match(sessionControlsSource, /End round/)
+  assert.match(
+    gameHudSource,
+    /MAPLIBRE_DEBUG_CONTROLS_ENABLED &&/,
+  )
+  assert.match(developmentControlsSource, /Technical session status/)
+  assert.doesNotMatch(developmentControlsSource, /controls-overlay/)
+  for (const callbackName of [
+    'toggleSpawning',
+    'clearTargets',
+    'resetScore',
+    'resetPlayer',
+    'resetGame',
+    'setSimulationSpeed',
+  ]) {
+    assert.match(developmentControlsSource, new RegExp(`gameplay\\.${callbackName}`))
+  }
+})
+
+test('MapLibre route notifications use the compact noninteractive toast', () => {
+  const soloPageSource = readFileSync(
+    new URL('../src/pages/SoloPlayPage.jsx', import.meta.url),
+    'utf8',
+  )
+  const mapLibreCss = readFileSync(
+    new URL('../src/styles/maplibreSoloGameMap.css', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(soloPageSource, /maplibre-game-toast is-error/)
+  assert.match(mapLibreCss, /\.maplibre-game-toast\s*\{/)
+  assert.match(mapLibreCss, /max-width: min\(360px,/)
+  assert.match(mapLibreCss, /pointer-events: none/)
+  assert.match(mapLibreCss, /@keyframes maplibre-game-toast-life/)
+})
+
+test('Leaflet solo components and multiplayer Leaflet map stay isolated', () => {
+  const soloPageSource = readFileSync(
+    new URL('../src/pages/SoloPlayPage.jsx', import.meta.url),
+    'utf8',
+  )
+  const roomPageSource = readFileSync(
+    new URL('../src/pages/RoomPlayPage.jsx', import.meta.url),
+    'utf8',
+  )
+
+  for (const legacyComponent of [
+    'MovementStatusPanel',
+    'PlayerHudPanel',
+    'GameSessionPanel',
+    'GameControlsPanel',
+    'TargetInfoPanel',
+    'CaughtInventoryPanel',
+    'MoveConfirmPanel',
+  ]) {
+    assert.match(soloPageSource, new RegExp(`<${legacyComponent}`))
+  }
+
+  assert.match(roomPageSource, /<GameMap/)
+  assert.doesNotMatch(roomPageSource, /MapLibre/)
+})
+
+test('Common, Rare, and Legendary targets derive distinct animation classes', () => {
+  const rarityExpectations = [
+    ['common', SOLO_TARGET_ANIMATION_CLASS_NAMES.COMMON],
+    ['Rare', SOLO_TARGET_ANIMATION_CLASS_NAMES.RARE],
+    ['LEGENDARY', SOLO_TARGET_ANIMATION_CLASS_NAMES.LEGENDARY],
+  ]
+
+  for (const [rarity, expectedAnimationClass] of rarityExpectations) {
+    const viewState = getSoloTargetMarkerViewState(
+      { ...REAL_TARGET, rarity },
+      null,
+      null,
+      NOW,
+    )
+
+    assert.equal(viewState.animationClassName, expectedAnimationClass)
+    assert.match(viewState.className, new RegExp(expectedAnimationClass))
+  }
+})
+
+test('rarity identity remains present while chase and routing stay distinct', () => {
+  const chasedViewState = getSoloTargetMarkerViewState(
+    REAL_TARGET,
+    REAL_TARGET.id,
+    null,
+    NOW,
+  )
+  const routingViewState = getSoloTargetMarkerViewState(
+    REAL_TARGET,
+    REAL_TARGET.id,
+    REAL_TARGET.id,
+    NOW,
+  )
+
+  assert.match(chasedViewState.className, /rarity-rare/)
+  assert.match(chasedViewState.className, /animation-rare/)
+  assert.match(chasedViewState.className, /is-chased/)
+  assert.doesNotMatch(chasedViewState.className, /is-routing/)
+  assert.match(routingViewState.className, /rarity-rare/)
+  assert.match(routingViewState.className, /is-chased/)
+  assert.match(routingViewState.className, /is-routing/)
+})
+
+test('the pending destination beacon renders only for a valid destination', () => {
+  const markerSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMarkers.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.ok(getSoloDestinationMarkerViewState({ lat: 28.61, lon: 77.2 }))
+  assert.equal(
+    getSoloDestinationMarkerViewState({ lat: Number.NaN, lon: 77.2 }),
+    null,
+  )
+  assert.match(markerSource, /maplibre-solo-destination-beacon/)
+  assert.match(markerSource, /maplibre-solo-destination-core/)
+  assert.match(markerSource, /pendingDestination &&/)
+})
+
+test('catch feedback remains score-aware and pointer-transparent', () => {
+  const markerSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMarkers.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const mapLibreCss = readFileSync(
+    new URL('../src/styles/maplibreSoloGameMap.css', import.meta.url),
+    'utf8',
+  )
+  const viewState = getCaughtTargetEffectViewState(REAL_TARGET)
+
+  assert.equal(viewState.score, REAL_TARGET.score)
+  assert.match(viewState.className, /rarity-rare/)
+  assert.match(markerSource, /pointerEvents: 'none'/)
+  assert.match(markerSource, /<strong>\+\{viewState\.score\}<\/strong>/)
+  assert.match(
+    mapLibreCss,
+    /\.maplibre-solo-catch-effect,[\s\S]*pointer-events: none/,
+  )
+})
+
+test('continuous MapLibre motion has complete reduced-motion fallbacks', () => {
+  const mapLibreCss = readFileSync(
+    new URL('../src/styles/maplibreSoloGameMap.css', import.meta.url),
+    'utf8',
+  )
+  const finalReducedMotionBlock = mapLibreCss.slice(
+    mapLibreCss.lastIndexOf('@media (prefers-reduced-motion: reduce)'),
+  )
+
+  for (const selector of [
+    '.maplibre-solo-target-visual',
+    '.maplibre-solo-target-ring',
+    '.maplibre-solo-target-lock',
+    '.maplibre-solo-target-routing',
+    '.maplibre-solo-destination-beacon',
+    '.maplibre-round-status.is-warning .maplibre-round-time',
+  ]) {
+    assert.ok(finalReducedMotionBlock.includes(selector))
+  }
+
+  assert.match(finalReducedMotionBlock, /animation: none/)
+  assert.match(finalReducedMotionBlock, /\.maplibre-solo-catch-ring/)
+  assert.match(finalReducedMotionBlock, /opacity: 0\.68/)
+})
+
+test('animations stay on marker inner elements and avoid frame loops', () => {
+  const markerSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMarkers.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const mapLibreCss = readFileSync(
+    new URL('../src/styles/maplibreSoloGameMap.css', import.meta.url),
+    'utf8',
+  )
+  const projectPackage = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  )
+
+  assert.match(markerSource, /maplibre-solo-target-visual/)
+  assert.match(
+    mapLibreCss,
+    /\.maplibre-solo-target\.animation-common \.maplibre-solo-target-visual/,
+  )
+  assert.doesNotMatch(
+    mapLibreCss,
+    /\.maplibregl-marker[^}]*animation/,
+  )
+  assert.doesNotMatch(markerSource, /requestAnimationFrame/)
+  assert.doesNotMatch(mapLibreCss, /requestAnimationFrame/)
+  assert.equal(projectPackage.dependencies['framer-motion'], undefined)
+  assert.equal(projectPackage.dependencies['react-spring'], undefined)
+  assert.equal(projectPackage.dependencies['animejs'], undefined)
+})
+
+test('HUD value feedback remounts only value spans, never the map', () => {
+  const gameHudSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreGameHud.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const targetPanelSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreTargetPanel.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(gameHudSource, /key=\{`score-\$\{score\}`\}/)
+  assert.match(gameHudSource, /key=\{`caught-\$\{caughtCount\}`\}/)
+  assert.match(targetPanelSource, /key=\{`targets-\$\{targets\.length\}`\}/)
+  assert.doesNotMatch(soloMapSource, /\bkey=/)
+  assert.doesNotMatch(gameHudSource, /requestAnimationFrame/)
 })

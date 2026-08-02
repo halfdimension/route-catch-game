@@ -11,6 +11,13 @@ import {
 
 export const SOLO_RECENTER_MIN_ZOOM = 11
 
+export const SOLO_TARGET_ANIMATION_CLASS_NAMES = Object.freeze({
+  COMMON: 'animation-common',
+  RARE: 'animation-rare',
+  LEGENDARY: 'animation-legendary',
+  UNKNOWN: 'animation-common',
+})
+
 export const SOLO_MAP_INTERACTION_PROPS = Object.freeze({
   interactive: true,
   cooperativeGestures: false,
@@ -119,12 +126,17 @@ export function getSoloTargetMarkerViewState(
     isRouting: target?.id === routingTargetId,
     now,
   })
+  const animationClassName =
+    SOLO_TARGET_ANIMATION_CLASS_NAMES[
+      String(target?.rarity ?? '').trim().toUpperCase()
+    ] || SOLO_TARGET_ANIMATION_CLASS_NAMES.UNKNOWN
 
   return {
     ...viewModel,
     mapPosition,
+    animationClassName,
     className:
-      `maplibre-solo-target ${viewModel.rarityClassName}` +
+      `maplibre-solo-target ${viewModel.rarityClassName} ${animationClassName}` +
       viewModel.chaseClassName,
   }
 }

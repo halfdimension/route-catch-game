@@ -67,7 +67,9 @@ function MapLibreSoloDestinationMarker({ position }) {
         title={viewState.title}
         aria-label={viewState.title}
       >
-        <span aria-hidden="true" />
+        <span className="maplibre-solo-destination-beacon" aria-hidden="true" />
+        <span className="maplibre-solo-destination-stem" aria-hidden="true" />
+        <span className="maplibre-solo-destination-core" aria-hidden="true" />
       </div>
     </Marker>
   )
@@ -106,9 +108,13 @@ function MapLibreSoloTargetMarker({
         aria-label={viewState.ariaLabel}
         aria-pressed={viewState.isChased}
       >
-        <span className="maplibre-solo-target-ring" aria-hidden="true" />
-        <span className="maplibre-solo-target-core" aria-hidden="true">
-          {target.symbol}
+        <span className="maplibre-solo-target-visual" aria-hidden="true">
+          <span className="maplibre-solo-target-ring" />
+          <span className="maplibre-solo-target-core">
+            {target.symbol}
+          </span>
+          <span className="maplibre-solo-target-lock" />
+          <span className="maplibre-solo-target-routing" />
         </span>
         <span className="maplibre-solo-target-card" aria-hidden="true">
           <span className="maplibre-solo-target-heading">
@@ -150,7 +156,8 @@ function MapLibreCaughtTargetEffect({ caughtTarget }) {
       style={{ zIndex: 5, pointerEvents: 'none' }}
     >
       <span className={viewState.className} aria-hidden="true">
-        <span className="maplibre-solo-catch-ring" />
+        <span className="maplibre-solo-catch-ring is-primary" />
+        <span className="maplibre-solo-catch-ring is-secondary" />
         <strong>+{viewState.score}</strong>
       </span>
     </Marker>
