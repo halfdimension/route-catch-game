@@ -1,35 +1,68 @@
+import { lazy, Suspense } from 'react'
 import CatchToast from '../components/CatchToast'
 import CaughtInventoryPanel from '../components/CaughtInventoryPanel'
 import GameControlsPanel from '../components/GameControlsPanel'
 import GameMap from '../components/GameMap'
 import GameSessionPanel from '../components/GameSessionPanel'
+import MapLibreMapErrorBoundary from '../components/maplibre/MapLibreMapErrorBoundary'
 import MovementStatusPanel from '../components/MovementStatusPanel'
 import MoveConfirmPanel from '../components/MoveConfirmPanel'
 import PlayerHudPanel from '../components/PlayerHudPanel'
 import RoundSummaryPanel from '../components/RoundSummaryPanel'
 import TargetInfoPanel from '../components/TargetInfoPanel'
 import { MAX_SIMULATION_SPEED } from '../config/gameConfig'
+import {
+  SOLO_MAP_RENDERER,
+  SOLO_MAP_RENDERERS,
+} from '../config/soloMapRenderer'
+
+const MapLibreSoloGameMap = lazy(
+  () => import('../components/maplibre/MapLibreSoloGameMap'),
+)
 
 function SoloPlayPage({ gameplay }) {
+  const soloMapProps = {
+    playerPosition: gameplay.playerPosition,
+    pendingDestination: gameplay.pendingDestination,
+    routeCoordinates: gameplay.routeCoordinates,
+    targets: gameplay.targets,
+    caughtTarget: gameplay.catchToastTarget,
+    chasedTargetId: gameplay.chasedTargetId,
+    routingTargetId: gameplay.routingTargetId,
+    playerName: gameplay.effectivePlayerName,
+    onMapClick: gameplay.handleMapClick,
+    onTargetClick: gameplay.handleTargetClick,
+  }
+
   return (
     <main className="game-shell">
-      <GameMap
-        playerPosition={gameplay.playerPosition}
-        pendingDestination={gameplay.pendingDestination}
-        routeCoordinates={gameplay.routeCoordinates}
-        targets={gameplay.targets}
-        sharedRoomCreatures={[]}
-        caughtTarget={gameplay.catchToastTarget}
-        chasedTargetId={gameplay.chasedTargetId}
-        routingTargetId={gameplay.routingTargetId}
-        chasedSharedRoomCreatureId={null}
-        routingSharedRoomCreatureId={null}
-        playerName={gameplay.effectivePlayerName}
-        otherPlayers={[]}
-        onMapClick={gameplay.handleMapClick}
-        onTargetClick={gameplay.handleTargetClick}
-        onSharedRoomCreatureCatch={gameplay.handleSharedRoomCreatureCatch}
-      />
+      {SOLO_MAP_RENDERER === SOLO_MAP_RENDERERS.MAPLIBRE ? (
+        <MapLibreMapErrorBoundary>
+          <Suspense
+            fallback={(
+              <div
+                className="game-map maplibre-solo-load-fallback"
+                role="status"
+              >
+                Loading MapLibre renderer…
+              </div>
+            )}
+          >
+            <MapLibreSoloGameMap {...soloMapProps} />
+          </Suspense>
+        </MapLibreMapErrorBoundary>
+      ) : (
+        <GameMap
+          {...soloMapProps}
+          sharedRoomCreatures={[]}
+          chasedSharedRoomCreatureId={null}
+          routingSharedRoomCreatureId={null}
+          otherPlayers={[]}
+          onSharedRoomCreatureCatch={
+            gameplay.handleSharedRoomCreatureCatch
+          }
+        />
+      )}
 
       {gameplay.routeError && (
         <div className="route-status route-error">{gameplay.routeError}</div>

@@ -1,6 +1,6 @@
 import { DomEvent, divIcon } from 'leaflet'
 import { Marker, Tooltip } from 'react-leaflet'
-import { getRarityClassName } from '../utils/rarityStyles'
+import { getTargetMarkerViewModel } from './targetMarkerViewModel'
 
 const TARGET_ICON_SIZE = 44
 const TARGET_ICON_ANCHOR = TARGET_ICON_SIZE / 2
@@ -19,33 +19,13 @@ function escapeHtml(value) {
   )
 }
 
-function getRemainingSeconds(target) {
-  return Math.max(0, Math.ceil((target.expiresAt - Date.now()) / 1000))
-}
-
-function formatScore(score) {
-  return Number.isFinite(Number(score)) ? Number(score) : 0
-}
-
-function formatValue(value, fallback = 'Unknown') {
-  const text = String(value ?? '').trim()
-
-  return text || fallback
-}
-
 function TargetMarker({ target, onClick, isChased, isRouting }) {
-  const rarityClassName = getRarityClassName(target.rarity)
-  const rarityLabel = formatValue(target.rarity)
-  const difficultyLabel = isRouting
-    ? 'Routing'
-    : isChased
-      ? 'Chasing'
-      : formatValue(target.difficulty)
-  const chaseClassName = isChased
-    ? ` is-chased${isRouting ? ' is-routing' : ''}`
-    : ''
+  const viewModel = getTargetMarkerViewModel(target, {
+    isChased,
+    isRouting,
+  })
   const icon = divIcon({
-    className: `target-creature-marker ${rarityClassName}${chaseClassName}`,
+    className: viewModel.markerClassName,
     html: `
       <span class="target-creature-marker-core">
         <span class="target-creature-marker-symbol">${escapeHtml(target.symbol)}</span>
@@ -62,9 +42,7 @@ function TargetMarker({ target, onClick, isChased, isRouting }) {
       pane="creature-marker-pane"
       bubblingMouseEvents={false}
       zIndexOffset={400}
-      title={`${target.name}, ${target.rarity} target${
-        isChased ? ', currently chased' : ''
-      }`}
+      title={viewModel.title}
       eventHandlers={{
         click(event) {
           DomEvent.stop(event.originalEvent)
@@ -73,19 +51,15 @@ function TargetMarker({ target, onClick, isChased, isRouting }) {
       }}
     >
       <Tooltip
-        className={`creature-hover-tooltip ${rarityClassName}`}
+        className={`creature-hover-tooltip ${viewModel.rarityClassName}`}
         direction="top"
         offset={[0, -18]}
         opacity={1}
       >
         <span
-          className={`creature-hover-card ${rarityClassName}`}
+          className={`creature-hover-card ${viewModel.rarityClassName}`}
           style={{ '--creature-rarity-color': target.color }}
-          aria-label={`${target.name}: ${rarityLabel}, ${formatScore(
-            target.score,
-          )} points, ${getRemainingSeconds(
-            target,
-          )} seconds remaining, ${difficultyLabel} difficulty`}
+          aria-label={viewModel.ariaLabel}
         >
           <span className="creature-hover-card-header">
             <span className="creature-hover-card-symbol" aria-hidden="true">
@@ -93,21 +67,21 @@ function TargetMarker({ target, onClick, isChased, isRouting }) {
             </span>
             <span className="creature-hover-card-title">
               <strong>{target.name}</strong>
-              <span>{rarityLabel}</span>
+              <span>{viewModel.rarityLabel}</span>
             </span>
           </span>
           <span className="creature-hover-card-grid">
             <span>
               <span>Score</span>
-              <strong>{formatScore(target.score)}</strong>
+              <strong>{viewModel.score}</strong>
             </span>
             <span>
               <span>Time</span>
-              <strong>{getRemainingSeconds(target)}s</strong>
+              <strong>{viewModel.remainingSeconds}s</strong>
             </span>
             <span>
               <span>Difficulty</span>
-              <strong>{difficultyLabel}</strong>
+              <strong>{viewModel.difficultyLabel}</strong>
             </span>
           </span>
         </span>
