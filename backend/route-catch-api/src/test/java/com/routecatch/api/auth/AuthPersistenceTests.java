@@ -17,6 +17,9 @@ import com.routecatch.api.auth.persistence.UserRepository;
 import com.routecatch.api.game.persistence.CaughtCreatureRepository;
 import com.routecatch.api.game.persistence.GameSessionEntity;
 import com.routecatch.api.game.persistence.GameSessionRepository;
+import com.routecatch.api.multiplayer.room.round.persistence.GameRoundPlayerCatchRepository;
+import com.routecatch.api.multiplayer.room.round.persistence.GameRoundPlayerRepository;
+import com.routecatch.api.multiplayer.room.round.persistence.GameRoundRepository;
 
 @SpringBootTest
 class AuthPersistenceTests {
@@ -30,8 +33,20 @@ class AuthPersistenceTests {
 	@Autowired
 	private CaughtCreatureRepository caughtCreatureRepository;
 
+	@Autowired
+	private GameRoundPlayerCatchRepository roundCatchRepository;
+
+	@Autowired
+	private GameRoundPlayerRepository roundPlayerRepository;
+
+	@Autowired
+	private GameRoundRepository roundRepository;
+
 	@BeforeEach
 	void clearGameData() {
+		roundCatchRepository.deleteAll();
+		roundPlayerRepository.deleteAll();
+		roundRepository.deleteAll();
 		caughtCreatureRepository.deleteAll();
 		gameSessionRepository.deleteAll();
 		userRepository.deleteAll();
