@@ -26,9 +26,11 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.scheduling.TaskScheduler;
 
 import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureInstance;
@@ -211,7 +213,7 @@ class RoomRoundFinalizationServiceTests {
 	}
 
 	@Test
-	void gameEndedFailureLeavesCommittedStateAndDuplicateRetriesPublicationOnly() {
+	void gameEndedFailureLeavesCommittedStateAndAutonomouslyRetriesPublicationOnly() {
 		Fixture fixture = fixture();
 		fixture.start();
 		UUID roundId = fixture.room.getGameState().getRoundId();
@@ -219,9 +221,8 @@ class RoomRoundFinalizationServiceTests {
 			throw new RuntimeException("transport failure");
 		};
 
-		assertThrows(
-			RuntimeException.class,
-			() -> fixture.finalizeRound(RoundEndReason.HOST_ENDED)
+		FinalizedRoomRound finalized = fixture.finalizeRound(
+			RoundEndReason.HOST_ENDED
 		);
 
 		assertEquals(RoomGameStatus.ENDED, fixture.room.getGameState().getStatus());
@@ -229,18 +230,15 @@ class RoomRoundFinalizationServiceTests {
 			fixture.room.getRoomCode(),
 			roundId
 		).orElseThrow();
+		assertSame(finalized, stored);
 		assertTrue(fixture.publisher.events.isEmpty());
+		assertEquals(1, fixture.publicationService.pendingPublicationCount());
 
 		fixture.publisher.beforePublish = ignored -> {};
-		FinalizedRoomRound retried = fixture.finalizer.finalizeRound(
-			fixture.room.getRoomCode(),
-			roundId,
-			1L,
-			RoundEndReason.HOST_ENDED
-		);
+		fixture.publicationRetryTasks.getFirst().run();
 
-		assertSame(stored, retried);
 		assertEquals(1, fixture.publisher.events.size());
+		assertEquals(0, fixture.publicationService.pendingPublicationCount());
 		verify(fixture.persistence, times(1)).persistIfAbsent(any());
 	}
 
@@ -698,6 +696,20 @@ class RoomRoundFinalizationServiceTests {
 			);
 		});
 		RecordingPublisher publisher = new RecordingPublisher();
+		TaskScheduler taskScheduler = mock(TaskScheduler.class);
+		List<Runnable> publicationRetryTasks = new ArrayList<>();
+		when(taskScheduler.schedule(any(Runnable.class), any(Instant.class)))
+			.thenAnswer(invocation -> {
+				publicationRetryTasks.add(invocation.getArgument(0));
+				return mock(ScheduledFuture.class);
+			});
+		GameEndedPublicationRetryService publicationService =
+			new GameEndedPublicationRetryService(
+				taskScheduler,
+				new InMemoryRoomEventSequencer(),
+				publisher,
+				Clock.fixed(NOW, ZoneOffset.UTC)
+			);
 		RoomRoundFinalizationService finalizer =
 			new RoomRoundFinalizationService(
 				roomService,
@@ -707,8 +719,7 @@ class RoomRoundFinalizationServiceTests {
 				scoreService,
 				store,
 				persistence,
-				new InMemoryRoomEventSequencer(),
-				publisher,
+				publicationService,
 				Clock.fixed(NOW, ZoneOffset.UTC)
 			);
 		finalizer.registerWithRoomLifecycle();
@@ -729,6 +740,8 @@ class RoomRoundFinalizationServiceTests {
 			store,
 			persistence,
 			publisher,
+			publicationService,
+			publicationRetryTasks,
 			finalizer,
 			room,
 			playerList,
@@ -781,6 +794,8 @@ class RoomRoundFinalizationServiceTests {
 		InMemoryRoomRoundResultStore store,
 		CompletedRoundPersistenceService persistence,
 		RecordingPublisher publisher,
+		GameEndedPublicationRetryService publicationService,
+		List<Runnable> publicationRetryTasks,
 		RoomRoundFinalizationService finalizer,
 		MultiplayerRoom room,
 		List<UserEntity> players,

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.scheduling.TaskScheduler;
 
 import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.auth.persistence.UserRepository;
@@ -119,8 +120,12 @@ class RoomRoundPersistenceIntegrationTests {
 				scoreService,
 				resultStore,
 				persistenceService,
-				new InMemoryRoomEventSequencer(),
-				publisher
+				new GameEndedPublicationRetryService(
+					mock(TaskScheduler.class),
+					new InMemoryRoomEventSequencer(),
+					publisher,
+					java.time.Clock.systemUTC()
+				)
 			);
 		finalizer.registerWithRoomLifecycle();
 

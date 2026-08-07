@@ -20,9 +20,6 @@ import org.springframework.stereotype.Service;
 
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureService;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureSpawnCoordinator;
-import com.routecatch.api.multiplayer.room.event.RoomEventEnvelope;
-import com.routecatch.api.multiplayer.room.event.RoomEventSequencer;
-import com.routecatch.api.multiplayer.room.event.RoomEventType;
 import com.routecatch.api.multiplayer.room.event.RoomGameLifecycleEvent;
 import com.routecatch.api.multiplayer.room.model.MultiplayerRoom;
 import com.routecatch.api.multiplayer.room.model.RoomGameState;
@@ -51,13 +48,8 @@ public class RoomRoundFinalizationService
 	private final RoomScoreService scoreService;
 	private final RoomRoundResultStore resultStore;
 	private final CompletedRoundPersistenceService persistenceService;
-	private final RoomEventSequencer eventSequencer;
-	private final RoomRoundEventPublisher eventPublisher;
+	private final GameEndedPublicationRetryService publicationService;
 	private final Clock clock;
-	private final RecentRoundPublicationTracker publishedRounds =
-		new RecentRoundPublicationTracker(
-			InMemoryRoomRoundResultStore.MAX_RESULTS_PER_ROOM
-		);
 	private final Map<FinalizationKey, FinalizationContext> finalizationContexts =
 		new ConcurrentHashMap<>();
 
@@ -70,8 +62,7 @@ public class RoomRoundFinalizationService
 		RoomScoreService scoreService,
 		RoomRoundResultStore resultStore,
 		CompletedRoundPersistenceService persistenceService,
-		RoomEventSequencer eventSequencer,
-		RoomRoundEventPublisher eventPublisher
+		GameEndedPublicationRetryService publicationService
 	) {
 		this(
 			roomService,
@@ -81,8 +72,7 @@ public class RoomRoundFinalizationService
 			scoreService,
 			resultStore,
 			persistenceService,
-			eventSequencer,
-			eventPublisher,
+			publicationService,
 			Clock.systemUTC()
 		);
 	}
@@ -95,8 +85,7 @@ public class RoomRoundFinalizationService
 		RoomScoreService scoreService,
 		RoomRoundResultStore resultStore,
 		CompletedRoundPersistenceService persistenceService,
-		RoomEventSequencer eventSequencer,
-		RoomRoundEventPublisher eventPublisher,
+		GameEndedPublicationRetryService publicationService,
 		Clock clock
 	) {
 		this.roomService = roomService;
@@ -106,8 +95,7 @@ public class RoomRoundFinalizationService
 		this.scoreService = scoreService;
 		this.resultStore = resultStore;
 		this.persistenceService = persistenceService;
-		this.eventSequencer = eventSequencer;
-		this.eventPublisher = eventPublisher;
+		this.publicationService = publicationService;
 		this.clock = clock;
 	}
 
@@ -182,7 +170,7 @@ public class RoomRoundFinalizationService
 				expectedRoundId,
 				expectedGeneration
 			);
-			publishGameEnded(existing);
+			publicationService.publish(existing);
 			return existing;
 		}
 
@@ -354,7 +342,7 @@ public class RoomRoundFinalizationService
 				? RoomGameLifecycleEvent.Type.CLOSED
 				: RoomGameLifecycleEvent.Type.STOPPED
 		);
-		publishGameEnded(stored);
+		publicationService.publish(stored);
 		return stored;
 	}
 
@@ -493,37 +481,6 @@ public class RoomRoundFinalizationService
 		return snapshot.caughtCreatures().stream()
 			.mapToInt(CaughtCreatureRecord::scoreAwarded)
 			.sum();
-	}
-
-	private void publishGameEnded(FinalizedRoomRound result) {
-		UUID roundId = result.publicResult().roundId();
-		String roomCode = result.publicResult().roomCode();
-
-		if (publishedRounds.isPublished(roomCode, roundId)) {
-			return;
-		}
-
-		PublicRoundResult payload = result.publicResult();
-		try {
-			eventPublisher.publish(new RoomEventEnvelope<>(
-				UUID.randomUUID(),
-				payload.roomCode(),
-				eventSequencer.next(payload.roomCode()),
-				RoomEventType.GAME_ENDED,
-				Instant.now(clock),
-				payload
-			));
-		} catch (RuntimeException exception) {
-			LOGGER.error(
-				"GAME_ENDED publication failed roomCode={} roundId={} generation={} failureType={}",
-				payload.roomCode(),
-				roundId,
-				result.generation(),
-				exception.getClass().getSimpleName()
-			);
-			throw exception;
-		}
-		publishedRounds.markPublished(roomCode, roundId);
 	}
 
 	boolean hasFinalizationContext(
