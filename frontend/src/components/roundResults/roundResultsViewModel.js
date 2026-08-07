@@ -33,6 +33,16 @@ export function getRoundResultsActions({
   }
 }
 
+export function getRoundResultsModalControls({ actions, historical }) {
+  return {
+    showClose: Boolean(historical),
+    showPlayAgain: Boolean(!historical && actions.showPlayAgain),
+    showReturnToLobby: !historical,
+    showViewMap: !historical,
+    showWaitingForHost: Boolean(!historical && actions.showWaitingForHost),
+  }
+}
+
 export async function playAgainAndClear({ onPlayAgain, clearResult }) {
   const didStart = await onPlayAgain()
 
