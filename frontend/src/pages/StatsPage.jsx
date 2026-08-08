@@ -1,4 +1,5 @@
 import GameHistoryPanel from '../components/GameHistoryPanel'
+import MultiplayerRoundHistoryPanel from '../components/MultiplayerRoundHistoryPanel'
 import PlayerStatsPanel from '../components/PlayerStatsPanel'
 import { useAuth } from '../context/authContextCore'
 
@@ -38,6 +39,15 @@ function StatsPage({ activeSessionId, playerName, refreshVersion }) {
           />
         </section>
       </div>
+      <section className="page-panel multiplayer-history-section">
+        <MultiplayerRoundHistoryPanel
+          authIdentity={currentUser?.userId}
+          isAuthenticated={isAuthenticated}
+          onAuthExpired={logout}
+          refreshVersion={refreshVersion}
+          token={token}
+        />
+      </section>
     </main>
   )
 }

@@ -4,13 +4,19 @@ import PersonalResultSummary from './PersonalResultSummary'
 import RaritySummary from './RaritySummary'
 import RoundEndReason from './RoundEndReason'
 import RoundLeaderboard from './RoundLeaderboard'
+import { restoreRoundResultsFocus } from './roundResultsFocus'
 import {
   createRoundResultsViewModel,
   getRoundResultsActions,
+  getRoundResultsModalControls,
   returnToRoundLobby,
 } from './roundResultsViewModel'
 
-function getErrorDetail(error) {
+function getErrorDetail(error, historical) {
+  if (historical) {
+    return error?.message || 'The historical result is temporarily unavailable.'
+  }
+
   if (error?.status === 403) {
     return `403 · ${error.message}`
   }
@@ -34,12 +40,16 @@ function RoundResultsModal({
   onRetry,
   onReturnToLobby,
   onPlayAgain,
+  historical = false,
+  historicalContext,
+  focusFallbackRef,
 }) {
   const closeButtonRef = useRef(null)
   const dialogRef = useRef(null)
 
   useEffect(() => {
     const previouslyFocusedElement = document.activeElement
+    const fallbackElement = focusFallbackRef?.current
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     closeButtonRef.current?.focus()
@@ -81,9 +91,12 @@ function RoundResultsModal({
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
       document.body.style.overflow = previousOverflow
-      previouslyFocusedElement?.focus?.()
+      restoreRoundResultsFocus(
+        previouslyFocusedElement,
+        fallbackElement,
+      )
     }
-  }, [onClose])
+  }, [focusFallbackRef, onClose])
 
   const viewModel = createRoundResultsViewModel(result)
   const {
@@ -100,6 +113,7 @@ function RoundResultsModal({
     result,
     canPlayAgain,
   })
+  const controls = getRoundResultsModalControls({ actions, historical })
   const showLoading = !result && (isLoading || isFinalizing)
 
   return (
@@ -119,17 +133,29 @@ function RoundResultsModal({
       >
         <header className="round-results-header">
           <div>
-            <span className="round-results-eyebrow">Final standings</span>
+            <span className="round-results-eyebrow">
+              {historical ? 'Saved round' : 'Final standings'}
+            </span>
             <h1 id="round-results-title">Round Complete</h1>
             {publicResult && (
               <RoundEndReason reason={publicResult.endReason} />
+            )}
+            {historical && historicalContext && (
+              <p className="round-results-history-context">
+                Room {historicalContext.roomCode}
+                {historicalContext.completedAt
+                  ? ` · ${historicalContext.completedAt}`
+                  : ''}
+              </p>
             )}
           </div>
           <button
             ref={closeButtonRef}
             type="button"
             className="round-results-close"
-            aria-label="Close results and view map"
+            aria-label={historical
+              ? 'Close historical result'
+              : 'Close results and view map'}
             onClick={onClose}
           >
             ×
@@ -141,8 +167,12 @@ function RoundResultsModal({
             <div className="round-results-loading" role="status">
               <span className="round-results-spinner" aria-hidden="true" />
               <div>
-                <strong>Finalizing round</strong>
-                <p>Loading the authoritative final results…</p>
+                <strong>{historical ? 'Loading saved result' : 'Finalizing round'}</strong>
+                <p>
+                  {historical
+                    ? 'Loading the durable final result…'
+                    : 'Loading the authoritative final results…'}
+                </p>
               </div>
             </div>
           )}
@@ -151,8 +181,12 @@ function RoundResultsModal({
             <div className="round-results-failure" role="alert">
               <span aria-hidden="true">!</span>
               <div>
-                <h2>Unable to load final results</h2>
-                <p>{getErrorDetail(error)}</p>
+                <h2>
+                  {historical
+                    ? 'Unable to load historical result'
+                    : 'Unable to load final results'}
+                </h2>
+                <p>{getErrorDetail(error, historical)}</p>
                 <button type="button" onClick={onRetry} disabled={isLoading}>
                   {isLoading ? 'Retrying…' : 'Retry'}
                 </button>
@@ -178,29 +212,41 @@ function RoundResultsModal({
         </div>
 
         <footer className="round-results-actions">
-          <button type="button" onClick={onClose}>
-            View Map
-          </button>
-          <button
-            type="button"
-            onClick={() => returnToRoundLobby(onReturnToLobby)}
-          >
-            Return to Lobby
-          </button>
-          {actions.showPlayAgain && (
-            <button
-              type="button"
-              className="primary-button"
-              onClick={onPlayAgain}
-              disabled={isActionPending}
-            >
-              {isActionPending ? 'Starting…' : 'Play Again'}
+          {controls.showClose ? (
+            <button type="button" className="primary-button" onClick={onClose}>
+              Close
             </button>
-          )}
-          {actions.showWaitingForHost && (
-            <p className="round-results-waiting">
-              Waiting for the host to start the next round
-            </p>
+          ) : (
+            <>
+              {controls.showViewMap && (
+                <button type="button" onClick={onClose}>
+                  View Map
+                </button>
+              )}
+              {controls.showReturnToLobby && (
+                <button
+                  type="button"
+                  onClick={() => returnToRoundLobby(onReturnToLobby)}
+                >
+                  Return to Lobby
+                </button>
+              )}
+              {controls.showPlayAgain && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={onPlayAgain}
+                  disabled={isActionPending}
+                >
+                  {isActionPending ? 'Starting…' : 'Play Again'}
+                </button>
+              )}
+              {controls.showWaitingForHost && (
+                <p className="round-results-waiting">
+                  Waiting for the host to start the next round
+                </p>
+              )}
+            </>
           )}
         </footer>
       </div>

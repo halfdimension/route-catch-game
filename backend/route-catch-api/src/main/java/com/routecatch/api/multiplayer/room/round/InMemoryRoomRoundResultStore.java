@@ -11,7 +11,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class InMemoryRoomRoundResultStore implements RoomRoundResultStore {
 
-	private static final int MAX_RESULTS_PER_ROOM = 100;
+	static final int MAX_RESULTS_PER_ROOM = 100;
 	private final Map<RoundKey, FinalizedRoomRound> results =
 		new ConcurrentHashMap<>();
 	private final Map<String, UUID> latestRoundByRoom = new ConcurrentHashMap<>();

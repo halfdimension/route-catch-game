@@ -303,6 +303,10 @@ public class MultiplayerRoomService implements RoomRoundAccess {
 
 	private void autoEndExpiredGame(MultiplayerRoom room, Instant now) {
 		RoomGameState gameState = room.getGameState();
+		if (gameState.getStatus() == RoomGameStatus.FINALIZING) {
+			finalizeOrLegacy(room, RoundEndReason.TIME_EXPIRED);
+			return;
+		}
 
 		if (
 			gameState.getStatus() == RoomGameStatus.RUNNING &&

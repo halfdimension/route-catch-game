@@ -1,6 +1,7 @@
 package com.routecatch.api.multiplayer.room.round;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -9,6 +10,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,8 +26,11 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.scheduling.TaskScheduler;
 
 import com.routecatch.api.auth.persistence.UserEntity;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureInstance;
@@ -32,10 +40,14 @@ import com.routecatch.api.multiplayer.room.dto.CreateRoomRequest;
 import com.routecatch.api.multiplayer.room.dto.StartRoomGameRequest;
 import com.routecatch.api.multiplayer.room.event.InMemoryRoomEventSequencer;
 import com.routecatch.api.multiplayer.room.event.RoomEventEnvelope;
+import com.routecatch.api.multiplayer.room.event.RoomGameLifecycleEvent;
 import com.routecatch.api.multiplayer.room.model.MultiplayerRoom;
 import com.routecatch.api.multiplayer.room.model.MultiplayerRoomStatus;
 import com.routecatch.api.multiplayer.room.model.RoomGameStatus;
 import com.routecatch.api.multiplayer.room.movement.service.RoomMovementRoundControl;
+import com.routecatch.api.multiplayer.room.round.persistence.CompletedRoundPersistenceCommand;
+import com.routecatch.api.multiplayer.room.round.persistence.CompletedRoundPersistenceOutcome;
+import com.routecatch.api.multiplayer.room.round.persistence.CompletedRoundPersistenceService;
 import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
 import com.routecatch.api.multiplayer.room.service.RoomScoreService;
 
@@ -86,6 +98,20 @@ class RoomRoundFinalizationServiceTests {
 			fixture.store.find(event.roomCode(), event.payload().roundId())
 				.isPresent()
 		);
+		when(fixture.persistence.persistIfAbsent(any())).thenAnswer(invocation -> {
+			CompletedRoundPersistenceCommand command = invocation.getArgument(0);
+			assertEquals(60, command.durationSeconds());
+			assertEquals(
+				RoomGameStatus.FINALIZING,
+				fixture.room.getGameState().getStatus()
+			);
+			assertFalse(fixture.store.find(
+				fixture.room.getRoomCode(),
+				roundId
+			).isPresent());
+			assertTrue(fixture.publisher.events.isEmpty());
+			return persistenceOutcome(command);
+		});
 
 		FinalizedRoomRound first = fixture.finalizeRound(
 			RoundEndReason.HOST_ENDED
@@ -111,6 +137,315 @@ class RoomRoundFinalizationServiceTests {
 			1L,
 			"FINALIZING"
 		);
+		verify(fixture.persistence, times(1)).persistIfAbsent(any());
+	}
+
+	@Test
+	void persistenceFailureKeepsExactFrozenRoundRetryableWithoutCompletionEvents() {
+		Fixture fixture = fixture();
+		fixture.start();
+		UUID roundId = fixture.room.getGameState().getRoundId();
+		AtomicBoolean persistenceAvailable = new AtomicBoolean(false);
+		when(fixture.persistence.persistIfAbsent(any())).thenAnswer(invocation -> {
+			if (!persistenceAvailable.get()) {
+				throw new RuntimeException("database unavailable");
+			}
+			return persistenceOutcome(invocation.getArgument(0));
+		});
+
+		RoundLifecycleException failure = assertThrows(
+			RoundLifecycleException.class,
+			() -> fixture.finalizeRound(RoundEndReason.HOST_ENDED)
+		);
+
+		assertEquals("ROUND_PERSISTENCE_UNAVAILABLE", failure.getErrorCode());
+		assertEquals(RoomGameStatus.FINALIZING, fixture.room.getGameState().getStatus());
+		assertFalse(fixture.store.find(fixture.room.getRoomCode(), roundId).isPresent());
+		assertTrue(fixture.publisher.events.isEmpty());
+		assertEquals(
+			List.of(
+				RoomGameLifecycleEvent.Type.STARTED,
+				RoomGameLifecycleEvent.Type.FINALIZING
+			),
+			fixture.lifecycleEvents.stream().map(RoomGameLifecycleEvent::type).toList()
+		);
+		AtomicBoolean gameplayMutationRan = new AtomicBoolean(false);
+		assertThrows(
+			RoundLifecycleException.class,
+			() -> fixture.roomService.withCurrentRoundRunning(
+				fixture.room.getRoomCode(),
+				1L,
+				() -> gameplayMutationRan.getAndSet(true)
+			)
+		);
+		assertFalse(gameplayMutationRan.get());
+		assertEquals(RoomGameStatus.FINALIZING, fixture.room.getGameState().getStatus());
+
+		persistenceAvailable.set(true);
+		FinalizedRoomRound retried = fixture.finalizer.finalizeRound(
+			fixture.room.getRoomCode(),
+			roundId,
+			1L,
+			RoundEndReason.TIME_EXPIRED
+		);
+
+		assertEquals(roundId, retried.publicResult().roundId());
+		assertEquals(RoundEndReason.HOST_ENDED, retried.publicResult().endReason());
+		assertEquals(NOW, retried.publicResult().endedAt());
+		assertEquals(RoomGameStatus.ENDED, fixture.room.getGameState().getStatus());
+		assertSame(retried, fixture.store.find(
+			fixture.room.getRoomCode(),
+			roundId
+		).orElseThrow());
+		assertEquals(1, fixture.publisher.events.size());
+		verify(fixture.movement, times(1)).freezeRound(
+			fixture.room.getRoomCode(),
+			roundId,
+			1L,
+			NOW
+		);
+		verify(fixture.spawnCoordinator, times(1)).stop(
+			fixture.room.getRoomCode(),
+			1L,
+			"FINALIZING"
+		);
+		verify(fixture.persistence, times(3)).persistIfAbsent(any());
+	}
+
+	@Test
+	void gameEndedFailureLeavesCommittedStateAndAutonomouslyRetriesPublicationOnly() {
+		Fixture fixture = fixture();
+		fixture.start();
+		UUID roundId = fixture.room.getGameState().getRoundId();
+		fixture.publisher.beforePublish = ignored -> {
+			throw new RuntimeException("transport failure");
+		};
+
+		FinalizedRoomRound finalized = fixture.finalizeRound(
+			RoundEndReason.HOST_ENDED
+		);
+
+		assertEquals(RoomGameStatus.ENDED, fixture.room.getGameState().getStatus());
+		FinalizedRoomRound stored = fixture.store.find(
+			fixture.room.getRoomCode(),
+			roundId
+		).orElseThrow();
+		assertSame(finalized, stored);
+		assertTrue(fixture.publisher.events.isEmpty());
+		assertEquals(1, fixture.publicationService.pendingPublicationCount());
+
+		fixture.publisher.beforePublish = ignored -> {};
+		fixture.publicationRetryTasks.getFirst().run();
+
+		assertEquals(1, fixture.publisher.events.size());
+		assertEquals(0, fixture.publicationService.pendingPublicationCount());
+		verify(fixture.persistence, times(1)).persistIfAbsent(any());
+	}
+
+	@Test
+	void roomClosePersistsBeforeClosingAndPublishingClosed() {
+		Fixture fixture = fixture();
+		fixture.start();
+		when(fixture.persistence.persistIfAbsent(any())).thenAnswer(invocation -> {
+			assertEquals(MultiplayerRoomStatus.IN_PROGRESS, fixture.room.getStatus());
+			assertEquals(RoomGameStatus.FINALIZING, fixture.room.getGameState().getStatus());
+			assertFalse(fixture.lifecycleEvents.stream().anyMatch(event ->
+				event.type() == RoomGameLifecycleEvent.Type.CLOSED
+			));
+			return persistenceOutcome(invocation.getArgument(0));
+		});
+
+		FinalizedRoomRound result = fixture.finalizeRound(
+			RoundEndReason.ROOM_CLOSED
+		);
+
+		assertEquals(RoundEndReason.ROOM_CLOSED, result.publicResult().endReason());
+		assertEquals(MultiplayerRoomStatus.CLOSED, fixture.room.getStatus());
+		assertEquals(
+			RoomGameLifecycleEvent.Type.CLOSED,
+			fixture.lifecycleEvents.getLast().type()
+		);
+	}
+
+	@Test
+	void lastMemberLeavingRunningRoundDefersClosureUntilPersistenceSucceeds() {
+		Fixture fixture = fixture();
+		fixture.start();
+		UUID roundId = fixture.room.getGameState().getRoundId();
+		AtomicBoolean persistenceAvailable = new AtomicBoolean(false);
+		when(fixture.persistence.persistIfAbsent(any())).thenAnswer(invocation -> {
+			assertNotEquals(MultiplayerRoomStatus.CLOSED, fixture.room.getStatus());
+			assertFalse(fixture.store.find(
+				fixture.room.getRoomCode(),
+				roundId
+			).isPresent());
+			if (!persistenceAvailable.get()) {
+				throw new RuntimeException("database unavailable");
+			}
+			return persistenceOutcome(invocation.getArgument(0));
+		});
+
+		RoundLifecycleException failure = assertThrows(
+			RoundLifecycleException.class,
+			() -> fixture.roomService.leaveRoom(
+				fixture.room.getRoomCode(),
+				fixture.players.getFirst()
+			)
+		);
+
+		assertEquals("ROUND_PERSISTENCE_UNAVAILABLE", failure.getErrorCode());
+		assertTrue(fixture.room.getMembers().isEmpty());
+		assertEquals(MultiplayerRoomStatus.IN_PROGRESS, fixture.room.getStatus());
+		assertEquals(RoomGameStatus.FINALIZING, fixture.room.getGameState().getStatus());
+		assertTrue(fixture.finalizer.hasFinalizationContext(
+			fixture.room.getRoomCode(), roundId, 1L
+		));
+		assertTrue(fixture.finalizer.closesRoomAfterFinalization(
+			fixture.room.getRoomCode(), roundId, 1L
+		));
+		assertFalse(fixture.lifecycleEvents.stream().anyMatch(event ->
+			event.type() == RoomGameLifecycleEvent.Type.CLOSED
+		));
+		assertTrue(fixture.publisher.events.isEmpty());
+
+		persistenceAvailable.set(true);
+		fixture.publisher.beforePublish = event -> {
+			assertEquals(MultiplayerRoomStatus.CLOSED, fixture.room.getStatus());
+			assertTrue(fixture.store.find(event.roomCode(), roundId).isPresent());
+		};
+		FinalizedRoomRound result = fixture.finalizer.finalizeRound(
+			fixture.room.getRoomCode(), roundId, 1L, RoundEndReason.TIME_EXPIRED
+		);
+
+		assertEquals(RoundEndReason.ROOM_CLOSED, result.publicResult().endReason());
+		assertEquals(MultiplayerRoomStatus.CLOSED, fixture.room.getStatus());
+		assertEquals(RoomGameStatus.ENDED, fixture.room.getGameState().getStatus());
+		assertFalse(fixture.finalizer.hasFinalizationContext(
+			fixture.room.getRoomCode(), roundId, 1L
+		));
+		assertEquals(1, fixture.publisher.events.size());
+		assertEquals(1, fixture.lifecycleEvents.stream().filter(event ->
+			event.type() == RoomGameLifecycleEvent.Type.CLOSED
+		).count());
+		verify(fixture.persistence, times(2)).persistIfAbsent(any());
+	}
+
+	@Test
+	void lastMemberLeavingWithoutActiveRoundStillClosesImmediately() {
+		Fixture fixture = fixture();
+
+		fixture.roomService.leaveRoom(
+			fixture.room.getRoomCode(),
+			fixture.players.getFirst()
+		);
+
+		assertTrue(fixture.room.getMembers().isEmpty());
+		assertEquals(MultiplayerRoomStatus.CLOSED, fixture.room.getStatus());
+		assertEquals(RoomGameStatus.WAITING, fixture.room.getGameState().getStatus());
+		assertEquals(
+			List.of(RoomGameLifecycleEvent.Type.CLOSED),
+			fixture.lifecycleEvents.stream().map(RoomGameLifecycleEvent::type).toList()
+		);
+		verify(fixture.persistence, never()).persistIfAbsent(any());
+	}
+
+	@Test
+	void closeDuringPendingHostEndPreservesResultAndUpgradesRoomDisposition() {
+		Fixture fixture = fixture();
+		fixture.start();
+		UUID roundId = fixture.room.getGameState().getRoundId();
+		AtomicBoolean persistenceAvailable = new AtomicBoolean(false);
+		when(fixture.persistence.persistIfAbsent(any())).thenAnswer(invocation -> {
+			if (!persistenceAvailable.get()) {
+				throw new RuntimeException("database unavailable");
+			}
+			assertTrue(fixture.finalizer.closesRoomAfterFinalization(
+				fixture.room.getRoomCode(), roundId, 1L
+			));
+			assertEquals(MultiplayerRoomStatus.IN_PROGRESS, fixture.room.getStatus());
+			return persistenceOutcome(invocation.getArgument(0));
+		});
+
+		assertThrows(
+			RoundLifecycleException.class,
+			() -> fixture.finalizeRound(RoundEndReason.HOST_ENDED)
+		);
+		persistenceAvailable.set(true);
+
+		fixture.roomService.closeRoom(
+			fixture.room.getRoomCode(),
+			fixture.players.getFirst()
+		);
+
+		FinalizedRoomRound stored = fixture.store.find(
+			fixture.room.getRoomCode(), roundId
+		).orElseThrow();
+		assertEquals(RoundEndReason.HOST_ENDED, stored.publicResult().endReason());
+		assertEquals(NOW, stored.publicResult().endedAt());
+		assertEquals(MultiplayerRoomStatus.CLOSED, fixture.room.getStatus());
+		assertEquals(RoomGameStatus.ENDED, fixture.room.getGameState().getStatus());
+		assertFalse(fixture.finalizer.hasFinalizationContext(
+			fixture.room.getRoomCode(), roundId, 1L
+		));
+		assertEquals(1, fixture.publisher.events.size());
+		verify(fixture.movement, times(1)).freezeRound(anyString(), any(), anyLong(), any());
+		verify(fixture.persistence, times(2)).persistIfAbsent(any());
+	}
+
+	@Test
+	void movementFreezeFailureCanResumeSameFinalizationContext() {
+		Fixture fixture = fixture();
+		fixture.start();
+		UUID roundId = fixture.room.getGameState().getRoundId();
+		when(fixture.movement.freezeRound(anyString(), any(), anyLong(), any()))
+			.thenThrow(new RuntimeException("movement failure"))
+			.thenReturn(2);
+
+		assertRetryablePreparationFailure(fixture, roundId);
+		fixture.finalizeRound(RoundEndReason.TIME_EXPIRED);
+
+		assertSuccessfulPreparationRetry(fixture, roundId);
+		verify(fixture.movement, times(2)).freezeRound(anyString(), any(), anyLong(), any());
+		verify(fixture.creatureService, times(1)).freezeRound(anyString(), anyLong());
+		verify(fixture.spawnCoordinator, times(1)).stop(anyString(), anyLong(), anyString());
+	}
+
+	@Test
+	void creatureFreezeFailureDoesNotRepeatCompletedMovementFreeze() {
+		Fixture fixture = fixture();
+		fixture.start();
+		UUID roundId = fixture.room.getGameState().getRoundId();
+		when(fixture.creatureService.freezeRound(anyString(), anyLong()))
+			.thenThrow(new RuntimeException("creature failure"))
+			.thenReturn(3);
+
+		assertRetryablePreparationFailure(fixture, roundId);
+		fixture.finalizeRound(RoundEndReason.TIME_EXPIRED);
+
+		assertSuccessfulPreparationRetry(fixture, roundId);
+		verify(fixture.movement, times(1)).freezeRound(anyString(), any(), anyLong(), any());
+		verify(fixture.creatureService, times(2)).freezeRound(anyString(), anyLong());
+		verify(fixture.spawnCoordinator, times(1)).stop(anyString(), anyLong(), anyString());
+	}
+
+	@Test
+	void scoreSnapshotFailureDoesNotRepeatCompletedCleanup() {
+		Fixture fixture = fixture();
+		fixture.start();
+		UUID roundId = fixture.room.getGameState().getRoundId();
+		doThrow(new RuntimeException("snapshot failure"))
+			.doCallRealMethod()
+			.when(fixture.scoreService)
+			.snapshotRound(fixture.room);
+
+		assertRetryablePreparationFailure(fixture, roundId);
+		fixture.finalizeRound(RoundEndReason.TIME_EXPIRED);
+
+		assertSuccessfulPreparationRetry(fixture, roundId);
+		verify(fixture.movement, times(1)).freezeRound(anyString(), any(), anyLong(), any());
+		verify(fixture.creatureService, times(1)).freezeRound(anyString(), anyLong());
+		verify(fixture.spawnCoordinator, times(1)).stop(anyString(), anyLong(), anyString());
+		verify(fixture.scoreService, times(2)).snapshotRound(fixture.room);
 	}
 
 	@Test
@@ -262,13 +597,83 @@ class RoomRoundFinalizationServiceTests {
 		assertEquals(1, fixture.publisher.events.size());
 	}
 
+	@Test
+	void realCompletedRoundCallbackCannotRepublishAfterNewRoundStarts() {
+		Fixture fixture = fixture();
+		fixture.start();
+		UUID firstRoundId = fixture.room.getGameState().getRoundId();
+		long firstGeneration = fixture.room.getGameState().getGeneration();
+		fixture.finalizeRound(RoundEndReason.HOST_ENDED);
+		fixture.start();
+		UUID secondRoundId = fixture.room.getGameState().getRoundId();
+
+		RoundLifecycleException exception = assertThrows(
+			RoundLifecycleException.class,
+			() -> fixture.finalizer.finalizeRound(
+				fixture.room.getRoomCode(),
+				firstRoundId,
+				firstGeneration,
+				RoundEndReason.HOST_ENDED
+			)
+		);
+
+		assertEquals("STALE_ROUND_GENERATION", exception.getErrorCode());
+		assertEquals(secondRoundId, fixture.room.getGameState().getRoundId());
+		assertEquals(2L, fixture.room.getGameState().getGeneration());
+		assertEquals(RoomGameStatus.RUNNING, fixture.room.getGameState().getStatus());
+		assertEquals(1, fixture.publisher.events.size());
+		verify(fixture.persistence, times(1)).persistIfAbsent(any());
+	}
+
+	private void assertRetryablePreparationFailure(
+		Fixture fixture,
+		UUID roundId
+	) {
+		RoundLifecycleException failure = assertThrows(
+			RoundLifecycleException.class,
+			() -> fixture.finalizeRound(RoundEndReason.HOST_ENDED)
+		);
+
+		assertEquals("ROUND_FINALIZATION_UNAVAILABLE", failure.getErrorCode());
+		assertEquals(RoomGameStatus.FINALIZING, fixture.room.getGameState().getStatus());
+		assertEquals(MultiplayerRoomStatus.IN_PROGRESS, fixture.room.getStatus());
+		assertTrue(fixture.finalizer.hasFinalizationContext(
+			fixture.room.getRoomCode(), roundId, 1L
+		));
+		assertFalse(fixture.lifecycleEvents.stream().anyMatch(event ->
+			event.type() == RoomGameLifecycleEvent.Type.STOPPED ||
+				event.type() == RoomGameLifecycleEvent.Type.CLOSED
+		));
+		assertTrue(fixture.publisher.events.isEmpty());
+		verify(fixture.persistence, never()).persistIfAbsent(any());
+	}
+
+	private void assertSuccessfulPreparationRetry(
+		Fixture fixture,
+		UUID roundId
+	) {
+		assertEquals(RoomGameStatus.ENDED, fixture.room.getGameState().getStatus());
+		assertEquals(MultiplayerRoomStatus.OPEN, fixture.room.getStatus());
+		assertTrue(fixture.store.find(
+			fixture.room.getRoomCode(), roundId
+		).isPresent());
+		assertFalse(fixture.finalizer.hasFinalizationContext(
+			fixture.room.getRoomCode(), roundId, 1L
+		));
+		assertEquals(1, fixture.publisher.events.size());
+		verify(fixture.persistence, times(1)).persistIfAbsent(any());
+	}
+
 	private Fixture fixture() {
 		return fixtureWithPlayers(user("host", "Host"));
 	}
 
 	private Fixture fixtureWithPlayers(UserEntity... players) {
-		MultiplayerRoomService roomService = new MultiplayerRoomService();
-		RoomScoreService scoreService = new RoomScoreService(roomService);
+		List<RoomGameLifecycleEvent> lifecycleEvents = new ArrayList<>();
+		MultiplayerRoomService roomService = new MultiplayerRoomService(event ->
+			lifecycleEvents.add((RoomGameLifecycleEvent) event)
+		);
+		RoomScoreService scoreService = spy(new RoomScoreService(roomService));
 		RoomCreatureService creatureService = mock(RoomCreatureService.class);
 		RoomCreatureSpawnCoordinator spawnCoordinator = mock(
 			RoomCreatureSpawnCoordinator.class
@@ -277,7 +682,34 @@ class RoomRoundFinalizationServiceTests {
 			RoomMovementRoundControl.class
 		);
 		InMemoryRoomRoundResultStore store = new InMemoryRoomRoundResultStore();
+		CompletedRoundPersistenceService persistence = mock(
+			CompletedRoundPersistenceService.class
+		);
+		when(persistence.persistIfAbsent(any(
+			CompletedRoundPersistenceCommand.class
+		))).thenAnswer(invocation -> {
+			CompletedRoundPersistenceCommand command = invocation.getArgument(0);
+			return new CompletedRoundPersistenceOutcome(
+				true,
+				UUID.randomUUID(),
+				command.finalizedRound().publicResult().roundId()
+			);
+		});
 		RecordingPublisher publisher = new RecordingPublisher();
+		TaskScheduler taskScheduler = mock(TaskScheduler.class);
+		List<Runnable> publicationRetryTasks = new ArrayList<>();
+		when(taskScheduler.schedule(any(Runnable.class), any(Instant.class)))
+			.thenAnswer(invocation -> {
+				publicationRetryTasks.add(invocation.getArgument(0));
+				return mock(ScheduledFuture.class);
+			});
+		GameEndedPublicationRetryService publicationService =
+			new GameEndedPublicationRetryService(
+				taskScheduler,
+				new InMemoryRoomEventSequencer(),
+				publisher,
+				Clock.fixed(NOW, ZoneOffset.UTC)
+			);
 		RoomRoundFinalizationService finalizer =
 			new RoomRoundFinalizationService(
 				roomService,
@@ -286,8 +718,8 @@ class RoomRoundFinalizationServiceTests {
 				spawnCoordinator,
 				scoreService,
 				store,
-				new InMemoryRoomEventSequencer(),
-				publisher,
+				persistence,
+				publicationService,
 				Clock.fixed(NOW, ZoneOffset.UTC)
 			);
 		finalizer.registerWithRoomLifecycle();
@@ -303,12 +735,27 @@ class RoomRoundFinalizationServiceTests {
 			roomService,
 			scoreService,
 			movement,
+			creatureService,
 			spawnCoordinator,
 			store,
+			persistence,
 			publisher,
+			publicationService,
+			publicationRetryTasks,
 			finalizer,
 			room,
-			playerList
+			playerList,
+			lifecycleEvents
+		);
+	}
+
+	private static CompletedRoundPersistenceOutcome persistenceOutcome(
+		CompletedRoundPersistenceCommand command
+	) {
+		return new CompletedRoundPersistenceOutcome(
+			true,
+			UUID.randomUUID(),
+			command.finalizedRound().publicResult().roundId()
 		);
 	}
 
@@ -342,12 +789,17 @@ class RoomRoundFinalizationServiceTests {
 		MultiplayerRoomService roomService,
 		RoomScoreService scoreService,
 		RoomMovementRoundControl movement,
+		RoomCreatureService creatureService,
 		RoomCreatureSpawnCoordinator spawnCoordinator,
 		InMemoryRoomRoundResultStore store,
+		CompletedRoundPersistenceService persistence,
 		RecordingPublisher publisher,
+		GameEndedPublicationRetryService publicationService,
+		List<Runnable> publicationRetryTasks,
 		RoomRoundFinalizationService finalizer,
 		MultiplayerRoom room,
-		List<UserEntity> players
+		List<UserEntity> players,
+		List<RoomGameLifecycleEvent> lifecycleEvents
 	) {
 
 		private void start() {

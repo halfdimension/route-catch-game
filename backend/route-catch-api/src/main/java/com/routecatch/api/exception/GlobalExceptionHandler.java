@@ -32,6 +32,8 @@ import com.routecatch.api.multiplayer.room.exception.RoomGameAlreadyRunningExcep
 import com.routecatch.api.multiplayer.room.exception.RoomNotFoundException;
 import com.routecatch.api.multiplayer.room.movement.exception.MovementRejectedException;
 import com.routecatch.api.multiplayer.room.round.RoundLifecycleException;
+import com.routecatch.api.multiplayer.room.round.history.InvalidMultiplayerRoundHistoryPaginationException;
+import com.routecatch.api.multiplayer.room.round.history.MultiplayerRoundHistoryUnavailableException;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -293,6 +295,32 @@ public class GlobalExceptionHandler {
 		return errorResponse(
 			exception.getStatus(),
 			exception.getErrorCode(),
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(InvalidMultiplayerRoundHistoryPaginationException.class)
+	public ResponseEntity<ApiErrorResponse> handleInvalidRoundHistoryPagination(
+		InvalidMultiplayerRoundHistoryPaginationException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.BAD_REQUEST,
+			"VALIDATION_ERROR",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(MultiplayerRoundHistoryUnavailableException.class)
+	public ResponseEntity<ApiErrorResponse> handleRoundHistoryUnavailable(
+		MultiplayerRoundHistoryUnavailableException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.INTERNAL_SERVER_ERROR,
+			"ROUND_HISTORY_UNAVAILABLE",
 			exception.getMessage(),
 			request
 		);

@@ -47,7 +47,7 @@ public class MultiplayerRoom {
 			return;
 		}
 
-		transferHostOrClose();
+		transferHost();
 	}
 
 	public boolean isHost(UUID userId) {
@@ -106,7 +106,7 @@ public class MultiplayerRoom {
 		return gameplaySettings;
 	}
 
-	private void transferHostOrClose() {
+	private void transferHost() {
 		members.values().forEach((member) -> member.setHost(false));
 
 		RoomMember nextHost = members.values().stream()
@@ -120,7 +120,6 @@ public class MultiplayerRoom {
 		if (nextHost == null) {
 			hostUserId = null;
 			hostDisplayName = null;
-			close();
 			return;
 		}
 

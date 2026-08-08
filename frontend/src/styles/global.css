@@ -233,6 +233,10 @@ button:focus-visible {
   gap: 12px;
 }
 
+.multiplayer-history-section {
+  margin-top: 12px;
+}
+
 .page-panel .leaderboard-list,
 .page-panel .game-history-sessions,
 .page-panel .game-history-catches ul {
@@ -2551,6 +2555,239 @@ button:focus-visible {
   background: #fef2f2;
 }
 
+.multiplayer-history-panel {
+  min-width: 0;
+  outline: none;
+}
+
+.multiplayer-history-panel:focus-visible {
+  border-radius: 6px;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.24);
+}
+
+.multiplayer-history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.multiplayer-history-header h2 {
+  margin: 0;
+  color: #172033;
+  font-size: 16px;
+}
+
+.multiplayer-history-header p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.multiplayer-history-header > span {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #475569;
+  background: #f1f5f9;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.multiplayer-history-list {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  transition: opacity 120ms ease;
+}
+
+.multiplayer-history-list.is-refreshing {
+  opacity: 0.58;
+  pointer-events: none;
+}
+
+.multiplayer-history-item article {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(400px, 2fr) auto;
+  gap: 14px;
+  align-items: center;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.multiplayer-history-round {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.multiplayer-history-round > span,
+.multiplayer-history-stats dt {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.multiplayer-history-round h3 {
+  overflow: hidden;
+  margin: 0;
+  color: #172033;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiplayer-history-round time,
+.multiplayer-history-round small {
+  overflow-wrap: anywhere;
+  color: #64748b;
+  font-size: 10px;
+}
+
+.multiplayer-history-round small {
+  color: #475569;
+  font-weight: 700;
+}
+
+.multiplayer-history-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+  gap: 7px;
+  margin: 0;
+}
+
+.multiplayer-history-stats > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.multiplayer-history-stats > div.is-rank {
+  background: #eef2ff;
+}
+
+.multiplayer-history-stats > div.is-score {
+  background: #eff6ff;
+}
+
+.multiplayer-history-stats > div.is-catches {
+  background: #ecfdf5;
+}
+
+.multiplayer-history-stats dd {
+  overflow: hidden;
+  margin: 0;
+  color: #172033;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multiplayer-history-view {
+  padding: 7px 10px;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.multiplayer-history-empty,
+.multiplayer-history-error,
+.multiplayer-history-loading-page {
+  margin: 12px 0 0;
+  padding: 18px;
+  border-radius: 8px;
+  color: #64748b;
+  background: #f3f6f8;
+  font-size: 12px;
+  text-align: center;
+}
+
+.multiplayer-history-loading-page {
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.multiplayer-history-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  color: #991b1b;
+  background: #fef2f2;
+  text-align: left;
+}
+
+.multiplayer-history-error button {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  color: #991b1b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.multiplayer-history-skeleton {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.multiplayer-history-skeleton span {
+  min-height: 70px;
+  border-radius: 8px;
+  background: linear-gradient(100deg, #f1f5f9 20%, #e2e8f0 38%, #f1f5f9 56%);
+  background-size: 200% 100%;
+  animation: multiplayer-history-loading 1.2s linear infinite;
+}
+
+.multiplayer-history-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.multiplayer-history-pagination button {
+  padding: 6px 10px;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.multiplayer-history-pagination span {
+  min-width: 84px;
+  color: #64748b;
+  font-size: 10px;
+  text-align: center;
+}
+
+.round-results-history-context {
+  margin: 4px 0 0;
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+@keyframes multiplayer-history-loading {
+  to {
+    background-position-x: -200%;
+  }
+}
+
 .round-results-reopen {
   position: fixed;
   right: 18px;
@@ -3056,6 +3293,15 @@ button:focus-visible {
 
   .leaderboard-list {
     max-height: 126px;
+  }
+
+  .multiplayer-history-item article {
+    grid-template-columns: minmax(130px, 0.65fr) minmax(360px, 2fr);
+  }
+
+  .multiplayer-history-view {
+    grid-column: 1 / -1;
+    justify-self: end;
   }
 
   .round-results-overlay {
@@ -3593,6 +3839,20 @@ button:focus-visible {
     grid-template-columns: 1fr;
   }
 
+  .multiplayer-history-item article {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+
+  .multiplayer-history-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .multiplayer-history-view {
+    grid-column: auto;
+    width: 100%;
+  }
+
   .room-play-panel-stack {
     top: 72px;
     left: 12px;
@@ -3606,7 +3866,8 @@ button:focus-visible {
   .catch-toast,
   .catch-map-effect-ring,
   .catch-map-effect-score,
-  .caught-inventory-panel li.is-new-catch {
+  .caught-inventory-panel li.is-new-catch,
+  .multiplayer-history-skeleton span {
     animation: none;
   }
 }

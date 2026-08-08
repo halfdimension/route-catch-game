@@ -4,6 +4,7 @@ import { formatUnknownReason } from '../src/components/roundResults/roundResultF
 import {
   createRoundResultsViewModel,
   getRoundResultsActions,
+  getRoundResultsModalControls,
   isCurrentRoundPlayer,
   playAgainAndClear,
   returnToRoundLobby,
@@ -131,4 +132,35 @@ test('Return to Lobby invokes the supplied navigation callback', () => {
   let returnCalls = 0
   returnToRoundLobby(() => { returnCalls += 1 })
   assert.equal(returnCalls, 1)
+})
+
+test('historical modal controls are view-only while live controls remain available', () => {
+  const liveActions = getRoundResultsActions({
+    canPlayAgain: true,
+    error: null,
+    isHost: true,
+    isOpen: true,
+    result: backendResult(),
+  })
+
+  assert.deepEqual(
+    getRoundResultsModalControls({ actions: liveActions, historical: true }),
+    {
+      showClose: true,
+      showPlayAgain: false,
+      showReturnToLobby: false,
+      showViewMap: false,
+      showWaitingForHost: false,
+    },
+  )
+  assert.deepEqual(
+    getRoundResultsModalControls({ actions: liveActions, historical: false }),
+    {
+      showClose: false,
+      showPlayAgain: true,
+      showReturnToLobby: true,
+      showViewMap: true,
+      showWaitingForHost: false,
+    },
+  )
 })
