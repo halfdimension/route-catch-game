@@ -29,6 +29,10 @@ import {
   INITIAL_PLAYER_POSITION,
   MIN_SIMULATION_SPEED,
 } from './config/gameConfig'
+import {
+  getSoloRouteAnimationStartDelay,
+  SOLO_MAP_RENDERER,
+} from './config/soloMapRenderer'
 import HomePage from './pages/HomePage'
 import LeaderboardPage from './pages/LeaderboardPage'
 import LoginPage from './pages/LoginPage'
@@ -163,7 +167,11 @@ function App() {
     moveToDestination,
     resetPlayerState,
     stopPlayerMovement,
-  } = usePlayerState()
+    subscribeToNavigationFrames,
+  } = usePlayerState({
+    routeAnimationStartDelayMs:
+      getSoloRouteAnimationStartDelay(SOLO_MAP_RENDERER),
+  })
   const {
     gameState,
     remainingSeconds,
@@ -1190,6 +1198,7 @@ function App() {
     sharedRoomCreatures,
     simulationSpeed,
     speedBonus,
+    subscribeToNavigationFrames,
     targets,
     token,
     toggleSpawning,

@@ -55,7 +55,13 @@ function SoloPlayPage({ gameplay }) {
               </div>
             )}
           >
-            <MapLibreSoloGameMap {...soloMapProps} />
+            <MapLibreSoloGameMap
+              {...soloMapProps}
+              isMoving={gameplay.isMoving}
+              subscribeToNavigationFrames={
+                gameplay.subscribeToNavigationFrames
+              }
+            />
           </Suspense>
         </MapLibreMapErrorBoundary>
       ) : (

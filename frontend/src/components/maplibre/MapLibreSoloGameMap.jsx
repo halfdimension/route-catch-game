@@ -15,6 +15,7 @@ import {
   recenterSoloMap,
   SOLO_MAP_INTERACTION_PROPS,
 } from './mapLibreSoloGameState'
+import { useMapLibreSoloCamera } from './useMapLibreSoloCamera'
 import {
   createBuildingExtrusionLayer,
   findBuildingSource,
@@ -42,6 +43,8 @@ function MapLibreSoloGameMap({
   chasedTargetId,
   routingTargetId,
   playerName,
+  isMoving,
+  subscribeToNavigationFrames,
   onMapClick,
   onTargetClick,
 }) {
@@ -53,6 +56,24 @@ function MapLibreSoloGameMap({
     createSoloInitialViewState(playerPosition),
   )
   const canRecenter = Boolean(toMapLibreLngLat(playerPosition))
+  const {
+    activeNavigationDestination,
+    canResumeFollow,
+    handleMapLoad: handleNavigationCameraMapLoad,
+    handleCameraInteraction,
+    handleFollowZoomEnd,
+    handleFollowZoomStart,
+    resumeFollow,
+  } = useMapLibreSoloCamera({
+    mapRef,
+    playerPosition,
+    pendingDestination,
+    routeCoordinates,
+    isMoving,
+    subscribeToNavigationFrames,
+  })
+  const navigationDestination =
+    pendingDestination || activeNavigationDestination
 
   useEffect(() => {
     playerPositionRef.current = playerPosition
@@ -71,6 +92,7 @@ function MapLibreSoloGameMap({
 
   const handleMapLoad = useCallback((event) => {
     const map = event.target
+    handleNavigationCameraMapLoad()
     const buildingSource = findBuildingSource(map.getStyle())
     const buildingLayer = createBuildingExtrusionLayer(buildingSource)
 
@@ -87,7 +109,7 @@ function MapLibreSoloGameMap({
     } catch {
       setStyleState(createLoadedStyleState(false))
     }
-  }, [])
+  }, [handleNavigationCameraMapLoad])
 
   const handleMapError = useCallback((event) => {
     setStyleState((currentState) =>
@@ -123,6 +145,14 @@ function MapLibreSoloGameMap({
         onClick={handleMapClick}
         onLoad={handleMapLoad}
         onError={handleMapError}
+        onMoveStart={handleCameraInteraction}
+        onDragStart={handleCameraInteraction}
+        onRotateStart={handleCameraInteraction}
+        onPitchStart={handleCameraInteraction}
+        onWheel={handleFollowZoomStart}
+        onZoomEnd={handleFollowZoomEnd}
+        onZoomStart={handleFollowZoomStart}
+        onBoxZoomStart={handleCameraInteraction}
       >
         <NavigationControl position="bottom-right" visualizePitch />
         {canRenderRoute && (
@@ -135,7 +165,7 @@ function MapLibreSoloGameMap({
         <MapLibreSoloGameMarkers
           playerPosition={playerPosition}
           playerName={playerName}
-          pendingDestination={pendingDestination}
+          destinationPosition={navigationDestination}
           targets={targets}
           chasedTargetId={chasedTargetId}
           routingTargetId={routingTargetId}
@@ -144,7 +174,20 @@ function MapLibreSoloGameMap({
         />
       </Map>
 
-      {canRecenter && (
+      {canResumeFollow && (
+        <button
+          type="button"
+          className="maplibre-solo-recenter-control is-resume-follow"
+          onClick={resumeFollow}
+          title="Resume automatic navigation camera"
+          aria-label="Resume automatic navigation camera"
+        >
+          <span aria-hidden="true">⌖</span>
+          Resume Follow
+        </button>
+      )}
+
+      {canRecenter && !isMoving && (
         <button
           type="button"
           className="maplibre-solo-recenter-control"

@@ -134,7 +134,7 @@ export function createBuildingExtrusionLayer(buildingSource) {
         ['to-number', ['get', 'min_height']],
         0,
       ],
-      'fill-extrusion-opacity': 0.42,
+      'fill-extrusion-opacity': 0.34,
     },
   }
 }

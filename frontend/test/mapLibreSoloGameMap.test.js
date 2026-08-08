@@ -7,15 +7,26 @@ import {
 import {
   createSoloDestinationFromMapClick,
   createSoloDestinationFromMapEvent,
+  createSoloFollowCameraOptions,
   createSoloInitialViewState,
+  createSoloOverviewBounds,
   getCaughtTargetEffectViewState,
+  getShortestSoloCameraBearingDelta,
+  getSoloReducedMotionCameraPolicy,
+  getSoloRouteDestination,
   getSoloDestinationMarkerViewState,
   getSoloPlayerMarkerViewState,
   getSoloTargetMarkerViewState,
   handleSoloTargetMarkerClick,
+  isSoloCameraUserInteraction,
   recenterSoloMap,
+  smoothSoloCameraBearing,
+  SOLO_CAMERA_EVENTS,
+  SOLO_CAMERA_MODES,
+  SOLO_CAMERA_PROGRAMMATIC_EVENT,
   SOLO_MAP_INTERACTION_PROPS,
   SOLO_TARGET_ANIMATION_CLASS_NAMES,
+  transitionSoloCameraMode,
 } from '../src/components/maplibre/mapLibreSoloGameState.js'
 import {
   getNonChasedMapLibreTargets,
@@ -27,6 +38,7 @@ import {
   stopMapLibreHudEvent,
 } from '../src/components/maplibre/mapLibreGameHudState.js'
 import {
+  createBuildingExtrusionLayer,
   getRouteLayerConfigurations,
 } from '../src/components/maplibre/mapLibreStyleConfig.js'
 import {
@@ -35,6 +47,8 @@ import {
 } from '../src/components/maplibre/mapLibreStyleState.js'
 import {
   resolveSoloMapRenderer,
+  getSoloRouteAnimationStartDelay,
+  MAPLIBRE_SOLO_ROUTE_PRELUDE_MS,
   SOLO_MAP_RENDERER,
   SOLO_MAP_RENDERERS,
 } from '../src/config/soloMapRenderer.js'
@@ -221,7 +235,7 @@ test('recenter uses the latest player position and preserves usable zoom', () =>
   )
   assert.deepEqual(cameraUpdates[0].center, [72.891, 19.082])
   assert.equal(cameraUpdates[0].zoom, 14)
-  assert.equal(cameraUpdates[0].essential, true)
+  assert.equal(cameraUpdates[0].essential, false)
   assert.equal(recenterSoloMap(map, { lat: 100, lon: 72.891 }), false)
   assert.equal(cameraUpdates.length, 1)
 })
@@ -341,6 +355,17 @@ test('a valid two-point route creates the solo halo and core layers', () => {
   assert.ok(
     layers.halo.paint['line-width'] > layers.core.paint['line-width'],
   )
+})
+
+test('3D buildings retain depth without overpowering navigation overlays', () => {
+  const layer = createBuildingExtrusionLayer({
+    source: 'openmaptiles',
+    sourceLayer: 'building',
+  })
+
+  assert.equal(layer.type, 'fill-extrusion')
+  assert.equal(layer.paint['fill-extrusion-opacity'], 0.34)
+  assert.ok(layer.paint['fill-extrusion-opacity'] > 0)
 })
 
 test('empty, short, and invalid route data clears the route view', () => {
@@ -902,7 +927,176 @@ test('the pending destination beacon renders only for a valid destination', () =
   )
   assert.match(markerSource, /maplibre-solo-destination-beacon/)
   assert.match(markerSource, /maplibre-solo-destination-core/)
-  assert.match(markerSource, /pendingDestination &&/)
+  assert.match(markerSource, /destinationPosition &&/)
+})
+
+test('MapLibre alone receives the bounded route overview prelude', () => {
+  assert.equal(
+    getSoloRouteAnimationStartDelay(SOLO_MAP_RENDERERS.LEAFLET),
+    0,
+  )
+  assert.equal(
+    getSoloRouteAnimationStartDelay(SOLO_MAP_RENDERERS.MAPLIBRE),
+    MAPLIBRE_SOLO_ROUTE_PRELUDE_MS,
+  )
+  assert.ok(MAPLIBRE_SOLO_ROUTE_PRELUDE_MS >= 350)
+  assert.ok(MAPLIBRE_SOLO_ROUTE_PRELUDE_MS <= 450)
+})
+
+test('camera modes transition OVERVIEW to FOLLOW to FREE and resume FOLLOW', () => {
+  let mode = SOLO_CAMERA_MODES.OVERVIEW
+
+  mode = transitionSoloCameraMode(
+    mode,
+    SOLO_CAMERA_EVENTS.MOVEMENT_STARTED,
+  )
+  assert.equal(mode, SOLO_CAMERA_MODES.FOLLOW)
+
+  mode = transitionSoloCameraMode(
+    mode,
+    SOLO_CAMERA_EVENTS.USER_INTERACTION,
+  )
+  assert.equal(mode, SOLO_CAMERA_MODES.FREE)
+  assert.equal(
+    transitionSoloCameraMode(
+      mode,
+      SOLO_CAMERA_EVENTS.MOVEMENT_STARTED,
+    ),
+    SOLO_CAMERA_MODES.FREE,
+  )
+
+  mode = transitionSoloCameraMode(
+    mode,
+    SOLO_CAMERA_EVENTS.RESUME_FOLLOW,
+  )
+  assert.equal(mode, SOLO_CAMERA_MODES.FOLLOW)
+  assert.equal(
+    transitionSoloCameraMode(
+      mode,
+      SOLO_CAMERA_EVENTS.MOVEMENT_STOPPED,
+    ),
+    SOLO_CAMERA_MODES.OVERVIEW,
+  )
+})
+
+test('shortest-angle bearing interpolation crosses north correctly', () => {
+  assert.equal(getShortestSoloCameraBearingDelta(359, 1), 2)
+  assert.equal(getShortestSoloCameraBearingDelta(1, 359), -2)
+  assert.equal(getShortestSoloCameraBearingDelta(0, 180), -180)
+  assert.equal(getShortestSoloCameraBearingDelta(180, 0), -180)
+  assert.ok(smoothSoloCameraBearing(359, 1, 16) > 359)
+  assert.ok(smoothSoloCameraBearing(1, 359, 16) < 1)
+})
+
+test('camera smoothing is elapsed-time based and converges toward heading', () => {
+  const oneLongFrame = smoothSoloCameraBearing(10, 90, 32)
+  const firstShortFrame = smoothSoloCameraBearing(10, 90, 16)
+  const twoShortFrames = smoothSoloCameraBearing(
+    firstShortFrame,
+    90,
+    16,
+  )
+
+  assert.ok(Math.abs(oneLongFrame - twoShortFrames) < 1e-10)
+  assert.ok(oneLongFrame > 10)
+  assert.ok(oneLongFrame < 90)
+})
+
+test('only real camera input is classified as a user interaction', () => {
+  assert.equal(
+    isSoloCameraUserInteraction({ originalEvent: { type: 'wheel' } }),
+    true,
+  )
+  assert.equal(
+    isSoloCameraUserInteraction({
+      soloCameraOperation: SOLO_CAMERA_PROGRAMMATIC_EVENT,
+    }),
+    false,
+  )
+  assert.equal(isSoloCameraUserInteraction({ type: 'movestart' }), false)
+  assert.equal(
+    isSoloCameraUserInteraction({
+      soloCameraOperation: SOLO_CAMERA_PROGRAMMATIC_EVENT,
+      originalEvent: { type: 'pointerdown' },
+    }),
+    true,
+  )
+})
+
+test('reduced motion removes cinematic transitions and rotation', () => {
+  assert.deepEqual(getSoloReducedMotionCameraPolicy(true), {
+    overviewDurationMs: 0,
+    followEntryDurationMs: 0,
+    resumeDurationMs: 0,
+    followPitch: 0,
+    overviewPitch: 0,
+    tracksBearing: false,
+  })
+
+  const options = createSoloFollowCameraOptions(
+    {
+      position: { lat: 28.6, lon: 77.2 },
+      lookAheadPosition: { lat: 28.601, lon: 77.201 },
+      bearingDegrees: 45,
+      timestampMs: 100,
+    },
+    { currentBearingDegrees: 20, prefersReducedMotion: true },
+  )
+
+  assert.equal(options.pitch, 0)
+  assert.equal(options.bearing, 0)
+  assert.ok(options.center[0] > 77.2)
+  assert.ok(options.center[1] > 28.6)
+})
+
+test('overview bounds include route endpoints without antimeridian world framing', () => {
+  assert.deepEqual(
+    createSoloOverviewBounds({
+      playerPosition: { lat: 10, lon: 179.8 },
+      destination: { lat: 10.1, lon: -179.8 },
+      routeCoordinates: [
+        [10, 179.8],
+        [10.1, -179.8],
+      ],
+    }),
+    [
+      [179.8, 10],
+      [180.2, 10.1],
+    ],
+  )
+  assert.deepEqual(
+    getSoloRouteDestination([
+      [28.6, 77.2],
+      [28.7, 77.3],
+    ]),
+    { lat: 28.7, lon: 77.3 },
+  )
+})
+
+test('camera controller remains local, imperative, and cleanup-aware', () => {
+  const cameraSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/useMapLibreSoloCamera.js',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const soloMapSource = readFileSync(
+    new URL(
+      '../src/components/maplibre/MapLibreSoloGameMap.jsx',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(cameraSource, /subscribeToNavigationFrames/)
+  assert.match(cameraSource, /map\.jumpTo/)
+  assert.match(cameraSource, /map\.easeTo/)
+  assert.match(cameraSource, /map\.fitBounds/)
+  assert.match(cameraSource, /createSoloCameraWorkManager/)
+  assert.match(cameraSource, /removeEventListener/)
+  assert.match(soloMapSource, /Resume Follow/)
+  assert.doesNotMatch(soloMapSource, /\bviewState=/)
 })
 
 test('catch feedback remains score-aware and pointer-transparent', () => {

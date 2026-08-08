@@ -23,6 +23,10 @@
   --ml-radius-sm: 10px;
   --ml-radius-md: 14px;
   --ml-radius-lg: 18px;
+  --ml-camera-padding-top: 96px;
+  --ml-camera-padding-right: 326px;
+  --ml-camera-padding-bottom: 64px;
+  --ml-camera-padding-left: 48px;
   min-height: 420px;
   color: var(--ml-hud-text);
   background: #111827;
@@ -676,6 +680,10 @@
 }
 
 @media (max-width: 1040px) {
+  .is-maplibre-experience {
+    --ml-camera-padding-right: 286px;
+  }
+
   .maplibre-round-status {
     top: 92px;
     width: min(340px, calc(100% - 560px));
@@ -701,6 +709,10 @@
 
 @media (max-width: 720px) {
   .is-maplibre-experience {
+    --ml-camera-padding-top: 170px;
+    --ml-camera-padding-right: 24px;
+    --ml-camera-padding-bottom: 96px;
+    --ml-camera-padding-left: 24px;
     min-height: 520px;
   }
 
@@ -935,6 +947,16 @@
 
 .maplibre-solo-recenter-control:hover {
   background: rgba(30, 41, 59, 0.96);
+}
+
+.maplibre-solo-recenter-control.is-resume-follow {
+  border-color: rgba(94, 234, 212, 0.58);
+  color: #ccfbf1;
+  background: rgba(8, 47, 47, 0.92);
+}
+
+.maplibre-solo-recenter-control.is-resume-follow:hover {
+  background: rgba(17, 94, 89, 0.96);
 }
 
 .maplibre-solo-recenter-control:focus-visible {

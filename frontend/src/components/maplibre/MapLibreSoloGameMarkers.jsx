@@ -167,7 +167,7 @@ function MapLibreCaughtTargetEffect({ caughtTarget }) {
 function MapLibreSoloGameMarkers({
   playerPosition,
   playerName,
-  pendingDestination,
+  destinationPosition,
   targets,
   chasedTargetId,
   routingTargetId,
@@ -189,8 +189,8 @@ function MapLibreSoloGameMarkers({
           onTargetClick={onTargetClick}
         />
       ))}
-      {pendingDestination && (
-        <MapLibreSoloDestinationMarker position={pendingDestination} />
+      {destinationPosition && (
+        <MapLibreSoloDestinationMarker position={destinationPosition} />
       )}
       <MapLibreCaughtTargetEffect caughtTarget={caughtTarget} />
     </>
