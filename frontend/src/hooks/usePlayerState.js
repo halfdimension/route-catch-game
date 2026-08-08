@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchRoute, isRouteUnavailableError } from '../api/osrmClient'
 import {
   DEFAULT_SIMULATION_SPEED,
@@ -6,6 +6,7 @@ import {
 } from '../config/gameConfig'
 import { API_BASE_URL } from '../config/apiConfig'
 import { useRouteAnimation } from './useRouteAnimation'
+import { createNavigationFrameChannel } from './navigationFrameChannel.js'
 
 const ROUTE_UNAVAILABLE_MESSAGE = 'Could not find a route to this target.'
 
@@ -13,7 +14,7 @@ function isAbortError(error) {
   return error?.name === 'AbortError'
 }
 
-export function usePlayerState() {
+export function usePlayerState({ routeAnimationStartDelayMs = 0 } = {}) {
   const [playerPosition, setPlayerPosition] = useState(INITIAL_PLAYER_POSITION)
   const [simulationSpeed, setSimulationSpeed] = useState(
     DEFAULT_SIMULATION_SPEED,
@@ -25,13 +26,37 @@ export function usePlayerState() {
   const routeRequestIdRef = useRef(0)
   const routeAbortControllerRef = useRef(null)
   const playerPositionRef = useRef(INITIAL_PLAYER_POSITION)
+  const navigationFrameChannelRef = useRef(null)
+
+  if (navigationFrameChannelRef.current == null) {
+    navigationFrameChannelRef.current = createNavigationFrameChannel()
+  }
+
+  const publishNavigationFrame = useCallback((navigationFrame) => {
+    navigationFrameChannelRef.current.publish(navigationFrame)
+  }, [])
   const { isMoving, startAnimation, cancelAnimation } = useRouteAnimation({
     speedMetersPerSecond: simulationSpeed,
+    startDelayMs: routeAnimationStartDelayMs,
     onPositionChange: (nextPosition) => {
       playerPositionRef.current = nextPosition
       setPlayerPosition(nextPosition)
     },
+    onNavigationFrame: publishNavigationFrame,
   })
+
+  const subscribeToNavigationFrames = useCallback(
+    (listener) => navigationFrameChannelRef.current.subscribe(listener),
+    [],
+  )
+
+  useEffect(() => {
+    const channel = navigationFrameChannelRef.current
+
+    return () => {
+      channel.clear()
+    }
+  }, [])
 
   function clearPendingDestination() {
     setPendingDestination(null)
@@ -159,5 +184,6 @@ export function usePlayerState() {
     moveToDestination,
     resetPlayerState,
     stopPlayerMovement,
+    subscribeToNavigationFrames,
   }
 }
