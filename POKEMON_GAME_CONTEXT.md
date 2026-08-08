@@ -399,35 +399,234 @@ prototype page. MapLibre-specific components/CSS live under
 `components/maplibre` and `styles/maplibre*.css`; both renderers consume the
 same solo game state/handlers rather than owning game rules.
 
-The MapLibre work added:
+The integrated renderer continues to provide player, creature, route,
+destination, compact HUD, target/chase/routing, catch-feedback, manual
+recentering, rarity-animation, and reduced-motion presentation. The navigation
+camera described below extends that renderer without moving game rules into it.
+
+## Current implementation — MapLibre SOLO navigation camera
+
+The integrated MapLibre SOLO renderer now has a navigation-oriented camera
+system. Camera presentation state is local to the MapLibre renderer; it is not
+global gameplay state and it is not shared with Leaflet or multiplayer.
+
+The three local presentation modes are:
 
 ```text
-player-centered initial camera
-manual recentering
-player rendering
-creature rendering
-route rendering
-destination rendering
-compact gameplay HUD
-target controls
-rarity-specific animations
-chase feedback
-routing feedback
-catch feedback
-reduced-motion support
+OVERVIEW -> FOLLOW -> FREE
+               ^        |
+               └ RESUME ┘
 ```
 
-The MapLibre work intentionally did NOT change:
+`OVERVIEW` briefly frames the current player, complete route, and destination
+before movement. The route animation has an approximately 400 ms delay only
+when the configured SOLO renderer is MapLibre, giving the renderer time to
+show this prelude. Bounds are calculated deliberately from the player, route,
+and destination with responsive HUD padding and antimeridian-safe longitude
+handling. The overview is wider than FOLLOW, north-up, and capped at zoom
+15.75. At the normal-motion checkpoint its MapLibre fit transition is 240 ms
+with a 24-degree pitch; these are presentation values, not gameplay timing
+contracts.
+
+`FOLLOW` is driven imperatively with MapLibre `jumpTo` and brief `easeTo` calls.
+The map remains uncontrolled through `initialViewState`; there is no React
+`viewState` feedback loop. The player is framed approximately lower-center
+with useful road space ahead, while bearing follows route direction. The
+camera consumes navigation frames directly rather than copying full camera
+state into React on every animation frame. React holds only coarse presentation
+state such as the mode control, active destination, and accessibility setting,
+not the per-frame camera pose.
+
+`FREE` is entered when the user meaningfully detaches navigation framing, such
+as panning, box zooming, pitching, or manually rotating. Player movement,
+catching, scoring, spawning, and other gameplay continue, but the camera stops
+being forced. Resume Follow uses the latest navigation frame and returns to the
+current navigation pose; it does not restart movement or route calculation.
+
+## Current implementation — navigation-frame stream
+
+`useRouteAnimation` still owns SOLO route-animation semantics. It now
+preprocesses valid route geometry into measured non-zero segments with
+cumulative distances, so frame sampling does not repeatedly remeasure the
+whole route. Duplicate/zero-length points are retained in the source geometry
+but omitted from the measured segment plan.
+
+The animation continues to publish existing React `playerPosition` updates
+required by:
+
+```text
+catch detection
+target spawning
+score/gameplay state
+HUD and marker rendering
+Leaflet
+other existing SOLO behavior
+```
+
+In parallel, it publishes an imperative navigation-frame stream through a
+small stable channel. The channel replays its latest frame to a new subscriber,
+isolates listener errors during publication, supports unsubscribe, and clears
+listeners on player-state teardown. This lets the MapLibre camera consume
+per-frame navigation data without introducing a new React camera-state render
+cycle.
+
+A current navigation frame contains these concepts:
+
+```text
+routeRevision
+position
+bearingDegrees
+lookAheadPosition
+lookAheadDistanceMeters
+speedMetersPerSecond
+progress
+distanceTraveledMeters
+distanceRemainingMeters
+totalDistanceMeters
+isMoving
+timestampMs
+```
+
+The exact object shape may evolve, but route revision, measured progress, and
+imperative delivery are important current boundaries.
+
+## Current implementation — heading and look-ahead
+
+Route heading is calculated from distance-based samples along the measured
+route, not from the previous animation frame's coordinate delta. This avoids
+short-segment jitter and handles duplicate/zero-length route points. Near
+completion, the heading window falls back to a useful look-behind sample so the
+final heading remains stable instead of collapsing with remaining distance.
+
+The current speed-aware look-ahead profile is:
+
+```text
+configuredLookAheadMeters = clamp(speedMetersPerSecond * 0.45, 20, 80)
+actualLookAheadMeters = min(configuredLookAheadMeters, remainingRouteMeters)
+```
+
+This is a deterministic, bounded camera-input profile. It does not alter
+gameplay speed. Short routes and completion cannot look beyond the destination.
+The physical route bearing in a navigation frame is separate from camera
+smoothing: FOLLOW applies elapsed-time smoothing with shortest-angle
+interpolation, including wraparound such as 359 degrees to 1 degree.
+
+## Current checkpoint — tunable camera profile
+
+These values describe the current DEFAULT MapLibre SOLO presentation profile.
+They are intentionally centralized and tunable, not permanent architectural
+contracts or global MapLibre limits.
+
+| Parameter | Current value |
+|---|---:|
+| FOLLOW minimum zoom | 16.5 |
+| FOLLOW default zoom | 17.5 |
+| FOLLOW maximum zoom | 18.3 |
+| FOLLOW pitch | 55 degrees |
+| FOLLOW look-ahead center fraction | 0.62 |
+| OVERVIEW maximum zoom | 15.75 |
+
+The 0.62 look-ahead fraction produces the current lower-center player framing.
+Speed changes look-ahead distance, but FOLLOW zoom itself is not currently
+speed-aware; this avoids camera zoom pumping from small speed changes.
+
+User zoom during FOLLOW does not by itself detach the camera. Wheel zoom,
+supported +/- control zoom, and identifiable pure zoom interactions can remain
+in FOLLOW. At the end of such a zoom, the renderer stores a FOLLOW-only zoom
+override clamped to 16.5 through 18.3 and preserves it on subsequent FOLLOW
+frames. A new route clears the override and returns to the 17.5 default.
+
+FREE exploration is not globally clamped to the FOLLOW zoom range. Resume
+Follow revalidates the stored navigation zoom before applying the current
+frame. Pan or manual orientation changes enter FREE. Camera operations tagged
+as programmatic, and events without genuine user input, do not accidentally
+trigger FREE; this prevents camera feedback loops. Gesture classification is
+limited to the MapLibre events and input types explicitly handled by the
+renderer and covered by its tests.
+
+## Current implementation — lifecycle and destination safeguards
+
+SOLO route animation and MapLibre camera work use separate revision guards.
+Route start, cancellation, replacement, reset, and animation teardown invalidate
+stale route revisions and cancel both delayed-start timers and animation-frame
+work. The camera controller has its own operation revision and timer manager;
+invalidation clears scheduled overview/follow callbacks and can stop an active
+MapLibre transition.
+
+These guards ensure that callbacks belonging to a cancelled or replaced route
+cannot manipulate a newer route. The same route-clearing path is used by
+player/game reset, round end, target expiry, chase cancellation, and completed
+chase cleanup. MapLibre component unmount marks the camera controller
+unavailable, clears its scheduled work, and stops its transitions. Separately,
+`useRouteAnimation` teardown clears animation work and invalidates its route
+revision, while player-state teardown clears navigation-frame listeners.
+Map-load checks and mounted refs prevent late work from updating an unavailable
+map/component.
+
+The destination beacon is MapLibre-local presentation state. It remains
+visible during the active route prelude and navigation, including while the
+camera is FREE, then clears on completion, cancellation, or replacement. This
+does not require globally clearing `routeCoordinates` at ordinary route
+completion, and it does not change Leaflet destination behavior.
+
+## Current implementation — reduced motion and buildings
+
+With `prefers-reduced-motion: reduce`, decorative overview/follow/resume camera
+durations become zero, FOLLOW is flat and north-up, and continuous cinematic
+rotation is disabled. Functional positional tracking continues. CSS also
+removes or simplifies continuous MapLibre marker, route, beacon, catch, and HUD
+motion. The functional MapLibre-only route prelude remains part of route start;
+reduced motion removes its camera transition animation rather than disabling
+navigation setup.
+
+Compatible MapLibre styles still receive the existing 3D building extrusion
+layer. Its current opacity is tuned from the earlier 0.42 to 0.34 so buildings
+retain environmental depth without visually dominating route, player, and
+target overlays. This is presentation tuning, not an architectural invariant.
+
+## Explicit non-changes
+
+This milestone is frontend-only and MapLibre SOLO-only. It did **not** add or
+change:
 
 ```text
 backend behavior
-multiplayer architecture
-routing semantics
-movement semantics
-database behavior
+multiplayer MapLibre rendering or multiplayer architecture
+Valhalla integration
+WALK / BIKE / CAR travel modes
+vehicle or person transport actors
+Redis or Kafka
+a routing-provider abstraction
+route traveled-vs-remaining rendering
+an approaching/arrival camera state
+an arrival/catch cinematic
 ```
 
-Preserve this isolation unless explicitly redesigning it.
+Leaflet remains the default gameplay renderer, the existing renderer setting
+keeps MapLibre opt-in for SOLO, and `RoomPlayPage` remains Leaflet-based. A
+separate local Valhalla experiment is not part of the current Route Catch
+architecture and must not be described as integrated.
+
+## Known limitations and future direction
+
+Browser E2E coverage does not yet exist, and navigation-camera visual feel
+still requires manual browser validation. The current closer FOLLOW framing has
+been manually validated as a suitable baseline, not as a final profile for
+every future transport type.
+
+Possible future work, none of which is implemented by this milestone, includes:
+
+```text
+WALK / BIKE / CAR transport actors
+mode-specific camera profiles
+traveled-vs-remaining route visualization
+approaching and arrival camera states
+eventual mode-aware routing
+eventual multiplayer MapLibre presentation driven by authoritative movement plans
+```
+
+Preserve the current renderer isolation unless a future task explicitly
+redesigns it.
 
 ---
 
@@ -1933,6 +2132,30 @@ historical result loading
 authentication-safe state
 ```
 
+Important MapLibre SOLO frontend concerns include:
+
+```text
+renderer-local OVERVIEW / FOLLOW / FREE camera modes
+imperative navigation-frame delivery
+measured SOLO route animation and distance-based heading
+programmatic-vs-user camera event classification
+camera and route revision cleanup
+reduced-motion camera policy
+MapLibre-local destination presentation
+```
+
+The central current implementation areas are:
+
+```text
+components/maplibre/MapLibreSoloGameMap.jsx
+components/maplibre/useMapLibreSoloCamera.js
+components/maplibre/mapLibreSoloGameState.js
+hooks/useRouteAnimation.js
+hooks/navigationFrameChannel.js
+hooks/usePlayerState.js
+config/soloMapRenderer.js
+```
+
 Do not create a second parallel WebSocket architecture for a new multiplayer
 feature without first checking whether the existing authenticated STOMP
 connection can be reused.
@@ -2155,6 +2378,12 @@ MapLibre is currently an opt-in SOLO implementation.
 
 Multiplayer currently always uses the existing Leaflet `GameMap` architecture.
 
+The navigation camera has automated geometry, state-transition, interaction,
+reduced-motion, lifecycle, and source-integration coverage, but it has no
+browser E2E suite. Camera composition and visual feel therefore still require
+manual browser validation. Future transport actors and mode-specific camera
+profiles are not implemented.
+
 ---
 
 ### Test/runtime gaps
@@ -2166,8 +2395,10 @@ or transaction edge case. The repository has no full browser end-to-end suite;
 frontend tests are primarily Node tests of clients/controllers/state and source
 integration assertions.
 
-GitHub CI currently builds and lints the frontend but does not execute the 20
-Node test files. The current production build also crosses Vite's default
+GitHub CI currently builds and lints the frontend but does not execute the Node
+test files. PR #13 had 20 such files; the MapLibre navigation-camera feature
+branch checkpoint has 22. These are historical/checkpoint counts, not permanent
+project guarantees. The current production build also crosses Vite's default
 large-chunk advisory (notably the lazy MapLibre dependency chunk); this is an
 optimization warning, not a build failure.
 
@@ -2287,6 +2518,33 @@ PostgreSQL persistence/restart verification passed
 multiplayer historical result UI verification passed
 ```
 
+## MapLibre SOLO navigation-camera feature-branch checkpoint
+
+The following is a later, checkpoint-specific verification record for
+`feature/maplibre-navigation-camera`. It is not a permanent test-count promise
+and does not imply that frontend Node tests run in GitHub CI:
+
+```text
+npm run test:maplibre           passing
+node --test test/*.test.js      22/22 test files passing
+npm run lint                    passing
+npm run build                   passing
+git diff --check                passing
+```
+
+The strengthened behavioral coverage includes measured route preprocessing,
+progress/distance consistency, duplicate and degenerate geometry, bounded
+speed-aware look-ahead, stable completion heading, shortest-angle camera
+smoothing, FOLLOW/FREE transitions, pure zoom behavior and FOLLOW zoom clamps,
+Resume Follow, new-route reset, destination cleanup, latest-frame replay and
+unsubscribe, stale timer/revision invalidation, unmount cleanup, reduced
+motion, the MapLibre-only prelude, and conservative 3D-building presentation.
+
+This remains Node-level behavior/source-integration coverage rather than
+browser E2E. Manual browser validation confirmed that the closer FOLLOW
+composition is suitable as the baseline for future transport actors; future
+actors and their camera profiles remain unimplemented.
+
 ---
 
 # 53. GitHub CI
@@ -2399,9 +2657,15 @@ The multiplayer system evolved approximately through these milestones:
 11-12. MapLibre solo renderer / gameplay polish
 
 13. PostgreSQL multiplayer result persistence + player match history
+
+14. MapLibre SOLO navigation camera with OVERVIEW / FOLLOW / FREE presentation
 ```
 
 These milestones are already implemented.
+
+Milestone 14 is the frontend-only, MapLibre SOLO-only feature-branch checkpoint
+documented in Section 8. It does not change the completed multiplayer
+architecture described by the earlier milestones.
 
 Do not propose them as future work without checking current code.
 
@@ -2784,6 +3048,13 @@ When updating:
 - The frontend is React 19/Vite 8/JavaScript; Leaflet is the default map.
 - MapLibre is opt-in for solo only via `VITE_SOLO_MAP_RENDERER=maplibre`;
   multiplayer remains on the shared Leaflet `GameMap` path.
+- MapLibre SOLO has a renderer-local navigation camera with `OVERVIEW`,
+  `FOLLOW`, and `FREE` modes. Resume Follow returns from manual exploration to
+  the latest current navigation pose.
+- SOLO route animation publishes measured navigation frames imperatively to the
+  MapLibre camera while preserving React player-position updates for existing
+  gameplay and Leaflet behavior; MapLibre remains uncontrolled without a
+  per-frame React `viewState` loop.
 - Spring Boot 4.1/Java 21 provides REST, authenticated STOMP/WebSocket,
   multiplayer coordination, JPA persistence, and OSRM adapters.
 - PostgreSQL schema changes are Flyway-owned; do not edit applied migrations.
@@ -2820,7 +3091,10 @@ When updating:
   one- and two-second backoff intervals, maximum three attempts, same envelope.
 - Publication retry/dedup is in memory; there is no transactional outbox, broker,
   or guarantee across process restart. REST/PostgreSQL is completed-result truth.
-- PR #13 merged at `c9e5f4c`; test counts in this document are that verification
-  checkpoint, not permanent guarantees.
+- Transport modes/actors, mode-specific camera profiles, Valhalla integration,
+  and multiplayer MapLibre presentation are future directions, not current
+  implementation.
+- PR #13 merged at `c9e5f4c`; its test counts and the later MapLibre camera
+  branch counts are separate historical checkpoints, not permanent guarantees.
 - Before changing architecture, inspect current source/tests and preserve
   authority, UUID/generation/version, transaction ordering, and auth isolation.
