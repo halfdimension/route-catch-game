@@ -23,7 +23,15 @@ import { useMovementPlanRenderer } from './hooks/useMovementPlanRenderer'
 import { usePlayerProgression } from './hooks/usePlayerProgression'
 import { usePlayerName } from './hooks/usePlayerName'
 import { usePlayerState } from './hooks/usePlayerState'
+import { useSoloRoundRecovery } from './hooks/useSoloRoundRecovery.js'
 import { useTargetSpawner } from './hooks/useTargetSpawner'
+import { SOLO_RECOVERY_MOVEMENT_PURPOSES } from './recovery/soloRecoveryCheckpoint.js'
+import {
+  finishSoloGameplayRound,
+  resetSoloGameplayRound,
+  restartSoloGameplayRound,
+  startSoloGameplayRound,
+} from './recovery/soloGameplayLifecycle.js'
 import {
   DEFAULT_SIMULATION_SPEED,
   INITIAL_PLAYER_POSITION,
@@ -49,6 +57,7 @@ import {
   MOVEMENT_ARCHITECTURE,
   startMovementForArchitecture,
 } from './utils/movementArchitecture'
+import { SOLO_ROUTE_EVENT_TYPES } from './utils/soloRouteCatchEvents.js'
 
 const MapLibrePrototypePage = import.meta.env.DEV
   ? lazy(() => import('./pages/MapLibrePrototypePage'))
@@ -149,8 +158,44 @@ function App() {
     currentUser,
     token,
     isAuthenticated,
+    loadingAuth,
     logout,
   } = useAuth()
+  const recoveryMovementTransitionRef = useRef(() => false)
+  const resolveSoloRouteIntervalRef = useRef(
+    () => ({ entries: [], terminal: null }),
+  )
+  const handleSoloRouteIntervalEventsRef = useRef(() => {})
+  const hydrateSoloGameplayRef = useRef(() => null)
+  const resetSoloTargetRuntimeRef = useRef(() => {})
+  const captureSoloRouteOperationRef = useRef(
+    () => ({ isCurrent: () => false }),
+  )
+  const captureSoloRouteOperation = useCallback(
+    () => captureSoloRouteOperationRef.current(),
+    [],
+  )
+  const recoveryRuntimeSnapshotRef = useRef({
+    targets: [],
+    caughtTargets: [],
+    score: 0,
+    xp: 0,
+    isSpawningPaused: false,
+    nextSpawnAtEpochMs: null,
+    spawning: { paused: false, nextSpawnAtEpochMs: null },
+    simulationSpeedMetersPerSecond: DEFAULT_SIMULATION_SPEED,
+  })
+  const handleSoloMovementTransition = useCallback((transition) => {
+    recoveryMovementTransitionRef.current(transition)
+  }, [])
+  const resolveSoloRouteInterval = useCallback(
+    (interval) => resolveSoloRouteIntervalRef.current(interval),
+    [],
+  )
+  const handleSoloRouteIntervalEvents = useCallback(
+    (...args) => handleSoloRouteIntervalEventsRef.current(...args),
+    [],
+  )
   const {
     playerPosition,
     pendingDestination,
@@ -166,17 +211,26 @@ function App() {
     confirmPendingMove,
     moveToDestination,
     resetPlayerState,
+    resetPlayerRecoveryRuntime,
     stopPlayerMovement,
     subscribeToNavigationFrames,
+    getMovementRecoverySnapshot,
+    getSettledPlayerPosition,
+    hydratePlayerState,
   } = usePlayerState({
     routeAnimationStartDelayMs:
       getSoloRouteAnimationStartDelay(SOLO_MAP_RENDERER),
+    onMovementTransition: handleSoloMovementTransition,
+    resolveRouteInterval: resolveSoloRouteInterval,
+    onRouteIntervalEvents: handleSoloRouteIntervalEvents,
+    captureRouteOperation: captureSoloRouteOperation,
   })
   const {
     gameState,
     remainingSeconds,
     selectedRoundSeconds,
     roundDurationOptions,
+    endsAtEpochMs,
     setSelectedRoundSeconds,
     startGame,
     endGame,
@@ -192,15 +246,18 @@ function App() {
     isSessionPending,
     beginSession,
     finishSession,
+    finishSessionById,
     replaceSession,
-    submitBackendCatch,
+    invalidateSessionOperations,
+    adoptBackendSession,
+    submitBackendCatchForSession,
   } = useBackendGameSession(token)
   const {
     xp,
     level,
     nextLevelXp,
     speedBonus,
-    addXp,
+    hydrateXp,
     resetProgression,
   } = usePlayerProgression()
   const { playerName, setPlayerName } = usePlayerName()
@@ -249,42 +306,222 @@ function App() {
     updateRoutingSharedRoomCreatureId(null)
   }, [updateChasedSharedRoomCreatureId, updateRoutingSharedRoomCreatureId])
 
-  const handleTargetExpired = useCallback(
-    (target) => {
-      if (chasedTargetIdRef.current !== target.id) {
-        return
-      }
+  const [caughtTargets, setCaughtTargets] = useState([])
+  const [score, setScore] = useState(0)
+  const [catchToastTarget, setCatchToastTarget] = useState(null)
+  const caughtTargetsRef = useRef([])
+  const scoreRef = useRef(0)
+  const xpRef = useRef(0)
 
-      stopPlayerMovement()
+  const hydrateSoloGameplay = useCallback(
+    (...args) => hydrateSoloGameplayRef.current?.(...args),
+    [],
+  )
+
+  const getSoloRecoveryRuntimeSnapshot = useCallback(({
+    advanceMovement = false,
+  } = {}) => {
+    const movement = getMovementRecoverySnapshot({
+      advance: advanceMovement,
+    })
+    return {
+      ...recoveryRuntimeSnapshotRef.current,
+      playerPosition: getSettledPlayerPosition(),
+      movement,
+    }
+  }, [getMovementRecoverySnapshot, getSettledPlayerPosition])
+
+  const resetSoloRuntimeForIdentity = useCallback(() => {
+    invalidateSessionOperations({ clearSession: true })
+    resetPlayerRecoveryRuntime()
+    resetSoloTargetRuntimeRef.current()
+    clearChaseState()
+    resetGameSession()
+  }, [
+    clearChaseState,
+    invalidateSessionOperations,
+    resetGameSession,
+    resetPlayerRecoveryRuntime,
+  ])
+
+  const soloRecovery = useSoloRoundRecovery({
+    loadingAuth,
+    isAuthenticated,
+    currentUser,
+    hydrateRound: startGame,
+    hydratePlayer: hydratePlayerState,
+    hydrateGameplay: hydrateSoloGameplay,
+    resetRuntime: resetSoloRuntimeForIdentity,
+    adoptBackendSession,
+    getRuntimeSnapshot: getSoloRecoveryRuntimeSnapshot,
+    submitBackendCatchForSession,
+  })
+  useEffect(() => {
+    captureSoloRouteOperationRef.current =
+      soloRecovery.captureRuntimeOperation
+  }, [soloRecovery.captureRuntimeOperation])
+
+  useEffect(() => {
+    recoveryMovementTransitionRef.current =
+      soloRecovery.queueRuntimeCheckpoint
+  }, [soloRecovery.queueRuntimeCheckpoint])
+
+  useLayoutEffect(() => {
+    resolveSoloRouteIntervalRef.current =
+      soloRecovery.resolveLiveCatchInterval
+  }, [soloRecovery.resolveLiveCatchInterval])
+
+  const handleTargetExpired = useCallback((expiredTargets, snapshot) => {
+    const chasedExpiredTarget = expiredTargets.find(
+      (target) => chasedTargetIdRef.current === target.id,
+    )
+    const chasedExpired = Boolean(chasedExpiredTarget)
+    const settledPosition = chasedExpiredTarget
+      ? stopPlayerMovement({
+          notify: false,
+          settleAtEpochMs: chasedExpiredTarget.expiresAt,
+        })
+      : undefined
+    const expiryTransition = soloRecovery.applyTargetsExpired({
+      targetIds: expiredTargets.map((target) => target.id),
+      expiredAtEpochMs:
+        chasedExpiredTarget?.expiresAt ?? snapshot.expiredAtEpochMs,
+      settledPosition,
+      movement: chasedExpired ? null : undefined,
+      targets: snapshot.targets,
+      spawning: snapshot.spawning,
+    })
+    if (chasedExpired && expiryTransition.applied) {
       clearChaseState()
       showRouteMessage(TARGET_EXPIRED_MESSAGE)
-    },
-    [clearChaseState, showRouteMessage, stopPlayerMovement],
-  )
+    }
+  }, [
+    clearChaseState,
+    showRouteMessage,
+    soloRecovery,
+    stopPlayerMovement,
+  ])
+
+  const handleTargetStateTransition = useCallback((transition) => {
+    soloRecovery.queueRuntimeCheckpoint({
+      targets: transition.targets,
+      spawning: transition.spawning,
+    })
+  }, [soloRecovery])
 
   const {
     targets,
     isSpawningPaused,
-    removeTarget,
     clearTargets,
+    replaceTargets,
+    hydrateTargetState,
+    hasActiveTarget,
+    nextSpawnAtEpochMs,
     toggleSpawning,
   } = useTargetSpawner(
     playerPosition,
     simulationSpeed,
-    gameState === 'running',
+    soloRecovery.isReady && gameState === 'running',
     level,
     handleTargetExpired,
+    { onTargetTransition: handleTargetStateTransition },
   )
-  const [caughtTargets, setCaughtTargets] = useState([])
-  const [score, setScore] = useState(0)
-  const [catchToastTarget, setCatchToastTarget] = useState(null)
+
+  const applyRecoveredSoloGameplay = useCallback((checkpoint) => {
+    hydrateTargetState({
+      targets: checkpoint.targets,
+      spawning: checkpoint.spawning,
+    })
+    const recoveredCaughtTargets = structuredClone(checkpoint.caughtTargets)
+    caughtTargetsRef.current = recoveredCaughtTargets
+    scoreRef.current = checkpoint.score
+    xpRef.current = checkpoint.xp
+    recoveryRuntimeSnapshotRef.current = {
+      ...recoveryRuntimeSnapshotRef.current,
+      targets: structuredClone(checkpoint.targets),
+      caughtTargets: recoveredCaughtTargets,
+      score: checkpoint.score,
+      xp: checkpoint.xp,
+      isSpawningPaused: checkpoint.spawning.paused,
+      nextSpawnAtEpochMs: checkpoint.spawning.nextSpawnAtEpochMs,
+      spawning: structuredClone(checkpoint.spawning),
+      simulationSpeedMetersPerSecond:
+        checkpoint.player.simulationSpeedMetersPerSecond,
+    }
+    setCaughtTargets(recoveredCaughtTargets)
+    setScore(checkpoint.score)
+    hydrateXp(checkpoint.xp)
+    setCatchToastTarget(null)
+
+    const recoveredChasedTargetId =
+      checkpoint.movement?.purpose ===
+        SOLO_RECOVERY_MOVEMENT_PURPOSES.CHASE
+        ? checkpoint.movement.chasedTargetId
+        : null
+    updateChasedTargetId(recoveredChasedTargetId)
+    updateRoutingTargetId(
+      checkpoint.movement?.phase === 'ROUTING'
+        ? recoveredChasedTargetId
+        : null,
+    )
+
+    return {
+      isMovementValid: () => (
+        !recoveredChasedTargetId ||
+        hasActiveTarget(recoveredChasedTargetId)
+      ),
+      completeMovementHydration: (movementResult) => {
+        if (checkpoint.movement?.phase === 'ROUTING') {
+          updateRoutingTargetId(null)
+        }
+        if (
+          recoveredChasedTargetId &&
+          movementResult?.kind !== 'MOVING'
+        ) {
+          updateChasedTargetId(null)
+        }
+      },
+    }
+  }, [
+    hasActiveTarget,
+    hydrateTargetState,
+    hydrateXp,
+    updateChasedTargetId,
+    updateRoutingTargetId,
+  ])
+
+  const resetSoloTargetRuntime = useCallback(() => {
+    clearTargets()
+    caughtTargetsRef.current = []
+    scoreRef.current = 0
+    xpRef.current = 0
+    recoveryRuntimeSnapshotRef.current = {
+      ...recoveryRuntimeSnapshotRef.current,
+      targets: [],
+      caughtTargets: [],
+      score: 0,
+      xp: 0,
+      isSpawningPaused: false,
+      nextSpawnAtEpochMs: null,
+      spawning: { paused: false, nextSpawnAtEpochMs: null },
+    }
+    setCaughtTargets([])
+    setScore(0)
+    setCatchToastTarget(null)
+    resetProgression()
+  }, [clearTargets, resetProgression])
+
+  useLayoutEffect(() => {
+    hydrateSoloGameplayRef.current = applyRecoveredSoloGameplay
+    resetSoloTargetRuntimeRef.current = resetSoloTargetRuntime
+  }, [applyRecoveredSoloGameplay, resetSoloTargetRuntime])
+
   const [historyRefreshVersion, setHistoryRefreshVersion] = useState(0)
   const [activeMultiplayerRoom, setActiveMultiplayerRoom] = useState(null)
   const [activeRoomGameState, setActiveRoomGameState] = useState(null)
   const [sharedRoomCreatures, setSharedRoomCreatures] = useState([])
   const [sharedRoomCatchMessage, setSharedRoomCatchMessage] = useState(null)
   const previousGameStateRef = useRef(gameState)
-  const targetsRef = useRef(targets)
   const sharedRoomCreaturesRef = useRef(sharedRoomCreatures)
   const pendingSharedRoomCatchIdsRef = useRef(new Set())
   const sharedRoomCatchRetryAfterRef = useRef(new Map())
@@ -293,6 +530,34 @@ function App() {
   const activeRoomStatus =
     activeRoomGameState?.roomStatus || activeMultiplayerRoom?.status
   const activeRoomGameStatus = activeRoomGameState?.gameStatus
+
+  useEffect(() => {
+    caughtTargetsRef.current = caughtTargets
+    scoreRef.current = score
+    xpRef.current = xp
+    recoveryRuntimeSnapshotRef.current = {
+      targets,
+      caughtTargets,
+      score,
+      xp,
+      isSpawningPaused,
+      nextSpawnAtEpochMs,
+      spawning: {
+        paused: isSpawningPaused,
+        nextSpawnAtEpochMs,
+      },
+      simulationSpeedMetersPerSecond: simulationSpeed,
+    }
+  }, [
+    caughtTargets,
+    isSpawningPaused,
+    nextSpawnAtEpochMs,
+    score,
+    simulationSpeed,
+    targets,
+    xp,
+  ])
+
   const handleRoomCreatureEvent = useCallback(
     (event) => {
       if (!event?.creature || event.roomCode !== activeRoomCode) {
@@ -414,10 +679,6 @@ function App() {
       })),
     [currentUser?.userId, onlinePlayers, roomPositionsByPlayerId],
   )
-
-  useEffect(() => {
-    targetsRef.current = targets
-  }, [targets])
 
   useLayoutEffect(() => {
     const maxSpeedMps = Number(activeMultiplayerRoom?.settings?.maxSpeedMps)
@@ -544,40 +805,128 @@ function App() {
     updateRoutingSharedRoomCreatureId,
   ])
 
-  const handleCatchTarget = useCallback(
-    (target) => {
-      removeTarget(target.id)
-      if (chasedTargetIdRef.current === target.id) {
-        stopPlayerMovement()
+  const applyLiveCatchEvents = useCallback(
+    (catchEvents, {
+      observedAtEpochMs = Date.now(),
+      terminal = null,
+    } = {}) => {
+      const catchesChasedTarget = catchEvents.some(
+        (event) => chasedTargetIdRef.current === event.targetId,
+      )
+      const settledPosition = catchesChasedTarget
+        ? stopPlayerMovement({ notify: false })
+        : getSettledPlayerPosition()
+      const transition = soloRecovery.applyTargetCatchBatch({
+        catches: catchEvents.map((event) => ({
+          targetId: event.targetId,
+          caughtAtEpochMs: event.caughtAtEpochMs,
+        })),
+        checkpointAtEpochMs: observedAtEpochMs,
+        settledPosition,
+        movement: catchesChasedTarget || terminal ? null : undefined,
+      })
+      if (!transition.applied) {
+        return false
+      }
+      replaceTargets(transition.checkpoint.targets)
+      const nextCaughtTargets = structuredClone(
+        transition.checkpoint.caughtTargets,
+      )
+      caughtTargetsRef.current = nextCaughtTargets
+      scoreRef.current = transition.checkpoint.score
+      xpRef.current = transition.checkpoint.xp
+      setCaughtTargets(nextCaughtTargets)
+      setScore(transition.checkpoint.score)
+      hydrateXp(transition.checkpoint.xp)
+      if (transition.chaseStopped) {
         clearChaseState()
       }
-      setCaughtTargets((currentCaughtTargets) => [
-        { ...target, caughtAt: Date.now() },
-        ...currentCaughtTargets,
-      ])
-      setScore((currentScore) => currentScore + target.score)
-      addXp(target.score)
-      setCatchToastTarget(target)
-      playCatchSound(target.rarity)
-
-      void submitBackendCatch(target.creatureId).then((response) => {
-        if (response) {
-          setHistoryRefreshVersion((version) => version + 1)
-        }
+      transition.submissions.forEach((submission) => {
+        setCatchToastTarget(submission.caughtTarget)
+        playCatchSound(submission.caughtTarget.rarity)
+        void soloRecovery.submitPendingCatch(submission).then((result) => {
+          if (result.confirmed && result.acknowledged && !result.stale) {
+            setHistoryRefreshVersion((version) => version + 1)
+          }
+        })
       })
+      return true
     },
     [
-      addXp,
       clearChaseState,
-      removeTarget,
+      getSettledPlayerPosition,
+      hydrateXp,
+      replaceTargets,
+      setCatchToastTarget,
+      soloRecovery,
       stopPlayerMovement,
-      submitBackendCatch,
     ],
   )
+
+  const handleCatchTarget = useCallback((target) => {
+    const caughtAtEpochMs = Date.now()
+    applyLiveCatchEvents([{
+      target,
+      targetId: target.id,
+      caughtAtEpochMs,
+    }], { observedAtEpochMs: caughtAtEpochMs })
+  }, [applyLiveCatchEvents])
+
+  useLayoutEffect(() => {
+    handleSoloRouteIntervalEventsRef.current = (intervalResult) => {
+      const terminal = intervalResult.terminal
+      const isMovementDeadline =
+        terminal?.type === SOLO_ROUTE_EVENT_TYPES.TARGET_EXPIRY ||
+        terminal?.type === SOLO_ROUTE_EVENT_TYPES.ROUND_END
+      const settledPosition = isMovementDeadline
+        ? stopPlayerMovement({
+            notify: false,
+            settleAtEpochMs: terminal.atEpochMs,
+          })
+        : getSettledPlayerPosition()
+
+      applyLiveCatchEvents(intervalResult.entries, {
+        observedAtEpochMs: intervalResult.observedAtEpochMs,
+        terminal,
+      })
+
+      if (terminal?.type === SOLO_ROUTE_EVENT_TYPES.TARGET_EXPIRY) {
+        const expiryTransition = soloRecovery.applyTargetsExpired({
+          targetIds: [terminal.targetId],
+          expiredAtEpochMs: terminal.atEpochMs,
+          settledPosition,
+          movement: null,
+        })
+        if (expiryTransition.applied) {
+          replaceTargets(expiryTransition.checkpoint.targets)
+          clearChaseState()
+          showRouteMessage(TARGET_EXPIRED_MESSAGE)
+        }
+      }
+
+      if (terminal?.type === SOLO_ROUTE_EVENT_TYPES.ROUND_END) {
+        soloRecovery.queueRuntimeCheckpoint({
+          settledPosition,
+          movement: null,
+          allowRoundTerminal: true,
+          roundTerminalAtEpochMs: terminal.atEpochMs,
+        })
+      }
+    }
+  }, [
+    applyLiveCatchEvents,
+    clearChaseState,
+    getSettledPlayerPosition,
+    replaceTargets,
+    showRouteMessage,
+    soloRecovery,
+    stopPlayerMovement,
+  ])
 
   useCatchDetection({
     playerPosition,
     targets,
+    enabled: soloRecovery.isReady && gameState === 'running',
     isMoving,
     onCatchTarget: handleCatchTarget,
   })
@@ -614,14 +963,31 @@ function App() {
       return
     }
 
+    const endedAtEpochMs = Date.now()
+    const isDelayedRoundEnd =
+      Number.isFinite(endsAtEpochMs) && endedAtEpochMs >= endsAtEpochMs
+    const settledPosition = stopPlayerMovement({
+      notify: false,
+      settleAtEpochMs: isDelayedRoundEnd ? endsAtEpochMs : endedAtEpochMs,
+    })
+    soloRecovery.queueRuntimeCheckpoint({
+      settledPosition,
+      movement: null,
+      allowRoundTerminal: isDelayedRoundEnd,
+      roundTerminalAtEpochMs: isDelayedRoundEnd ? endsAtEpochMs : undefined,
+    })
     clearTargets()
-    stopPlayerMovement()
     clearChaseState()
     clearSharedRoomCreatureChaseState()
-    void finishSession(
-      'Round ended locally, but the backend session could not be closed.',
-    ).then((didEndSession) => {
-      if (didEndSession) {
+    const endingScope = soloRecovery.captureActiveRoundScope()
+    void finishSoloGameplayRound({
+      recovery: soloRecovery,
+      backend: { finishSession },
+      scope: endingScope,
+      failureMessage:
+        'Round ended locally, but the backend session could not be closed.',
+    }).then((result) => {
+      if (result.shouldRefreshHistory) {
         setHistoryRefreshVersion((version) => version + 1)
       }
     })
@@ -629,12 +995,16 @@ function App() {
     clearChaseState,
     clearSharedRoomCreatureChaseState,
     clearTargets,
+    endsAtEpochMs,
     finishSession,
     gameState,
+    soloRecovery,
     stopPlayerMovement,
   ])
 
   function resetScore() {
+    caughtTargetsRef.current = []
+    scoreRef.current = 0
     setCaughtTargets([])
     setScore(0)
     setCatchToastTarget(null)
@@ -646,63 +1016,89 @@ function App() {
     clearSharedRoomCreatureChaseState()
   }
 
-  function resetGame() {
-    void finishSession()
-    resetPlayerState()
-    clearChaseState()
-    clearSharedRoomCreatureChaseState()
-    clearTargets()
-    resetScore()
-    resetProgression()
-    resetGameSession()
+  async function resetGame() {
+    await resetSoloGameplayRound({
+      recovery: soloRecovery,
+      backend: {
+        finishSessionById,
+        invalidateSessionOperations,
+      },
+      resetRuntime: () => {
+        resetPlayerState()
+        clearChaseState()
+        clearSharedRoomCreatureChaseState()
+        clearTargets()
+        resetScore()
+        resetProgression()
+        resetGameSession()
+      },
+    })
   }
 
   async function handleStartGame() {
-    const didStartBackendSession = await beginSession(
-      selectedRoundSeconds,
-      effectivePlayerName,
-    )
-
-    if (didStartBackendSession) {
-      startGame()
-      setHistoryRefreshVersion((version) => version + 1)
-    }
-  }
-
-  async function handleEndGame() {
-    const didEndBackendSession = await finishSession()
-    endGame()
-
-    if (didEndBackendSession) {
-      setHistoryRefreshVersion((version) => version + 1)
-    }
-  }
-
-  async function restartGame() {
-    const didStartBackendSession = await replaceSession(
-      selectedRoundSeconds,
-      effectivePlayerName,
-    )
-
-    if (!didStartBackendSession) {
+    if (!soloRecovery.isReady) {
       return
     }
 
-    resetPlayerState()
-    clearChaseState()
-    clearSharedRoomCreatureChaseState()
-    clearTargets()
-    resetScore()
-    resetProgression()
-    restartGameSession()
-    setHistoryRefreshVersion((version) => version + 1)
+    await startSoloGameplayRound({
+      recovery: soloRecovery,
+      backend: { beginSession },
+      durationSeconds: selectedRoundSeconds,
+      playerName: effectivePlayerName,
+      onStarted: (timeline) => {
+        startGame(timeline)
+        setHistoryRefreshVersion((version) => version + 1)
+      },
+    })
+  }
+
+  async function handleEndGame() {
+    if (!soloRecovery.isReady) {
+      return
+    }
+
+    endGame()
+  }
+
+  async function restartGame() {
+    if (!soloRecovery.isReady) {
+      return
+    }
+
+    await restartSoloGameplayRound({
+      recovery: soloRecovery,
+      backend: {
+        invalidateSessionOperations,
+        replaceSession,
+      },
+      durationSeconds: selectedRoundSeconds,
+      playerName: effectivePlayerName,
+      resetRuntime: () => {
+        resetPlayerState()
+        clearChaseState()
+        clearSharedRoomCreatureChaseState()
+        clearTargets()
+        resetScore()
+        resetProgression()
+      },
+      onStarted: (timeline) => {
+        restartGameSession(timeline)
+        setHistoryRefreshVersion((version) => version + 1)
+      },
+    })
   }
 
   function handleMapClick(destination) {
+    if (!soloRecovery.isReady) {
+      return
+    }
     setPendingDestination(destination)
   }
 
   async function handleConfirmPendingMove() {
+    if (!soloRecovery.isReady) {
+      return
+    }
     clearChaseState()
     clearSharedRoomCreatureChaseState()
     await startMovementForArchitecture({
@@ -1059,14 +1455,14 @@ function App() {
   ])
 
   const isTargetActive = useCallback((targetId) => {
-    return targetsRef.current.some(
-      (currentTarget) =>
-        currentTarget.id === targetId && currentTarget.expiresAt > Date.now(),
-    )
-  }, [])
+    return hasActiveTarget(targetId)
+  }, [hasActiveTarget])
 
   const handleTargetClick = useCallback(
     async (target) => {
+      if (!soloRecovery.isReady) {
+        return
+      }
       stopPlayerMovement()
       clearPendingDestination()
       clearChaseState()
@@ -1087,6 +1483,8 @@ function App() {
         },
         {
           blockedMessage: TARGET_EXPIRED_MESSAGE,
+          purpose: SOLO_RECOVERY_MOVEMENT_PURPOSES.CHASE,
+          chasedTargetId: target.id,
           shouldStart: () => isTargetActive(target.id),
           onComplete: () => {
             if (chasedTargetIdRef.current === target.id) {
@@ -1112,6 +1510,7 @@ function App() {
       clearSharedRoomCreatureChaseState,
       isTargetActive,
       moveToDestination,
+      soloRecovery.isReady,
       showRouteMessage,
       stopPlayerMovement,
       clearChaseState,
@@ -1150,6 +1549,9 @@ function App() {
     handleEndGame,
     handleTargetClick,
     historyRefreshVersion,
+    isRecoveryReady: soloRecovery.isReady,
+    recoveryBootstrapState: soloRecovery.bootstrapState,
+    recoveryWarning: soloRecovery.warning,
     isAuthenticated,
     isMoving,
     isRouteLoading,

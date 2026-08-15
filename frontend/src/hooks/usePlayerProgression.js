@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   LEVEL_SPEED_BONUSES,
   LEVEL_THRESHOLDS,
   SPAWN_RARITY_WEIGHTS_BY_LEVEL,
-} from '../config/progressionConfig'
+} from '../config/progressionConfig.js'
 
 function getLevelForXp(xp) {
   return LEVEL_THRESHOLDS.reduce((currentLevel, threshold) => {
@@ -30,13 +30,21 @@ export function usePlayerProgression() {
   const speedBonus = LEVEL_SPEED_BONUSES[level] ?? 0
   const spawnRarityWeights = useMemo(() => getSpawnRarityWeights(level), [level])
 
-  function addXp(amount) {
+  const addXp = useCallback((amount) => {
     setXp((currentXp) => currentXp + amount)
-  }
+  }, [])
 
-  function resetProgression() {
+  const hydrateXp = useCallback((recoveredXp) => {
+    setXp(
+      Number.isSafeInteger(recoveredXp) && recoveredXp >= 0
+        ? recoveredXp
+        : 0,
+    )
+  }, [])
+
+  const resetProgression = useCallback(() => {
     setXp(0)
-  }
+  }, [])
 
   return {
     xp,
@@ -45,6 +53,7 @@ export function usePlayerProgression() {
     speedBonus,
     spawnRarityWeights,
     addXp,
+    hydrateXp,
     resetProgression,
   }
 }

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import React from 'react'
+import { act, create } from 'react-test-renderer'
 import {
   createSoloFollowCameraOptions,
   DEFAULT_SOLO_NAVIGATION_CAMERA_PROFILE,
@@ -18,8 +20,16 @@ import {
   transitionSoloFollowZoom,
   transitionSoloNavigationDestination,
 } from '../src/components/maplibre/mapLibreSoloGameState.js'
-import { createSoloCameraWorkManager } from '../src/components/maplibre/useMapLibreSoloCamera.js'
-import { createNavigationFrameChannel } from '../src/hooks/navigationFrameChannel.js'
+import {
+  createSoloCameraWorkManager,
+  useMapLibreSoloCamera,
+} from '../src/components/maplibre/useMapLibreSoloCamera.js'
+import {
+  createNavigationFrameChannel,
+  SOLO_NAVIGATION_START_KINDS,
+} from '../src/hooks/navigationFrameChannel.js'
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 const ROUTE_A = [
   [28.6, 77.2],
@@ -35,10 +45,10 @@ function createFakeTimers() {
   const timers = new Map()
 
   return {
-    schedule(callback) {
+    schedule(callback, delayMs = 0) {
       const timerId = nextTimerId
       nextTimerId += 1
-      timers.set(timerId, { callback, cancelled: false })
+      timers.set(timerId, { callback, cancelled: false, delayMs })
       return timerId
     },
     clear(timerId) {
@@ -56,6 +66,9 @@ function createFakeTimers() {
           timer.callback()
         }
       })
+    },
+    entries() {
+      return [...timers.values()]
     },
   }
 }
@@ -90,6 +103,139 @@ function createCameraWorkHarness() {
   })
 
   return { manager, map, timers }
+}
+
+function createCameraHookMap() {
+  const operations = []
+  const cameraApiCalls = []
+  let zoom = 17.5
+
+  return {
+    operations,
+    cameraApiCalls,
+    fitBounds(bounds, options, eventData) {
+      cameraApiCalls.push('fitBounds')
+      operations.push({ type: 'fit', bounds, options, eventData })
+    },
+    easeTo(options, eventData) {
+      cameraApiCalls.push('easeTo')
+      operations.push({ type: 'ease', options, eventData })
+    },
+    jumpTo(options, eventData) {
+      cameraApiCalls.push('jumpTo')
+      operations.push({ type: 'jump', options, eventData })
+    },
+    stop() {
+      cameraApiCalls.push('stop')
+      operations.push({ type: 'stop' })
+    },
+    getBearing() {
+      cameraApiCalls.push('getBearing')
+      return 0
+    },
+    getZoom() {
+      cameraApiCalls.push('getZoom')
+      return zoom
+    },
+    setZoom(nextZoom) {
+      zoom = nextZoom
+    },
+    getContainer() {
+      cameraApiCalls.push('getContainer')
+      return { closest: () => null }
+    },
+  }
+}
+
+async function withCameraHookRuntime(callback, {
+  prefersReducedMotion = false,
+} = {}) {
+  const originalWindow = globalThis.window
+  const timers = createFakeTimers()
+  globalThis.window = {
+    setTimeout: (timerCallback, delayMs) =>
+      timers.schedule(timerCallback, delayMs),
+    clearTimeout: (timerId) => timers.clear(timerId),
+    matchMedia: () => ({
+      matches: prefersReducedMotion,
+      addEventListener() {},
+      removeEventListener() {},
+    }),
+  }
+
+  try {
+    await callback({ timers })
+  } finally {
+    globalThis.window = originalWindow
+  }
+}
+
+function CameraHookHarness({ options, capture }) {
+  capture(useMapLibreSoloCamera(options))
+  return null
+}
+
+async function mountCameraHook(options) {
+  let current
+  let root
+  const render = (nextOptions) => React.createElement(CameraHookHarness, {
+    options: nextOptions,
+    capture: (value) => { current = value },
+  })
+
+  await act(async () => {
+    root = create(render(options))
+  })
+
+  return {
+    get current() {
+      return current
+    },
+    async update(nextOptions) {
+      await act(async () => root.update(render(nextOptions)))
+    },
+    async unmount() {
+      await act(async () => root.unmount())
+    },
+  }
+}
+
+function cameraOptions(map, channel, overrides = {}) {
+  return {
+    mapRef: { current: map },
+    playerPosition: { lat: 28.6, lon: 77.2 },
+    pendingDestination: null,
+    routeCoordinates: [],
+    isMoving: false,
+    subscribeToNavigationFrames: channel.subscribe,
+    ...overrides,
+  }
+}
+
+function navigationFrame({
+  routeRevision = 1,
+  navigationStartKind = SOLO_NAVIGATION_START_KINDS.FRESH,
+  position = { lat: 28.6, lon: 77.2 },
+  lookAheadPosition = { lat: 28.605, lon: 77.205 },
+  progress = 0,
+  isMoving = false,
+  timestampMs = 100,
+} = {}) {
+  return {
+    routeRevision,
+    navigationStartKind,
+    position,
+    lookAheadPosition,
+    bearingDegrees: 45,
+    lookAheadDistanceMeters: 40,
+    distanceTraveledMeters: progress * 1_000,
+    distanceRemainingMeters: (1 - progress) * 1_000,
+    totalDistanceMeters: 1_000,
+    speedMetersPerSecond: 80,
+    progress,
+    isMoving,
+    timestampMs,
+  }
 }
 
 function prepareDestination(
@@ -174,19 +320,522 @@ test('teardown removes subscriptions and invalidates camera timers', () => {
   assert.deepEqual(map.operations, ['stop'])
 })
 
-test('navigation frame subscribers receive latest and stop after unsubscribe', () => {
+test('navigation frame subscribers replay complete route-scoped metadata', () => {
   const channel = createNavigationFrameChannel()
-  const receivedRevisions = []
+  const receivedFrames = []
 
-  channel.publish({ routeRevision: 4 })
-  const unsubscribe = channel.subscribe((frame) => {
-    receivedRevisions.push(frame.routeRevision)
+  channel.publish({
+    routeRevision: 4,
+    navigationStartKind: SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
   })
-  channel.publish({ routeRevision: 5 })
+  const unsubscribe = channel.subscribe((frame) => {
+    receivedFrames.push({
+      routeRevision: frame.routeRevision,
+      navigationStartKind: frame.navigationStartKind,
+    })
+  })
+  channel.publish({
+    routeRevision: 5,
+    navigationStartKind: SOLO_NAVIGATION_START_KINDS.FRESH,
+  })
   unsubscribe()
-  channel.publish({ routeRevision: 6 })
+  channel.publish({
+    routeRevision: 6,
+    navigationStartKind: SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
+  })
 
-  assert.deepEqual(receivedRevisions, [4, 5])
+  assert.deepEqual(receivedFrames, [
+    {
+      routeRevision: 4,
+      navigationStartKind: SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
+    },
+    {
+      routeRevision: 5,
+      navigationStartKind: SOLO_NAVIGATION_START_KINDS.FRESH,
+    },
+  ])
+})
+
+test('recovered active MAP enters FOLLOW at its reconstructed near-complete frame', async () => {
+  await withCameraHookRuntime(async ({ timers }) => {
+    const channel = createNavigationFrameChannel()
+    const map = createCameraHookMap()
+    const baseOptions = cameraOptions(map, channel)
+    const hook = await mountCameraHook(baseOptions)
+    const recoveredFrame = navigationFrame({
+      navigationStartKind:
+        SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
+      position: { lat: 28.6195, lon: 77.239 },
+      lookAheadPosition: { lat: 28.62, lon: 77.24 },
+      progress: 0.995,
+      isMoving: true,
+      timestampMs: 5_000,
+    })
+
+    try {
+      await act(async () => hook.current.handleMapLoad())
+      await act(async () => {
+        channel.publish({ ...recoveredFrame, isMoving: false })
+        channel.publish(recoveredFrame)
+      })
+      await hook.update({
+        ...baseOptions,
+        playerPosition: recoveredFrame.position,
+        routeCoordinates: ROUTE_B,
+        isMoving: true,
+      })
+
+      assert.equal(hook.current.cameraMode, SOLO_CAMERA_MODES.FOLLOW)
+      assert.equal(
+        map.operations.some((operation) => operation.type === 'fit'),
+        false,
+      )
+      const follow = map.operations.findLast(
+        (operation) => operation.type === 'jump',
+      )
+      assert.ok(follow)
+      assert.ok(follow.options.center[1] > recoveredFrame.position.lat)
+      assert.ok(follow.options.center[1] > 28.619)
+      assert.equal(timers.entries().length, 0)
+    } finally {
+      await hook.unmount()
+    }
+  })
+})
+
+test('a recovered frame before map load uses zero map APIs then enters FOLLOW', async () => {
+  await withCameraHookRuntime(async () => {
+    const channel = createNavigationFrameChannel()
+    const map = createCameraHookMap()
+    const baseOptions = cameraOptions(map, channel)
+    const hook = await mountCameraHook(baseOptions)
+    const recoveredFrame = navigationFrame({
+      navigationStartKind:
+        SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
+      position: { lat: 28.608, lon: 77.208 },
+      lookAheadPosition: { lat: 28.61, lon: 77.21 },
+      progress: 0.6,
+      isMoving: true,
+    })
+
+    try {
+      await act(async () => {
+        channel.publish({ ...recoveredFrame, isMoving: false })
+        channel.publish(recoveredFrame)
+      })
+      await hook.update({
+        ...baseOptions,
+        playerPosition: recoveredFrame.position,
+        routeCoordinates: ROUTE_A,
+        isMoving: true,
+      })
+      await act(async () => hook.current.handleFollowZoomStart({
+        type: 'wheel',
+        originalEvent: { type: 'wheel' },
+      }))
+      await act(async () => hook.current.handleFollowZoomEnd({
+        type: 'zoomend',
+        originalEvent: { type: 'wheel' },
+      }))
+      await act(async () => hook.current.handleCameraInteraction({
+        type: 'dragstart',
+        originalEvent: { type: 'mousedown' },
+      }))
+      assert.deepEqual(map.cameraApiCalls, [])
+
+      await act(async () => hook.current.handleMapLoad())
+      assert.equal(hook.current.cameraMode, SOLO_CAMERA_MODES.FOLLOW)
+      assert.deepEqual(map.cameraApiCalls, ['getBearing', 'jumpTo'])
+      assert.equal(
+        map.operations.filter((operation) => operation.type === 'jump').length,
+        1,
+      )
+      assert.equal(
+        map.operations.some((operation) => operation.type === 'fit'),
+        false,
+      )
+    } finally {
+      await hook.unmount()
+    }
+  })
+})
+
+test('a fresh route before map load defers APIs then keeps overview and follow', async () => {
+  await withCameraHookRuntime(async ({ timers }) => {
+    const channel = createNavigationFrameChannel()
+    const map = createCameraHookMap()
+    const baseOptions = cameraOptions(map, channel)
+    const hook = await mountCameraHook(baseOptions)
+    const freshFrame = navigationFrame({
+      navigationStartKind: SOLO_NAVIGATION_START_KINDS.FRESH,
+      isMoving: false,
+    })
+
+    try {
+      await act(async () => {
+        channel.publish(freshFrame)
+        channel.publish({
+          ...freshFrame,
+          isMoving: true,
+          timestampMs: 150,
+        })
+      })
+      await hook.update({
+        ...baseOptions,
+        routeCoordinates: ROUTE_A,
+        isMoving: true,
+      })
+      assert.deepEqual(map.cameraApiCalls, [])
+
+      await act(async () => hook.current.handleMapLoad())
+      assert.equal(hook.current.cameraMode, SOLO_CAMERA_MODES.OVERVIEW)
+      assert.deepEqual(map.cameraApiCalls, [
+        'getBearing',
+        'stop',
+        'getContainer',
+        'fitBounds',
+      ])
+      assert.equal(timers.entries()[0].delayMs, 240)
+
+      await act(async () => timers.runAll())
+      await act(async () => channel.publish({
+        ...freshFrame,
+        isMoving: true,
+        timestampMs: 200,
+      }))
+      assert.equal(hook.current.cameraMode, SOLO_CAMERA_MODES.FOLLOW)
+      assert.equal(
+        map.operations.some((operation) => operation.type === 'ease'),
+        true,
+      )
+      assert.equal(
+        map.operations.some((operation) => operation.type === 'jump'),
+        true,
+      )
+    } finally {
+      await hook.unmount()
+    }
+  })
+})
+
+test('a recovered pre-load frame cannot affect its fresh replacement', async () => {
+  await withCameraHookRuntime(async ({ timers }) => {
+    const channel = createNavigationFrameChannel()
+    const map = createCameraHookMap()
+    const baseOptions = cameraOptions(map, channel)
+    const hook = await mountCameraHook(baseOptions)
+    const recoveredA = navigationFrame({
+      routeRevision: 1,
+      navigationStartKind:
+        SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
+      progress: 0.5,
+      isMoving: true,
+    })
+    const freshB = navigationFrame({
+      routeRevision: 2,
+      navigationStartKind: SOLO_NAVIGATION_START_KINDS.FRESH,
+      position: { lat: 28.61, lon: 77.21 },
+      lookAheadPosition: { lat: 28.62, lon: 77.24 },
+      isMoving: false,
+    })
+
+    try {
+      await act(async () => {
+        channel.publish({ ...recoveredA, isMoving: false })
+        channel.publish(recoveredA)
+      })
+      await hook.update({
+        ...baseOptions,
+        routeCoordinates: ROUTE_A,
+        isMoving: true,
+      })
+      await act(async () => channel.publish(freshB))
+      await hook.update({
+        ...baseOptions,
+        playerPosition: freshB.position,
+        routeCoordinates: ROUTE_B,
+        isMoving: false,
+      })
+      assert.deepEqual(map.cameraApiCalls, [])
+
+      await act(async () => hook.current.handleMapLoad())
+      assert.equal(hook.current.cameraMode, SOLO_CAMERA_MODES.OVERVIEW)
+      assert.deepEqual(hook.current.activeNavigationDestination, {
+        lat: ROUTE_B.at(-1)[0],
+        lon: ROUTE_B.at(-1)[1],
+      })
+      assert.equal(
+        map.operations.filter((operation) => operation.type === 'fit').length,
+        1,
+      )
+      assert.equal(
+        map.operations.some((operation) => operation.type === 'jump'),
+        false,
+      )
+
+      const apiCallCount = map.cameraApiCalls.length
+      await act(async () => channel.publish({
+        ...recoveredA,
+        timestampMs: 999,
+      }))
+      assert.equal(map.cameraApiCalls.length, apiCallCount)
+
+      await act(async () => timers.runAll())
+      await act(async () => channel.publish({
+        ...freshB,
+        isMoving: true,
+        timestampMs: 1_000,
+      }))
+      assert.equal(hook.current.cameraMode, SOLO_CAMERA_MODES.FOLLOW)
+    } finally {
+      await hook.unmount()
+    }
+  })
+})
+
+test('fresh and recovered-ROUTING results retain overview after recovered A', async () => {
+  await withCameraHookRuntime(async ({ timers }) => {
+    const channel = createNavigationFrameChannel()
+    const map = createCameraHookMap()
+    const baseOptions = cameraOptions(map, channel)
+    const hook = await mountCameraHook(baseOptions)
+    const recoveredA = navigationFrame({
+      routeRevision: 1,
+      navigationStartKind:
+        SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
+      progress: 0.5,
+      isMoving: true,
+    })
+
+    try {
+      await act(async () => hook.current.handleMapLoad())
+      await act(async () => {
+        channel.publish({ ...recoveredA, isMoving: false })
+        channel.publish(recoveredA)
+      })
+      await hook.update({
+        ...baseOptions,
+        routeCoordinates: ROUTE_A,
+        isMoving: true,
+      })
+      assert.equal(
+        map.operations.some((operation) => operation.type === 'fit'),
+        false,
+      )
+
+      const freshB = navigationFrame({
+        routeRevision: 2,
+        navigationStartKind: SOLO_NAVIGATION_START_KINDS.FRESH,
+        position: { lat: 28.61, lon: 77.21 },
+        lookAheadPosition: { lat: 28.62, lon: 77.24 },
+        isMoving: true,
+      })
+      await act(async () => channel.publish(freshB))
+      await hook.update({
+        ...baseOptions,
+        playerPosition: freshB.position,
+        routeCoordinates: ROUTE_B,
+        isMoving: true,
+      })
+
+      assert.equal(hook.current.cameraMode, SOLO_CAMERA_MODES.OVERVIEW)
+      assert.equal(
+        map.operations.filter((operation) => operation.type === 'fit').length,
+        1,
+      )
+      assert.equal(timers.entries()[0].delayMs, 240)
+    } finally {
+      await hook.unmount()
+    }
+  })
+})
+
+test('recovered CHASE FOLLOW detaches to FREE and resumes at the latest frame', async () => {
+  await withCameraHookRuntime(async ({ timers }) => {
+    const channel = createNavigationFrameChannel()
+    const map = createCameraHookMap()
+    const baseOptions = cameraOptions(map, channel)
+    const hook = await mountCameraHook(baseOptions)
+    const recoveredChase = navigationFrame({
+      navigationStartKind:
+        SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
+      progress: 0.4,
+      isMoving: true,
+    })
+
+    try {
+      await act(async () => hook.current.handleMapLoad())
+      await act(async () => {
+        channel.publish({ ...recoveredChase, isMoving: false })
+        channel.publish(recoveredChase)
+      })
+      await hook.update({
+        ...baseOptions,
+        routeCoordinates: ROUTE_A,
+        isMoving: true,
+      })
+      await act(async () => hook.current.handleCameraInteraction({
+        type: 'dragstart',
+        originalEvent: { type: 'mousedown' },
+      }))
+      assert.equal(hook.current.cameraMode, SOLO_CAMERA_MODES.FREE)
+
+      const latestFrame = navigationFrame({
+        navigationStartKind:
+          SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
+        position: { lat: 28.609, lon: 77.209 },
+        lookAheadPosition: { lat: 28.61, lon: 77.21 },
+        progress: 0.8,
+        isMoving: true,
+        timestampMs: 200,
+      })
+      const jumpCount = map.operations.filter(
+        (operation) => operation.type === 'jump',
+      ).length
+      await act(async () => channel.publish(latestFrame))
+      assert.equal(
+        map.operations.filter((operation) => operation.type === 'jump').length,
+        jumpCount,
+      )
+
+      await act(async () => hook.current.resumeFollow())
+      assert.equal(hook.current.cameraMode, SOLO_CAMERA_MODES.FOLLOW)
+      const resumed = map.operations.findLast(
+        (operation) => operation.type === 'ease',
+      )
+      assert.ok(resumed.options.center[1] > latestFrame.position.lat)
+      await act(async () => timers.runAll())
+
+      map.setZoom(20)
+      await act(async () => hook.current.handleFollowZoomStart({
+        type: 'wheel',
+        originalEvent: { type: 'wheel' },
+      }))
+      await act(async () => hook.current.handleFollowZoomEnd({
+        type: 'zoomend',
+        originalEvent: { type: 'wheel' },
+      }))
+      assert.equal(hook.current.cameraMode, SOLO_CAMERA_MODES.FOLLOW)
+      assert.equal(
+        map.operations.findLast((operation) => operation.type === 'jump')
+          .options.zoom,
+        SOLO_FOLLOW_MAX_ZOOM,
+      )
+    } finally {
+      await hook.unmount()
+    }
+  })
+})
+
+test('recovered FOLLOW uses the reduced-motion positional profile', async () => {
+  await withCameraHookRuntime(async () => {
+    const channel = createNavigationFrameChannel()
+    const map = createCameraHookMap()
+    const baseOptions = cameraOptions(map, channel)
+    const hook = await mountCameraHook(baseOptions)
+    const recoveredFrame = navigationFrame({
+      navigationStartKind:
+        SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
+      progress: 0.7,
+      isMoving: true,
+    })
+
+    try {
+      await act(async () => hook.current.handleMapLoad())
+      await act(async () => {
+        channel.publish({ ...recoveredFrame, isMoving: false })
+        channel.publish(recoveredFrame)
+      })
+      await hook.update({
+        ...baseOptions,
+        routeCoordinates: ROUTE_A,
+        isMoving: true,
+      })
+      const follow = map.operations.findLast(
+        (operation) => operation.type === 'jump',
+      )
+      assert.equal(hook.current.prefersReducedMotion, true)
+      assert.equal(follow.options.pitch, 0)
+      assert.equal(follow.options.bearing, 0)
+      assert.equal(
+        map.operations.some((operation) => operation.type === 'fit'),
+        false,
+      )
+    } finally {
+      await hook.unmount()
+    }
+  }, { prefersReducedMotion: true })
+})
+
+test('stale recovered camera work cannot manipulate its fresh replacement', async () => {
+  await withCameraHookRuntime(async ({ timers }) => {
+    const channel = createNavigationFrameChannel()
+    const map = createCameraHookMap()
+    const baseOptions = cameraOptions(map, channel)
+    const hook = await mountCameraHook(baseOptions)
+    const recoveredA = navigationFrame({
+      routeRevision: 1,
+      navigationStartKind:
+        SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE,
+      progress: 0.5,
+      isMoving: true,
+    })
+
+    try {
+      await act(async () => hook.current.handleMapLoad())
+      await act(async () => {
+        channel.publish({ ...recoveredA, isMoving: false })
+        channel.publish(recoveredA)
+      })
+      await hook.update({
+        ...baseOptions,
+        routeCoordinates: ROUTE_A,
+        isMoving: true,
+      })
+      await act(async () => hook.current.handleCameraInteraction({
+        type: 'dragstart',
+        originalEvent: { type: 'mousedown' },
+      }))
+      await act(async () => hook.current.resumeFollow())
+
+      const freshB = navigationFrame({
+        routeRevision: 2,
+        position: { lat: 28.61, lon: 77.21 },
+        lookAheadPosition: { lat: 28.62, lon: 77.24 },
+      })
+      await act(async () => channel.publish(freshB))
+      await hook.update({
+        ...baseOptions,
+        playerPosition: freshB.position,
+        routeCoordinates: ROUTE_B,
+        isMoving: false,
+      })
+      const replacementIndex = map.operations.findLastIndex(
+        (operation) => operation.type === 'fit',
+      )
+      await act(async () => timers.runAll({ includeCancelled: true }))
+      await act(async () => channel.publish({
+        ...recoveredA,
+        timestampMs: 999,
+      }))
+
+      const replacementOperations = map.operations.slice(replacementIndex + 1)
+      assert.equal(
+        replacementOperations.filter(
+          (operation) => operation.type === 'ease',
+        ).length,
+        1,
+      )
+      assert.equal(
+        replacementOperations.some((operation) =>
+          operation.type === 'jump' &&
+          operation.options.center[1] < freshB.position.lat),
+        false,
+      )
+    } finally {
+      await hook.unmount()
+    }
+  })
 })
 
 test('ordinary and chase destinations clear when navigation completes', () => {

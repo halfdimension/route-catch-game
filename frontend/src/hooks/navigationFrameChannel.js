@@ -1,3 +1,8 @@
+export const SOLO_NAVIGATION_START_KINDS = Object.freeze({
+  FRESH: 'FRESH',
+  RECOVERED_ACTIVE: 'RECOVERED_ACTIVE',
+})
+
 export function createNavigationFrameChannel({
   onListenerError = (error) => {
     console.error('Navigation frame listener failed:', error)

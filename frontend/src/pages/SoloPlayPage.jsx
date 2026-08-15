@@ -24,6 +24,15 @@ const MapLibreSoloGameMap = lazy(
 function SoloPlayPage({ gameplay }) {
   const isMapLibreExperience =
     SOLO_MAP_RENDERER === SOLO_MAP_RENDERERS.MAPLIBRE
+
+  if (!gameplay.isRecoveryReady) {
+    return (
+      <main className="route-loading" role="status">
+        Recovering active SOLO round…
+      </main>
+    )
+  }
+
   const soloMapProps = {
     playerPosition: gameplay.playerPosition,
     pendingDestination: gameplay.pendingDestination,
@@ -87,6 +96,18 @@ function SoloPlayPage({ gameplay }) {
           </div>
         ) : (
           <div className="route-status route-error">{gameplay.routeError}</div>
+        )
+      )}
+
+      {gameplay.recoveryWarning && (
+        isMapLibreExperience ? (
+          <div className="maplibre-game-toast is-error" role="status">
+            {gameplay.recoveryWarning}
+          </div>
+        ) : (
+          <div className="route-status route-error" role="status">
+            {gameplay.recoveryWarning}
+          </div>
         )
       )}
 
