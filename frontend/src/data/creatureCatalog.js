@@ -112,3 +112,7 @@ export const CREATURE_CATALOG = [
 export function getCreaturesByRarity(rarity) {
   return CREATURE_CATALOG.filter((creature) => creature.rarity === rarity)
 }
+
+export function getCreatureById(creatureId) {
+  return CREATURE_CATALOG.find((creature) => creature.id === creatureId) ?? null
+}

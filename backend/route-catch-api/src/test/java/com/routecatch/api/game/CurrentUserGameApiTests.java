@@ -264,7 +264,8 @@ class CurrentUserGameApiTests {
 		gameSessionService.startSession(sessionId);
 		gameSessionService.submitCatch(
 			sessionId,
-			new SubmitCatchRequest(creatureId, null, null, null)
+			new SubmitCatchRequest(creatureId, null, null, null),
+			gameSessionRepository.findById(sessionId).orElseThrow().getUserId()
 		);
 		gameSessionService.endSession(sessionId);
 	}

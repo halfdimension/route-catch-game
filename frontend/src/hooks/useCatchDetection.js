@@ -1,34 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { CATCH_RADIUS_METERS } from '../config/gameConfig'
-
-const EARTH_RADIUS_METERS = 6371000
-
-function toRadians(degrees) {
-  return (degrees * Math.PI) / 180
-}
-
-function getDistanceMeters(source, target) {
-  const latDelta = toRadians(target.lat - source.lat)
-  const lonDelta = toRadians(target.lon - source.lon)
-  const sourceLatRadians = toRadians(source.lat)
-  const targetLatRadians = toRadians(target.lat)
-
-  const a =
-    Math.sin(latDelta / 2) ** 2 +
-    Math.cos(sourceLatRadians) *
-      Math.cos(targetLatRadians) *
-      Math.sin(lonDelta / 2) ** 2
-
-  return (
-    EARTH_RADIUS_METERS *
-    2 *
-    Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  )
-}
+import { isSoloTargetCatchableAt } from '../utils/soloCatchGeometry.js'
 
 export function useCatchDetection({
   playerPosition,
   targets,
+  enabled = true,
   isMoving,
   onCatchTarget,
 }) {
@@ -43,7 +19,10 @@ export function useCatchDetection({
       }
     })
 
-    if (!isMoving) {
+    // Moving catches are resolved from logical route-distance intervals by
+    // useRouteAnimation. Sampling rendered positions here would reintroduce a
+    // frame-rate-dependent event model and could race the interval resolver.
+    if (!enabled || isMoving) {
       return
     }
 
@@ -56,12 +35,10 @@ export function useCatchDetection({
           return
         }
 
-        const distanceMeters = getDistanceMeters(playerPosition, target)
-
-        if (distanceMeters <= CATCH_RADIUS_METERS) {
+        if (isSoloTargetCatchableAt(playerPosition, target, now)) {
           reportedTargetIdsRef.current.add(target.id)
           onCatchTarget(target)
         }
       })
-  }, [isMoving, onCatchTarget, playerPosition, targets])
+  }, [enabled, isMoving, onCatchTarget, playerPosition, targets])
 }

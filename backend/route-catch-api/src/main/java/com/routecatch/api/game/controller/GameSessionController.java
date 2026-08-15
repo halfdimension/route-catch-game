@@ -92,9 +92,15 @@ public class GameSessionController {
 	@PostMapping("/{sessionId}/catches")
 	public SubmitCatchResponse submitCatch(
 		@PathVariable UUID sessionId,
-		@Valid @RequestBody SubmitCatchRequest request
+		@Valid @RequestBody SubmitCatchRequest request,
+		Authentication authentication
 	) {
-		return gameSessionService.submitCatch(sessionId, request);
+		UserEntity authenticatedUser = authenticatedUser(authentication);
+		return gameSessionService.submitCatch(
+			sessionId,
+			request,
+			authenticatedUser == null ? null : authenticatedUser.getUserId()
+		);
 	}
 
 	private UserEntity authenticatedUser(Authentication authentication) {

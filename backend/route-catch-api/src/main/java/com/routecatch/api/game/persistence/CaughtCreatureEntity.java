@@ -43,7 +43,15 @@ public class CaughtCreatureEntity {
 		UUID sessionId,
 		CreatureDefinition creature
 	) {
-		this.catchId = UUID.randomUUID();
+		this(UUID.randomUUID(), sessionId, creature);
+	}
+
+	public CaughtCreatureEntity(
+		UUID catchId,
+		UUID sessionId,
+		CreatureDefinition creature
+	) {
+		this.catchId = catchId;
 		this.sessionId = sessionId;
 		this.creatureId = creature.creatureId();
 		this.creatureName = creature.creatureName();

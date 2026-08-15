@@ -292,6 +292,144 @@ class GameSessionApiTests {
 	}
 
 	@Test
+	void suppliedCatchIdIsReturnedAndExactRetryIsIdempotent() throws Exception {
+		GameSession session = gameSessionService.createSession(60);
+		gameSessionService.startSession(session.sessionId());
+		UUID catchId = UUID.randomUUID();
+		String request = """
+			{
+				"catchId": "%s",
+				"creatureId": "sparkbit"
+			}
+			""".formatted(catchId);
+
+		for (int attempt = 0; attempt < 2; attempt += 1) {
+			mockMvc.perform(post(
+					"/api/game/sessions/{sessionId}/catches",
+					session.sessionId()
+				)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(request))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.sessionId").value(
+					session.sessionId().toString()
+				))
+				.andExpect(jsonPath("$.catchId").value(catchId.toString()))
+				.andExpect(jsonPath("$.score").value(10))
+				.andExpect(jsonPath("$.caughtCount").value(1))
+				.andExpect(jsonPath("$.creatureId").value("sparkbit"));
+		}
+
+		assertEquals(1, caughtCreatureRepository.count());
+		GameSessionEntity persisted = gameSessionRepository
+			.findById(session.sessionId())
+			.orElseThrow();
+		assertEquals(10, persisted.getScore());
+		assertEquals(1, persisted.getCaughtCount());
+	}
+
+	@Test
+	void catchEndpointRejectsAuthenticatedNonOwnerBeforeCatchLookup()
+		throws Exception {
+		String ownerToken = registerUserAndReturnToken(
+			"owner",
+			"owner@example.com",
+			"Owner"
+		);
+		String otherToken = registerUserAndReturnToken(
+			"other",
+			"other@example.com",
+			"Other"
+		);
+		UUID sessionId = createAuthenticatedSession(ownerToken);
+		gameSessionService.startSession(sessionId);
+		UUID catchId = UUID.randomUUID();
+		String request = catchRequestJson(catchId, "sparkbit");
+
+		mockMvc.perform(post(
+				"/api/game/sessions/{sessionId}/catches",
+				sessionId
+			)
+				.header("Authorization", "Bearer " + otherToken)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(request))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.errorCode").value(
+				"GAME_SESSION_FORBIDDEN"
+			));
+
+		mockMvc.perform(post(
+				"/api/game/sessions/{sessionId}/catches",
+				sessionId
+			)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(request))
+			.andExpect(status().isForbidden())
+			.andExpect(jsonPath("$.errorCode").value(
+				"GAME_SESSION_FORBIDDEN"
+			));
+
+		mockMvc.perform(post(
+				"/api/game/sessions/{sessionId}/catches",
+				sessionId
+			)
+				.header("Authorization", "Bearer " + ownerToken)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(request))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.catchId").value(catchId.toString()));
+	}
+
+	@Test
+	void anotherUserCannotReplayCatchIdIntoTheirOwnSession() throws Exception {
+		String firstToken = registerUserAndReturnToken(
+			"first",
+			"first@example.com",
+			"First"
+		);
+		String secondToken = registerUserAndReturnToken(
+			"second",
+			"second@example.com",
+			"Second"
+		);
+		UUID firstSessionId = createAuthenticatedSession(firstToken);
+		UUID secondSessionId = createAuthenticatedSession(secondToken);
+		gameSessionService.startSession(firstSessionId);
+		gameSessionService.startSession(secondSessionId);
+		UUID catchId = UUID.randomUUID();
+		String request = catchRequestJson(catchId, "sparkbit");
+
+		mockMvc.perform(post(
+				"/api/game/sessions/{sessionId}/catches",
+				firstSessionId
+			)
+				.header("Authorization", "Bearer " + firstToken)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(request))
+			.andExpect(status().isOk());
+
+		mockMvc.perform(post(
+				"/api/game/sessions/{sessionId}/catches",
+				secondSessionId
+			)
+				.header("Authorization", "Bearer " + secondToken)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(request))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.errorCode").value("CATCH_ID_CONFLICT"))
+			.andExpect(jsonPath("$.message").value(
+				"Catch ID is already assigned to a different catch"
+			));
+
+		GameSessionEntity second = gameSessionRepository
+			.findById(secondSessionId)
+			.orElseThrow();
+		assertEquals(0, second.getScore());
+		assertEquals(0, second.getCaughtCount());
+		assertEquals(1, caughtCreatureRepository.count());
+	}
+
+	@Test
 	void listSessionsReturnsMostRecentFirst() throws Exception {
 		GameSession older = gameSessionService.createSession(60);
 		Thread.sleep(2);
@@ -456,5 +594,33 @@ class GameSessionApiTests {
 			.getContentAsString();
 
 		return com.jayway.jsonpath.JsonPath.read(response, "$.token");
+	}
+
+	private UUID createAuthenticatedSession(String token) throws Exception {
+		String response = mockMvc.perform(post("/api/game/sessions")
+				.header("Authorization", "Bearer " + token)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+						"durationSeconds": 60
+					}
+					"""))
+			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+
+		return UUID.fromString(
+			com.jayway.jsonpath.JsonPath.read(response, "$.sessionId")
+		);
+	}
+
+	private String catchRequestJson(UUID catchId, String creatureId) {
+		return """
+			{
+				"catchId": "%s",
+				"creatureId": "%s"
+			}
+			""".formatted(catchId, creatureId);
 	}
 }

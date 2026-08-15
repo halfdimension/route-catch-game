@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../config/apiConfig'
+import { API_BASE_URL } from '../config/apiConfig.js'
 
 export class RouteRequestError extends Error {
   constructor(message, { status, errorCode, responseMessage } = {}) {

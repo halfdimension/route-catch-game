@@ -23,6 +23,7 @@ import {
   transitionSoloNavigationDestination,
   transitionSoloCameraMode,
 } from './mapLibreSoloGameState.js'
+import { SOLO_NAVIGATION_START_KINDS } from '../../hooks/navigationFrameChannel.js'
 
 const CAMERA_PADDING_PROPERTIES = Object.freeze({
   top: '--ml-camera-padding-top',
@@ -72,6 +73,18 @@ function getMapInstance(mapRef) {
   }
 
   return map
+}
+
+export function shouldSkipSoloNavigationOverview(
+  navigationFrame,
+  activeRouteRevision,
+) {
+  return Boolean(
+    navigationFrame?.routeRevision === activeRouteRevision &&
+    navigationFrame.navigationStartKind ===
+      SOLO_NAVIGATION_START_KINDS.RECOVERED_ACTIVE &&
+    navigationFrame.progress < 1,
+  )
 }
 
 export function createSoloCameraWorkManager({
@@ -154,15 +167,15 @@ export function useMapLibreSoloCamera({
     })
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     playerPositionRef.current = playerPosition
   }, [playerPosition])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     pendingDestinationRef.current = pendingDestination
   }, [pendingDestination])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     routeCoordinatesRef.current = routeCoordinates
   }, [routeCoordinates])
 
@@ -204,7 +217,9 @@ export function useMapLibreSoloCamera({
   const cancelCameraTransitions = useCallback(
     ({ stopMap = false } = {}) => {
       automaticTransitionRef.current = false
-      return cameraWorkManagerRef.current.invalidate({ stopMap })
+      return cameraWorkManagerRef.current.invalidate({
+        stopMap: stopMap && mapReadyRef.current,
+      })
     },
     [],
   )
@@ -258,6 +273,10 @@ export function useMapLibreSoloCamera({
     const navigationFrame = latestNavigationFrameRef.current
 
     if (
+      shouldSkipSoloNavigationOverview(
+        navigationFrame,
+        activeRouteRevisionRef.current,
+      ) ||
       !mapReadyRef.current ||
       !map ||
       !Array.isArray(route) ||
@@ -354,8 +373,10 @@ export function useMapLibreSoloCamera({
         activeRouteRevisionRef.current = navigationFrame.routeRevision
         latestNavigationFrameRef.current = navigationFrame
         lastCameraTimestampRef.current = navigationFrame.timestampMs
-        const map = getMapInstance(mapRef)
-        lastCameraBearingRef.current = Number(map?.getBearing?.()) || 0
+        if (mapReadyRef.current) {
+          const map = getMapInstance(mapRef)
+          lastCameraBearingRef.current = Number(map?.getBearing?.()) || 0
+        }
         updateNavigationDestination({
           type: SOLO_NAVIGATION_DESTINATION_EVENTS.NAVIGATION_FRAME,
           navigationFrame,
@@ -492,8 +513,8 @@ export function useMapLibreSoloCamera({
 
     return () => {
       mountedRef.current = false
-      mapReadyRef.current = false
       cancelCameraTransitions({ stopMap: true })
+      mapReadyRef.current = false
     }
   }, [cancelCameraTransitions])
 
@@ -501,10 +522,17 @@ export function useMapLibreSoloCamera({
     mapReadyRef.current = true
     const map = getMapInstance(mapRef)
     lastCameraBearingRef.current = Number(map?.getBearing?.()) || 0
+    const navigationFrame = latestNavigationFrameRef.current
 
-    if (latestNavigationFrameRef.current?.isMoving) {
+    if (
+      navigationFrame?.isMoving &&
+      shouldSkipSoloNavigationOverview(
+        navigationFrame,
+        activeRouteRevisionRef.current,
+      )
+    ) {
       updateCameraMode(SOLO_CAMERA_EVENTS.MOVEMENT_STARTED)
-      applyFollowFrame(latestNavigationFrameRef.current)
+      applyFollowFrame(navigationFrame)
     } else {
       fitOverview()
     }
@@ -513,6 +541,7 @@ export function useMapLibreSoloCamera({
   const handleCameraInteraction = useCallback(
     (event) => {
       if (
+        !mapReadyRef.current ||
         !isSoloCameraUserInteraction(event) ||
         getSoloCameraInteractionType(event) !==
           SOLO_CAMERA_INTERACTION_TYPES.DETACH
@@ -537,6 +566,7 @@ export function useMapLibreSoloCamera({
   const handleFollowZoomStart = useCallback(
     (event) => {
       if (
+        !mapReadyRef.current ||
         getSoloCameraInteractionType(event) !==
           SOLO_CAMERA_INTERACTION_TYPES.ZOOM ||
         cameraModeRef.current !== SOLO_CAMERA_MODES.FOLLOW
@@ -552,6 +582,10 @@ export function useMapLibreSoloCamera({
 
   const handleFollowZoomEnd = useCallback(
     (event) => {
+      if (!mapReadyRef.current) {
+        return
+      }
+
       const wasUserZooming = userZoomInteractionRef.current
 
       if (
@@ -587,7 +621,7 @@ export function useMapLibreSoloCamera({
   const resumeFollow = useCallback(() => {
     const navigationFrame = latestNavigationFrameRef.current
 
-    if (!navigationFrame?.isMoving) {
+    if (!mapReadyRef.current || !navigationFrame?.isMoving) {
       return false
     }
 

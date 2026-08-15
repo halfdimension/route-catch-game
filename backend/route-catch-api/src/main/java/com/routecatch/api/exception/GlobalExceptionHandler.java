@@ -16,6 +16,8 @@ import com.routecatch.api.auth.exception.InvalidCredentialsException;
 import com.routecatch.api.auth.exception.UserAlreadyExistsException;
 import com.routecatch.api.dto.ApiErrorResponse;
 import com.routecatch.api.game.exception.CreatureNotFoundException;
+import com.routecatch.api.game.exception.GameSessionCatchConflictException;
+import com.routecatch.api.game.exception.GameSessionForbiddenException;
 import com.routecatch.api.game.exception.GameSessionNotFoundException;
 import com.routecatch.api.game.exception.InvalidGameSessionStateException;
 import com.routecatch.api.game.exception.InvalidPlayerNameException;
@@ -74,6 +76,32 @@ public class GlobalExceptionHandler {
 		return errorResponse(
 			HttpStatus.CONFLICT,
 			"INVALID_GAME_SESSION_STATE",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(GameSessionCatchConflictException.class)
+	public ResponseEntity<ApiErrorResponse> handleGameSessionCatchConflict(
+		GameSessionCatchConflictException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.CONFLICT,
+			"CATCH_ID_CONFLICT",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(GameSessionForbiddenException.class)
+	public ResponseEntity<ApiErrorResponse> handleGameSessionForbidden(
+		GameSessionForbiddenException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.FORBIDDEN,
+			"GAME_SESSION_FORBIDDEN",
 			exception.getMessage(),
 			request
 		);

@@ -1,20 +1,23 @@
-import { API_BASE_URL } from '../config/apiConfig'
+import { API_BASE_URL } from '../config/apiConfig.js'
 
 async function requestGameSession(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, options)
 
   if (!response.ok) {
     let message = 'Game session request failed'
+    let errorCode = null
 
     try {
       const errorResponse = await response.json()
       message = errorResponse.message || message
+      errorCode = errorResponse.errorCode ?? null
     } catch {
       // Keep the safe fallback when the response does not contain JSON.
     }
 
     const requestError = new Error(message)
     requestError.status = response.status
+    requestError.errorCode = errorCode
     throw requestError
   }
 
@@ -102,12 +105,18 @@ export function endGameSession(sessionId) {
   })
 }
 
-export function submitCatch(sessionId, creatureId) {
+export function submitCatch(sessionId, catchId, creatureId, token) {
+  const headers = {
+    'Content-Type': 'application/json',
+  }
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
   return requestGameSession(`/api/game/sessions/${sessionId}/catches`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ creatureId }),
+    headers,
+    body: JSON.stringify({ catchId, creatureId }),
   })
 }
