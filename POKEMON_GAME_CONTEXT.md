@@ -377,6 +377,271 @@ happens without blocking gameplay.
 Do not automatically apply multiplayer's authoritative movement architecture to
 solo mode unless a feature explicitly requires that redesign.
 
+## Current implementation — active-round refresh recovery
+
+An active SOLO round now survives a browser refresh/reload through a transient,
+frontend-owned recovery checkpoint. Normal play remains memory-first. IndexedDB
+stores recovery evidence for the current identity, while PostgreSQL remains the
+durable store for backend sessions, catch history, and other historical data.
+These are separate persistence concerns:
+
+```text
+live SOLO state               frontend memory
+active-round recovery         versioned IndexedDB checkpoint
+guest recovery identity       stable installation UUID in localStorage
+backend/history durability    PostgreSQL
+```
+
+The SOLO recovery subsystem does not use Redis, Kafka, or any other broker.
+Existing authentication-token and preference uses of localStorage are unrelated
+to the recovery checkpoint; recovery state itself is not stored there.
+
+The current checkpoint schema is version 1 and is scoped by an immutable
+identity key: authenticated user UUID or guest installation UUID. It stores
+semantic state needed to reconstruct a round, including:
+
+```text
+client round UUID and backend session UUID
+round phase, duration, absolute start/end time, and storage expiry
+settled player position and simulation speed
+ROUTING or MOVING intent, route geometry, and a semantic movement anchor
+active targets and already-caught targets
+local score and XP
+spawn paused state and next absolute spawn deadline
+pending backend catch synchronization evidence
+```
+
+It deliberately does not store rendered animation frames or camera pose. A
+checkpoint is validated as a complete versioned record rather than loosely
+merged with defaults; malformed, unsupported-version, identity-mismatched, or
+expired records are rejected, and cleanup is attempted through the guarded
+writer path.
+
+## Recovery bootstrap and lifecycle barrier
+
+Recovery is not safe until authentication restoration has resolved whether the
+browser represents an authenticated user or a guest installation. Bootstrap has
+an explicit barrier:
+
+```text
+AUTH_UNRESOLVED -> RECOVERY_LOADING -> RECOVERY_READY
+```
+
+Round launch/restart, map movement, spawning, and catch detection are blocked
+from creating fresh gameplay state until `RECOVERY_READY`. Hydration restores
+targets, caught state, score/XP, spawning, movement, backend-session context, and
+the original absolute round timeline before the recovered round is exposed as
+ready. If IndexedDB is unavailable, gameplay is eventually released in a
+degraded memory-only mode with a warning rather than remaining permanently
+blocked.
+
+Identity, bootstrap, gameplay-lifecycle, replay, route, spawn, and writer
+generations prevent delayed asynchronous work from mutating a newer scope. This
+includes ordinary A-to-B changes and ABA sequences:
+
+```text
+A -> B
+A -> B -> A
+```
+
+Returning to the same identity does not make an A1 request current in A2.
+Reset, restart, finish, logout/account change, and unmount invalidate their
+captured scopes. IndexedDB replacements/deletions are serialized per identity.
+A terminal deletion synchronously tombstones its writer generation, rejects
+later stale replacements, and orders a replacement writer behind the old
+generation's native write/delete barrier. This prevents a late reset or finish
+from resurrecting an old checkpoint or deleting a newly established round.
+
+The schema defines `STARTING`, `RUNNING`, and `RECONCILING` round phases. The
+current normal production launch path writes its first `RUNNING` checkpoint only
+after the backend session has been created and started; therefore a crash after
+the backend responds but before that first checkpoint commits remains outside
+the recovery guarantee. `STARTING` remains a validated/bootstrap-supported
+transient phase, but the current launch path does not construct it.
+
+## Epoch-anchored movement and absolute round time
+
+SOLO movement is now derived from a measured route and an epoch-anchored
+semantic movement plan, not from accumulated animation-frame progress:
+
+```text
+distance(at time) =
+    clamp(
+        anchor distance
+        + elapsed wall-clock seconds * movement speed,
+        0,
+        measured route length
+    )
+```
+
+The movement anchor records route distance and epoch time. Refresh downtime
+therefore counts as real elapsed movement time. Recovery samples the measured
+route at the reconstructed distance and either resumes from that position or
+settles at the destination if the route completed while the browser was
+unavailable. A speed change first resolves progress under the old anchor, then
+re-anchors at the same distance/time with the new speed so progress is
+continuous. Backward wall-clock observations cannot move the player backward.
+
+The round clock likewise uses absolute `startedAt`/`endsAt` epoch timestamps.
+Refresh never starts a new countdown. A delayed foreground callback or recovery
+reconstructs round completion at the semantic end time, and movement is clamped
+so it cannot apply events beyond that cutoff.
+
+Leaflet and MapLibre consume this same recovered player, route, target, score,
+and round truth. Leaflet has no MapLibre navigation-camera behavior; MapLibre
+adds presentation only. Multiplayer remains Leaflet-based and is unaffected by
+this SOLO recovery feature.
+
+## Target, spawn, and catch timeline recovery
+
+Known active targets survive refresh with semantic spawn and absolute expiry
+times. Expiry does not restart on hydration. Spawn cadence also keeps an
+absolute next deadline: a delayed callback advances from its prior cadence phase
+and skips missed opportunities rather than producing a burst.
+
+Only one asynchronous spawn-materialization operation can own the current
+spawn generation at a time. Reset/restart, logout or identity change,
+pause/resume, round ineligibility, hydration/replacement, and unmount invalidate
+stale results before they can publish a target or release a newer generation's
+ownership.
+
+Random spawn opportunities missed while the browser is completely unavailable
+are intentionally not replayed. After recovery, an overdue schedule continues
+with one ordinary future cadence. There is no deterministic spawn PRNG/log, so
+arbitrary downtime is not exactly reproducible.
+
+Moving catch detection and recovery share the same route-distance/timeline
+geometry. The system finds the first entry into a target's catch radius along a
+measured route interval rather than relying on sampled rendered frames. This
+means a large or delayed animation interval cannot jump across an otherwise
+valid catch.
+
+Terminal movement events use the same semantic model. A CHASE catch stops at
+its exact route-entry distance; chased-target expiry stops at its absolute
+expiry; round end stops at the round cutoff; and route completion is the
+measured route endpoint. Events after the winning terminal event are not
+applied. Equal-time priority is currently:
+
+```text
+ROUND_END
+TARGET_EXPIRY
+ROUTE_COMPLETION
+TARGET_CATCH
+```
+
+Thus a catch exactly at target expiry or round end does not win, and a catch at
+the route-completion instant is not applied after completion.
+
+## Local catch state and pending-catch outbox
+
+SOLO remains responsive and frontend-driven. A valid local catch immediately
+removes the active target, adds the caught target, increments local score and XP
+by the target's catalog score, updates presentation, and creates a stable catch
+UUID. It does not wait for a backend network round-trip. This is intentionally
+different from multiplayer's authoritative catch transition and scoring.
+
+Each local catch also creates pending synchronization evidence containing that
+stable catch identity, the target/creature identity, and logical caught time.
+The normal successful path is:
+
+```text
+local semantic catch and stable catchId
+        -> serialized durability-critical checkpoint replacement
+        -> POST the same catchId to the backend
+        -> require a response carrying the same catchId
+        -> durably remove that pending entry
+```
+
+The live flow waits for the IndexedDB persistence attempt before POSTing. If the
+write commits, the catch has durable replay evidence first. If storage fails or
+the bounded application wait times out, the round enters explicit degraded mode
+and permits only that one live submission; it does not falsely claim the catch
+is recoverable. Recovered replay is stricter and runs only when the checkpoint
+is durable and the backend session/identity has been verified.
+
+Recovered pending catches replay automatically once recovery becomes eligible.
+Replay uses the same `catchId`, performs backend synchronization only, and does
+not re-award local score/XP or recreate catch presentation. It is guarded by
+identity, lifecycle, replay, client-round, backend-session, writer-generation,
+and catch identity. Live and recovered submission of the same operation share
+single-flight ownership. Multiple pending catches are processed sequentially in
+deterministic `caughtAt`, then `catchId`, order.
+
+Network/no-response failures, HTTP 429, HTTP 5xx, and durable acknowledgement
+write failures are retryable/uncertain. They leave evidence pending and stop the
+current replay pass so the worker cannot hot-loop past uncertainty. Other
+deterministic client failures and response-identity mismatches also remain
+pending, but are suppressed for the current recovery lifecycle; a deterministic
+failure for one catch does not prevent later pending catches in that pass.
+Retries are triggered deliberately by a new eligible recovery lifecycle or the
+browser `online` event. No timed exponential-backoff subsystem or new generic
+fetch timeout was added.
+
+`RECONCILING` is a non-resumable recovery phase used after gameplay has ended
+while backend session/catch cleanup may still be incomplete. It contains no
+active movement, active targets, or spawn schedule. Pending catch replay can
+continue, and an exact durable acknowledgement can update the same
+`RECONCILING` checkpoint, but this never changes the phase back to `RUNNING`.
+
+## Recovery checkpoint retention
+
+Checkpoints are transient evidence, not permanent history. Current version-1
+retention is:
+
+```text
+STARTING        createdAt + 2 minutes
+RUNNING         round endsAt + 15 minutes
+RECONCILING     round endsAt + 15 minutes
+```
+
+A `RUNNING` checkpoint stops being resumable at `endsAt` even though its
+reconciliation evidence may remain during the grace period. Pending catch
+synchronization is therefore bounded recovery evidence, not a permanent outbox.
+
+## Backend SOLO catch idempotency
+
+The implemented catch endpoint remains:
+
+```text
+POST /api/game/sessions/{sessionId}/catches
+```
+
+The request accepts an optional client `catchId` UUID. When supplied, that UUID
+is persisted as the logical catch identity and returned in the response. When
+omitted, the backend generates a new UUID for compatibility with legacy callers;
+separate legacy retries therefore remain separate catches and do not gain
+cross-request idempotency.
+
+No new migration or idempotency table was needed. The original
+`V1__create_game_tables.sql` migration already made
+`caught_creatures.catch_id` a UUID primary key, and the implementation reuses
+that global uniqueness constraint.
+
+After session ownership/authentication checks, backend semantics are:
+
+```text
+same catchId + same session + same creature
+    -> idempotent success; no second score/count award
+
+same catchId + different session or different creature
+    -> HTTP 409 CATCH_ID_CONFLICT
+```
+
+An exact persisted replay succeeds even if the session has since ended. A new
+catch ID against an ended session remains rejected. Authenticated sessions
+require the same authenticated user UUID; an anonymous request cannot mutate an
+authenticated session. Guest sessions retain the existing anonymous
+session-UUID capability semantics.
+
+The normal writer is transactional, takes a pessimistic lock on the session row,
+checks for an existing catch, flushes the catch insert, and only then mutates and
+flushes session score/count. The catch primary key is the global race arbiter.
+If a concurrent insert loses that unique race, its writer transaction rolls
+back; collision resolution then uses a fresh `REQUIRES_NEW` read transaction and
+persistence context to return the exact winner or raise a catch-ID conflict.
+Consequently concurrent identical requests cannot double-award, while
+cross-session reuse has one winner and one conflict.
+
 ---
 
 # 8. Solo Map Renderers
@@ -418,15 +683,15 @@ OVERVIEW -> FOLLOW -> FREE
                └ RESUME ┘
 ```
 
-`OVERVIEW` briefly frames the current player, complete route, and destination
-before movement. The route animation has an approximately 400 ms delay only
-when the configured SOLO renderer is MapLibre, giving the renderer time to
-show this prelude. Bounds are calculated deliberately from the player, route,
-and destination with responsive HUD padding and antimeridian-safe longitude
-handling. The overview is wider than FOLLOW, north-up, and capped at zoom
-15.75. At the normal-motion checkpoint its MapLibre fit transition is 240 ms
-with a 24-degree pitch; these are presentation values, not gameplay timing
-contracts.
+For a fresh route, `OVERVIEW` briefly frames the current player, complete route,
+and destination before movement. Fresh route animation has an approximately
+400 ms delay only when the configured SOLO renderer is MapLibre, giving the
+renderer time to show this prelude. Bounds are calculated deliberately from the
+player, route, and destination with responsive HUD padding and
+antimeridian-safe longitude handling. The overview is wider than FOLLOW,
+north-up, and capped at zoom 15.75. At the normal-motion checkpoint its
+MapLibre fit transition is 240 ms with a 24-degree pitch; these are presentation
+values, not gameplay timing contracts.
 
 `FOLLOW` is driven imperatively with MapLibre `jumpTo` and brief `easeTo` calls.
 The map remains uncontrolled through `initialViewState`; there is no React
@@ -484,11 +749,46 @@ distanceTraveledMeters
 distanceRemainingMeters
 totalDistanceMeters
 isMoving
+navigationStartKind
 timestampMs
 ```
 
 The exact object shape may evolve, but route revision, measured progress, and
 imperative delivery are important current boundaries.
+
+## Current implementation — fresh versus recovered navigation
+
+Navigation frames carry one ephemeral route-scoped start intent:
+
+```text
+FRESH
+RECOVERED_ACTIVE
+```
+
+This is renderer input, not durable gameplay state. Current behavior is:
+
+```text
+fresh MapLibre route
+    OVERVIEW -> approximately 400 ms route prelude -> FOLLOW
+
+recovered already-MOVING MapLibre route
+    reconstructed current navigation frame -> FOLLOW directly
+```
+
+`RECOVERED_ACTIVE` skips both a new overview and the fresh-route delay. A route
+that was still `ROUTING` at refresh is re-requested through the normal route
+path and is treated as `FRESH` when the new geometry arrives. Any later route
+started after recovered navigation is also `FRESH` again.
+
+Leaflet consumes the same recovered movement state but has no navigation start
+intent, overview camera, or MapLibre prelude.
+
+MapLibre camera state is intentionally presentation-only and is not included in
+the SOLO checkpoint. Recovery does not persist or restore camera mode, center,
+zoom, pitch, bearing, `FREE`, FOLLOW zoom override, transition state, or
+`navigationStartKind`. Refreshing active MapLibre movement intentionally returns
+to FOLLOW at the reconstructed position; a previously detached `FREE` camera is
+not restored.
 
 ## Current implementation — heading and look-ahead
 
@@ -563,6 +863,12 @@ revision, while player-state teardown clears navigation-frame listeners.
 Map-load checks and mounted refs prevent late work from updating an unavailable
 map/component.
 
+All imperative camera operations are gated until MapLibre emits its load/ready
+signal. Fresh or recovered navigation frames may arrive earlier and are retained
+as semantic input, but they cannot call map camera APIs before readiness. Once
+ready, a current recovered-active frame enters FOLLOW directly. Route revisions
+ensure an old pre-load frame cannot manipulate a replacement route.
+
 The destination beacon is MapLibre-local presentation state. It remains
 visible during the active route prelude and navigation, including while the
 camera is FREE, then clears on completion, cancellation, or replacement. This
@@ -575,9 +881,10 @@ With `prefers-reduced-motion: reduce`, decorative overview/follow/resume camera
 durations become zero, FOLLOW is flat and north-up, and continuous cinematic
 rotation is disabled. Functional positional tracking continues. CSS also
 removes or simplifies continuous MapLibre marker, route, beacon, catch, and HUD
-motion. The functional MapLibre-only route prelude remains part of route start;
-reduced motion removes its camera transition animation rather than disabling
-navigation setup.
+motion. The functional MapLibre-only route prelude remains part of fresh route
+start; reduced motion removes its camera transition animation rather than
+disabling navigation setup. Recovered already-moving routes intentionally skip
+that fresh prelude under either motion preference.
 
 Compatible MapLibre styles still receive the existing 3D building extrusion
 layer. Its current opacity is tuned from the earlier 0.42 to 0.34 so buildings
@@ -586,11 +893,11 @@ target overlays. This is presentation tuning, not an architectural invariant.
 
 ## Explicit non-changes
 
-This milestone is frontend-only and MapLibre SOLO-only. It did **not** add or
-change:
+The original navigation-camera milestone was frontend-only and MapLibre
+SOLO-only. The later active-round recovery milestone changed SOLO recovery and
+backend SOLO catch synchronization, but still did **not** add or change:
 
 ```text
-backend behavior
 multiplayer MapLibre rendering or multiplayer architecture
 Valhalla integration
 WALK / BIKE / CAR travel modes
@@ -613,6 +920,10 @@ Browser E2E coverage does not yet exist, and navigation-camera visual feel
 still requires manual browser validation. The current closer FOLLOW framing has
 been manually validated as a suitable baseline, not as a final profile for
 every future transport type.
+
+Camera persistence is intentionally absent. Refresh resets presentation to the
+recovered FOLLOW default rather than restoring FREE mode or a FOLLOW zoom
+override.
 
 Possible future work, none of which is implemented by this milestone, includes:
 
@@ -1812,6 +2123,14 @@ completed multiplayer round participants
 completed multiplayer round catches
 ```
 
+## Transient browser recovery state
+
+IndexedDB stores the current identity's versioned SOLO active-round checkpoint,
+including pending catch synchronization evidence. This state is TTL-bound and
+exists to reconstruct an interrupted live round; it is not historical truth and
+does not replace PostgreSQL. Recovery uses localStorage only for a stable guest
+installation UUID, not for the checkpoint itself.
+
 ## In-memory runtime multiplayer state
 
 Still includes major runtime concepts such as:
@@ -1989,6 +2308,11 @@ V4__create_users_and_link_sessions.sql
 V5__create_multiplayer_round_results.sql
 ```
 
+The SOLO catch-idempotency milestone required no new migration.
+`V1__create_game_tables.sql` already defines `caught_creatures.catch_id` as a
+UUID primary key, and the current backend uses that existing key as the stable
+catch-operation identity and global uniqueness arbiter.
+
 When adding schema changes:
 
 ```text
@@ -2144,6 +2468,19 @@ reduced-motion camera policy
 MapLibre-local destination presentation
 ```
 
+Important SOLO active-round recovery concerns include:
+
+```text
+identity-gated recovery bootstrap and READY barrier
+versioned IndexedDB checkpoint validation/retention
+serialized writers, tombstones, and lifecycle/ABA guards
+absolute round time and epoch-anchored route movement
+absolute target expiry and spawn cadence
+live/recovered route-interval catch equivalence
+pending catch durability, replay, and acknowledgement
+RECONCILING cleanup without gameplay resume
+```
+
 The central current implementation areas are:
 
 ```text
@@ -2155,6 +2492,26 @@ hooks/navigationFrameChannel.js
 hooks/usePlayerState.js
 config/soloMapRenderer.js
 ```
+
+The central recovery implementation areas are:
+
+```text
+hooks/useSoloRoundRecovery.js
+recovery/soloRecoveryCheckpoint.js
+recovery/soloRecoveryIdentity.js
+recovery/soloRecoveryRuntime.js
+recovery/soloRecoveryStore.js
+recovery/soloRecoveryWriter.js
+recovery/soloRoundClock.js
+recovery/soloTargetRecoveryTimeline.js
+recovery/soloTargetState.js
+recovery/soloCatchSubmission.js
+utils/soloCatchGeometry.js
+utils/soloRouteCatchEvents.js
+```
+
+Backend SOLO catch idempotency is coordinated by the game-session catch
+service/writer/reader boundary and the existing caught-creature primary key.
 
 Do not create a second parallel WebSocket architecture for a new multiplayer
 feature without first checking whether the existing authenticated STOMP
@@ -2299,6 +2656,35 @@ gameplay.
 
 ---
 
+## Invariant 15 — SOLO recovery is identity- and generation-scoped
+
+Do not hydrate or create gameplay before authentication/recovery reaches READY,
+and do not weaken lifecycle/writer/ABA guards around delayed work.
+
+---
+
+## Invariant 16 — SOLO movement, round time, targets, and catches share semantic time
+
+Do not replace epoch-anchored route distance, absolute round/target deadlines,
+or interval catch geometry with frame-count or rendered-position truth.
+
+---
+
+## Invariant 17 — One logical SOLO catch keeps one stable catch ID
+
+Replay must use the original `catchId`, must not re-award local score/XP, and
+must not remove pending evidence until the matching acknowledgement is durably
+checkpointed.
+
+---
+
+## Invariant 18 — SOLO recovery truth is renderer-independent
+
+Leaflet and MapLibre must consume the same recovered gameplay state. Camera
+state and navigation start intent remain ephemeral MapLibre presentation.
+
+---
+
 # 50. Known Limitations
 
 Current known architectural limitations include:
@@ -2321,7 +2707,7 @@ A backend restart therefore does not reconstruct an active multiplayer game.
 
 The same applies to a round stuck in `FINALIZING`: even if its database commit
 has not occurred, the frozen result and retry context exist only in that JVM.
-There is no active-round recovery log.
+There is no active multiplayer-round recovery log.
 
 ---
 
@@ -2372,6 +2758,43 @@ This is a known candidate for future improvement.
 
 ---
 
+### SOLO active-round recovery is transient and bounded
+
+SOLO checkpoints expire under the two-minute `STARTING` or post-round
+15-minute grace policies. They are recovery evidence, not permanent local
+history or an indefinitely durable catch outbox.
+
+Missed random spawn opportunities during complete browser downtime are not
+deterministically replayed. Recovery preserves known targets and the absolute
+cadence, then skips missed opportunities without a burst.
+
+A permanently hung spawn materialization request occupies the one in-flight
+slot for its generation until it settles or the lifecycle is invalidated by
+pause/reset/restart/identity change/round ineligibility/unmount. The recovery
+milestone did not add a lower-level request timeout for it.
+
+Catch replay uses recovery eligibility and browser-online triggers rather than
+a timed exponential-backoff scheduler. It added no generic fetch timeout, so a
+never-settling catch POST retains its single-flight ownership until the request
+settles or its lifecycle becomes stale; it does not block READY or create
+duplicate requests on rerender.
+
+Legacy catch requests that omit `catchId` still receive a newly generated UUID
+per request and are not idempotent across retries. Guest sessions retain the
+existing anonymous session-UUID capability semantics; this milestone did not
+redesign guest authorization.
+
+Active SOLO recovery still depends on the existing backend-session lifecycle.
+In particular, it does not make session creation idempotent or recover the
+crash window after the backend starts a session but before the first `RUNNING`
+checkpoint commits.
+
+This milestone does not recover active multiplayer state. Multiplayer rooms,
+rounds, movement, creatures, and finalization retain their existing single-JVM
+recovery limitations.
+
+---
+
 ### MapLibre scope
 
 MapLibre is currently an opt-in SOLO implementation.
@@ -2382,7 +2805,9 @@ The navigation camera has automated geometry, state-transition, interaction,
 reduced-motion, lifecycle, and source-integration coverage, but it has no
 browser E2E suite. Camera composition and visual feel therefore still require
 manual browser validation. Future transport actors and mode-specific camera
-profiles are not implemented.
+profiles are not implemented. SOLO refresh also does not persist MapLibre FREE
+mode, camera pose, or FOLLOW zoom override; recovered active navigation defaults
+to FOLLOW.
 
 ---
 
@@ -2397,10 +2822,11 @@ integration assertions.
 
 GitHub CI currently builds and lints the frontend but does not execute the Node
 test files. PR #13 had 20 such files; the MapLibre navigation-camera feature
-branch checkpoint has 22. These are historical/checkpoint counts, not permanent
-project guarantees. The current production build also crosses Vite's default
-large-chunk advisory (notably the lazy MapLibre dependency chunk); this is an
-optimization warning, not a build failure.
+branch checkpoint had 22; the SOLO recovery milestone has 37. These are
+historical/checkpoint counts, not permanent project guarantees. The current
+production build also crosses Vite's default large-chunk advisory (notably the
+lazy MapLibre dependency chunk); this is an optimization warning, not a build
+failure.
 
 ---
 
@@ -2474,12 +2900,12 @@ diverge.
 
 ---
 
-# 52. PR #13 Verification Checkpoint
+# 52. Historical Verification Checkpoints
+
+## PR #13 checkpoint
 
 The following numbers are explicitly a **PR #13 verification checkpoint**, not
-permanent project guarantees. At current HEAD, Surefire reports and source
-counts still correspond to this checkpoint; future changes may legitimately
-increase them.
+permanent project guarantees. Later milestones legitimately increased them.
 
 Backend:
 
@@ -2544,6 +2970,46 @@ This remains Node-level behavior/source-integration coverage rather than
 browser E2E. Manual browser validation confirmed that the closer FOLLOW
 composition is suitable as the baseline for future transport actors; future
 actors and their camera profiles remain unimplemented.
+
+## SOLO active-round refresh/recovery checkpoint
+
+The later `feature/solo-active-round-recovery` milestone delivered transient
+IndexedDB recovery, epoch movement reconstruction, absolute round/target time,
+target and catch recovery, the pending-catch outbox, backend catch idempotency,
+recovered catch replay, Leaflet/MapLibre gameplay parity, and direct MapLibre
+FOLLOW for recovered active movement.
+
+The milestone handoff recorded:
+
+```text
+npm run test:maplibre           passing
+node --test test/*.test.js      37/37 test files passing
+npm run lint                    passing
+npm run build                   passing
+backend full suite              366 tests passing
+git diff --check                passing
+```
+
+The frontend full-suite file count and the backend Surefire total were also
+confirmed from the current worktree/reports during this context update. These
+remain checkpoint evidence, not permanent test-count guarantees. Frontend Node
+tests are still not browser E2E and are still not run by the current GitHub CI
+workflow.
+
+As an additional Slice 3A verification checkpoint, the backend idempotency and
+concurrency behavior was exercised against a disposable real PostgreSQL
+instance using the actual Flyway migrations. That reviewed run covered first
+submission, exact retry, concurrent identical submission, and unique-constraint
+collision behavior. Normal automated backend integration tests continue to use
+H2 in PostgreSQL compatibility mode; do not infer that every CI run uses real
+PostgreSQL.
+
+Manual browser validation separately passed both the Leaflet and MapLibre
+recovery matrices. Manual-only cases included refresh and repeated refresh
+during movement, speed change plus refresh, targets/catches, CHASE, expiry,
+round end, route completion during reload, catch synchronization/replay,
+MapLibre direct recovered FOLLOW, and a later new fresh route. These are manual
+verification records, not claims of automated browser coverage.
 
 ---
 
@@ -2629,9 +3095,9 @@ git fetch --prune
 
 ---
 
-# 55. Major Completed Multiplayer Milestones
+# 55. Major Completed Milestones
 
-The multiplayer system evolved approximately through these milestones:
+The system evolved approximately through these milestones:
 
 ```text
 1. authenticated WebSocket/STOMP presence
@@ -2659,6 +3125,10 @@ The multiplayer system evolved approximately through these milestones:
 13. PostgreSQL multiplayer result persistence + player match history
 
 14. MapLibre SOLO navigation camera with OVERVIEW / FOLLOW / FREE presentation
+
+15. SOLO active-round refresh/recovery with IndexedDB checkpointing,
+    epoch movement/time reconstruction, catch outbox/replay, backend catch
+    idempotency, renderer parity, and recovered MapLibre FOLLOW
 ```
 
 These milestones are already implemented.
@@ -2666,6 +3136,10 @@ These milestones are already implemented.
 Milestone 14 is the frontend-only, MapLibre SOLO-only feature-branch checkpoint
 documented in Section 8. It does not change the completed multiplayer
 architecture described by the earlier milestones.
+
+Milestone 15 adds transient SOLO recovery and backend SOLO catch-idempotency
+support. It does not make SOLO server-authoritative and does not add active
+multiplayer recovery.
 
 Do not propose them as future work without checking current code.
 
@@ -2734,17 +3208,18 @@ c9e5f4c  Merge PR #13 into main
 
 | Concern | Solo | Multiplayer |
 |---|---|---|
-| Player movement | Frontend-oriented | Backend movement plan |
+| Player movement | Frontend-owned epoch-anchored route plan | Backend movement plan |
 | Route source | Backend/OSRM API used by frontend | Backend directly controls authoritative OSRM route |
 | Creature spawning | Frontend-oriented | Backend |
 | Creature location authority | Primarily solo frontend flow | Backend shared instance |
-| Catch transition | Frontend-oriented | Backend state/concurrency/scoring; distance currently uses submitted coordinates |
-| Score during game | Frontend-local + backend session sync | Backend authoritative |
-| Round timer | Solo frontend flow | Shared backend round |
+| Catch transition | Immediate frontend transition + stable-ID backend synchronization | Backend state/concurrency/scoring; distance currently uses submitted coordinates |
+| Score during game | Frontend-local + idempotent backend session sync | Backend authoritative |
+| Round timer | Frontend-owned absolute epoch timeline | Shared backend round |
 | Final ranking | Solo/session-specific | Backend |
 | Completed result | Persisted session model | PostgreSQL multiplayer result model |
 | Realtime presence | Not required | STOMP |
-| Reconnect movement recovery | Not applicable | Backend snapshot |
+| Active-round refresh recovery | Identity-scoped transient IndexedDB checkpoint | Not implemented |
+| Reconnect movement recovery | Epoch-anchor reconstruction from SOLO checkpoint | Backend snapshot |
 | Historical multiplayer result | Not applicable | PostgreSQL + REST |
 
 Do not blur this matrix accidentally.
@@ -2896,6 +3371,11 @@ GET  /api/game/players/{playerName}/stats
 The general session routes support guest-compatible solo behavior; `/me`
 routes use authenticated UUID scoping.
 
+`POST /api/game/sessions/{sessionId}/catches` accepts optional UUID `catchId`.
+Supplying it enables exact retry idempotency for the same session/creature;
+omitting it preserves legacy per-request UUID generation. An exact reuse with a
+different session or creature returns HTTP 409 `CATCH_ID_CONFLICT`.
+
 ## Rooms, rounds, and score
 
 ```text
@@ -2956,6 +3436,15 @@ documented above.
 
 | Failure | Current behavior | Recovery/durability |
 |---|---|---|
+| Browser refresh during active SOLO round | Authentication resolves before checkpoint hydration; fresh gameplay stays behind RECOVERY_READY | Valid identity-scoped IndexedDB state reconstructs absolute round time, targets/catches, route distance, and pending sync; Leaflet/MapLibre use the same gameplay truth |
+| Invalid, mismatched, or expired SOLO checkpoint | Record is rejected and guarded cleanup is attempted | Bootstrap reaches READY with a clean/degraded state; invalid state is never merged into gameplay |
+| IndexedDB unavailable/write fails | SOLO remains playable in memory with a recovery warning; a live catch may submit once after its failed/timed-out persistence attempt | No false durability claim; recovered replay requires durable evidence |
+| SOLO round/route/target deadline passes while browser is unavailable | Recovery applies semantic event ordering and exact cutoff positions; expired gameplay does not resume | Post-round pending evidence may remain as RECONCILING until acknowledgement or TTL expiry |
+| Recovered catch POST has no response, HTTP 429/5xx, or ACK persistence fails | Pending catch remains and the current uncertain pass stops without hot-looping | Browser-online or a new eligible recovery lifecycle retries the same catchId; no timed backoff exists |
+| Recovered catch has deterministic client failure or mismatched response ID | Evidence remains pending and that catch is suppressed for the current lifecycle | A later lifecycle may retry; no local score/XP is re-awarded |
+| Concurrent identical backend SOLO catch requests | Session lock/primary key/transaction ordering produces one catch and one aggregate award | Exact loser resolves from a fresh transaction as idempotent success |
+| Cross-session reuse of one SOLO catchId | One insert wins; the other cannot mutate its session aggregate | Fresh collision read returns HTTP 409 catch-ID conflict |
+| Random SOLO spawn opportunities missed during complete downtime | Missed opportunities are skipped rather than burst-replayed | Known targets and the next absolute cadence recover; random history is not deterministic |
 | Result preparation failure | Round remains `FINALIZING`; no `ENDED`, result-store entry, completion lifecycle event, or `GAME_ENDED` | In-process retry resumes completed preparation steps; timeout scheduler retries eligible failures up to three total attempts |
 | Persistence failure | Same frozen result/UUID remains in the in-memory finalization context; durable completion is not exposed | Retry calls `persistIfAbsent`; after scheduler exhaustion it stays `FINALIZING`; restart recovery is unsupported |
 | Concurrent unique round insert | Named round-UUID unique loser rolls back | Fresh transaction reads the winner; unrelated constraint failures propagate |
@@ -3051,6 +3540,9 @@ When updating:
 - MapLibre SOLO has a renderer-local navigation camera with `OVERVIEW`,
   `FOLLOW`, and `FREE` modes. Resume Follow returns from manual exploration to
   the latest current navigation pose.
+- Recovered already-moving MapLibre routes use ephemeral `RECOVERED_ACTIVE`
+  intent to skip fresh OVERVIEW/prelude and enter FOLLOW directly; camera pose,
+  FREE mode, zoom override, and start intent are not persisted.
 - SOLO route animation publishes measured navigation frames imperatively to the
   MapLibre camera while preserving React player-position updates for existing
   gameplay and Leaflet behavior; MapLibre remains uncontrolled without a
@@ -3062,6 +3554,18 @@ When updating:
   automatic shared-creature road snapping.
 - Solo gameplay is intentionally frontend-oriented, with backend session/catch
   persistence and catalog-backed scoring synchronization.
+- Active SOLO rounds recover from a version-1 identity-scoped IndexedDB
+  checkpoint after auth resolution and a RECOVERY_READY barrier. The checkpoint
+  is transient; PostgreSQL remains durable history and localStorage only holds
+  the stable guest installation UUID for recovery identity.
+- SOLO route progress is measured from epoch-anchored route distance and speed;
+  round/target deadlines are absolute. Refresh downtime therefore advances
+  movement/time and live/recovered catches share interval geometry and terminal
+  event ordering.
+- A SOLO catch updates local target/score/XP immediately, persists a stable
+  catchId as pending evidence, and synchronizes separately. Recovered replay
+  reuses that ID without local re-award; backend catch_id idempotency prevents
+  double scoring.
 - Multiplayer rooms, membership, presence, movement plans, live creatures,
   scoring/catch logs, schedulers, sequences, and finalization contexts are
   single-JVM/in-memory state.
@@ -3094,7 +3598,8 @@ When updating:
 - Transport modes/actors, mode-specific camera profiles, Valhalla integration,
   and multiplayer MapLibre presentation are future directions, not current
   implementation.
-- PR #13 merged at `c9e5f4c`; its test counts and the later MapLibre camera
-  branch counts are separate historical checkpoints, not permanent guarantees.
+- PR #13 merged at `c9e5f4c`; its test counts and the later MapLibre camera and
+  SOLO recovery branch counts are separate historical checkpoints, not
+  permanent guarantees.
 - Before changing architecture, inspect current source/tests and preserve
   authority, UUID/generation/version, transaction ordering, and auth isolation.
