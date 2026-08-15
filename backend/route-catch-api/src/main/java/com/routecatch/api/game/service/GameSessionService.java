@@ -10,8 +10,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.routecatch.api.auth.persistence.UserEntity;
-import com.routecatch.api.game.creature.CreatureCatalogService;
-import com.routecatch.api.game.creature.CreatureDefinition;
 import com.routecatch.api.game.dto.CaughtCreatureResponse;
 import com.routecatch.api.game.dto.LeaderboardEntryResponse;
 import com.routecatch.api.game.dto.PlayerStatsResponse;
@@ -24,7 +22,6 @@ import com.routecatch.api.game.exception.InvalidSessionHistoryLimitException;
 import com.routecatch.api.game.model.GameSession;
 import com.routecatch.api.game.model.GameSessionStatus;
 import com.routecatch.api.game.model.PlayerNames;
-import com.routecatch.api.game.persistence.CaughtCreatureEntity;
 import com.routecatch.api.game.persistence.CaughtCreatureRepository;
 import com.routecatch.api.game.persistence.GameSessionEntity;
 import com.routecatch.api.game.persistence.GameSessionRepository;
@@ -32,18 +29,18 @@ import com.routecatch.api.game.persistence.GameSessionRepository;
 @Service
 public class GameSessionService {
 
-	private final CreatureCatalogService creatureCatalogService;
 	private final GameSessionRepository gameSessionRepository;
 	private final CaughtCreatureRepository caughtCreatureRepository;
+	private final GameSessionCatchService gameSessionCatchService;
 
 	public GameSessionService(
-		CreatureCatalogService creatureCatalogService,
 		GameSessionRepository gameSessionRepository,
-		CaughtCreatureRepository caughtCreatureRepository
+		CaughtCreatureRepository caughtCreatureRepository,
+		GameSessionCatchService gameSessionCatchService
 	) {
-		this.creatureCatalogService = creatureCatalogService;
 		this.gameSessionRepository = gameSessionRepository;
 		this.caughtCreatureRepository = caughtCreatureRepository;
+		this.gameSessionCatchService = gameSessionCatchService;
 	}
 
 	@Transactional
@@ -220,33 +217,23 @@ public class GameSessionService {
 		return toModel(gameSessionRepository.save(session));
 	}
 
-	@Transactional(noRollbackFor = InvalidGameSessionStateException.class)
 	public SubmitCatchResponse submitCatch(
 		UUID sessionId,
 		SubmitCatchRequest request
 	) {
-		GameSessionEntity session = findSessionForUpdate(sessionId);
-		session.expireIfStale(Instant.now());
+		return submitCatch(sessionId, request, null);
+	}
 
-		if (session.getStatus() != GameSessionStatus.RUNNING) {
-			throw new InvalidGameSessionStateException(
-				"Catches can only be submitted to running game sessions"
-			);
-		}
-
-		CreatureDefinition creature =
-			creatureCatalogService.getCreatureById(request.creatureId());
-
-		CaughtCreatureEntity caughtCreature = new CaughtCreatureEntity(
+	public SubmitCatchResponse submitCatch(
+		UUID sessionId,
+		SubmitCatchRequest request,
+		UUID authenticatedUserId
+	) {
+		return gameSessionCatchService.submit(
 			sessionId,
-			creature
+			request,
+			authenticatedUserId
 		);
-		session.recordCatch(creature.scoreValue());
-
-		caughtCreatureRepository.save(caughtCreature);
-		GameSession updatedSession = toModel(gameSessionRepository.save(session));
-
-		return SubmitCatchResponse.from(updatedSession, creature);
 	}
 
 	private GameSessionEntity findSession(UUID sessionId) {
