@@ -1520,6 +1520,7 @@ function App() {
   )
 
   const gameplay = {
+    activeTravelMode: soloRecovery.activeTravelMode,
     activeRoomGameStatus,
     activeRoomStatus,
     activeMultiplayerRoom,
@@ -1591,11 +1592,13 @@ function App() {
     routingTargetId,
     routingSharedRoomCreatureId,
     score,
+    selectedTravelMode: soloRecovery.selectedTravelMode,
     selectedRoundSeconds,
     sessionNotice,
     setPlayerName,
     setSelectedRoundSeconds,
     setSimulationSpeed,
+    setSelectedTravelMode: soloRecovery.setSelectedTravelMode,
     sharedRoomCatchMessage,
     sharedRoomCreatures,
     simulationSpeed,

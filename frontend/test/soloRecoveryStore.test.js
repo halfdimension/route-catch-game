@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { indexedDB } from 'fake-indexeddb'
 import {
+  SOLO_RECOVERY_DATABASE_VERSION,
   SOLO_RECOVERY_OBJECT_STORE,
   createSoloRecoveryStore,
 } from '../src/recovery/soloRecoveryStore.js'
@@ -11,6 +12,7 @@ import {
 import { resolveSoloRecoveryIdentity } from '../src/recovery/soloRecoveryIdentity.js'
 import {
   createValidSoloCheckpoint,
+  createValidSoloV1Checkpoint,
   SOLO_RECOVERY_TEST_USER_ID,
 } from './helpers/soloRecoveryFixtures.js'
 
@@ -63,6 +65,53 @@ async function putRawRecord(databaseName, record) {
   })
   database.close()
 }
+
+async function getRawRecord(databaseName, identityKey) {
+  const database = await openTestDatabase(databaseName)
+  const transaction = database.transaction(
+    SOLO_RECOVERY_OBJECT_STORE,
+    'readonly',
+  )
+  const request = transaction.objectStore(SOLO_RECOVERY_OBJECT_STORE).get(
+    identityKey,
+  )
+  const record = await new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+  database.close()
+  return record
+}
+
+test('v1 read migrates in memory without changing DB version or writing back', async () => {
+  const harness = createHarness()
+  const v1 = createValidSoloV1Checkpoint({ score: 25 })
+
+  try {
+    assert.equal(SOLO_RECOVERY_DATABASE_VERSION, 1)
+    await putRawRecord(harness.databaseName, v1)
+
+    const read = await harness.store.read(v1.identityKey, {
+      deleteInvalid: false,
+    })
+    assert.equal(read.ok, true)
+    assert.equal(read.migratedFromSchemaVersion, 1)
+    assert.equal(read.checkpoint.schemaVersion, 2)
+    assert.equal(read.checkpoint.round.travelMode, 'CAR')
+
+    const retainedRawRecord = await getRawRecord(
+      harness.databaseName,
+      v1.identityKey,
+    )
+    assert.equal(retainedRawRecord.schemaVersion, 1)
+    assert.equal(
+      Object.hasOwn(retainedRawRecord.round, 'travelMode'),
+      false,
+    )
+  } finally {
+    await disposeHarness(harness)
+  }
+})
 
 test('IndexedDB store writes, reads, and atomically replaces one identity record', async () => {
   const harness = createHarness()

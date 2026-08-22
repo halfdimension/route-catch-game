@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { TRAVEL_MODES } from '../src/config/travelMode.js'
 import {
   createRouteAnimationPlan,
   reconstructAnchoredRouteMovement,
@@ -95,6 +96,7 @@ function withMovingCheckpoint({ speed, anchorDistance = 100 } = {}) {
 
 test('checkpoint builder retains stable round identity and real movement state', () => {
   const previous = withMovingCheckpoint({ speed: 80 })
+  previous.round.travelMode = TRAVEL_MODES.MOTORCYCLE
   const timeline = {
     durationSeconds: previous.round.durationSeconds,
     startedAtEpochMs: previous.round.startedAtEpochMs,
@@ -106,6 +108,7 @@ test('checkpoint builder retains stable round identity and real movement state',
     timeline,
     playerPosition: { lat: 28.56, lon: 77.26 },
     simulationSpeedMetersPerSecond: 120,
+    travelMode: TRAVEL_MODES.WALKING,
     movement: previous.movement,
     previousCheckpoint: previous,
     nowEpochMs: STARTED_AT + 10_000,
@@ -118,6 +121,7 @@ test('checkpoint builder retains stable round identity and real movement state',
   assert.equal(checkpoint.createdAtEpochMs, previous.createdAtEpochMs)
   assert.deepEqual(checkpoint.movement, previous.movement)
   assert.equal(checkpoint.player.simulationSpeedMetersPerSecond, 120)
+  assert.equal(checkpoint.round.travelMode, TRAVEL_MODES.MOTORCYCLE)
 })
 
 test('checkpoint builder preserves durable gameplay fields only for the same round', () => {
@@ -133,6 +137,7 @@ test('checkpoint builder preserves durable gameplay fields only for the same rou
     timeline,
     playerPosition: previous.player.settledPosition,
     simulationSpeedMetersPerSecond: 80,
+    travelMode: previous.round.travelMode,
     previousCheckpoint: previous,
     nowEpochMs: STARTED_AT + 10_000,
   }

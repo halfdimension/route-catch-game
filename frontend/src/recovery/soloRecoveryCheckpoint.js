@@ -1,10 +1,15 @@
 import { createRouteAnimationPlan } from '../hooks/useRouteAnimation.js'
 import {
+  DEFAULT_TRAVEL_MODE,
+  isTravelMode,
+} from '../config/travelMode.js'
+import {
   isUuid,
   isValidSoloIdentityKey,
 } from './soloRecoveryIdentity.js'
 
-export const SOLO_RECOVERY_SCHEMA_VERSION = 1
+export const SOLO_RECOVERY_LEGACY_SCHEMA_VERSION = 1
+export const SOLO_RECOVERY_SCHEMA_VERSION = 2
 export const SOLO_RECOVERY_STARTING_TTL_MS = 2 * 60 * 1000
 export const SOLO_RECOVERY_RUNNING_GRACE_MS = 15 * 60 * 1000
 export const SOLO_RECOVERY_ROUTE_DISTANCE_EPSILON_METERS = 0.001
@@ -299,13 +304,17 @@ export function isSoloCheckpointResumable(checkpoint, nowEpochMs) {
   )
 }
 
-export function validateSoloRecoveryCheckpoint(
+function validateSoloRecoveryCheckpointShape(
   checkpoint,
-  { expectedIdentityKey } = {},
+  {
+    expectedIdentityKey,
+    schemaVersion,
+    requireRoundTravelMode,
+  },
 ) {
   assertPlainObject(checkpoint, 'checkpoint')
 
-  if (checkpoint.schemaVersion !== SOLO_RECOVERY_SCHEMA_VERSION) {
+  if (checkpoint.schemaVersion !== schemaVersion) {
     reject(`Unsupported SOLO recovery schema version: ${checkpoint.schemaVersion}`)
   }
 
@@ -331,6 +340,10 @@ export function validateSoloRecoveryCheckpoint(
   assertPlainObject(checkpoint.round, 'round')
   assertUuid(checkpoint.round.clientRoundId, 'round.clientRoundId')
   assertUuid(checkpoint.round.backendSessionId, 'round.backendSessionId')
+
+  if (requireRoundTravelMode && !isTravelMode(checkpoint.round.travelMode)) {
+    reject('round.travelMode must be CAR, MOTORCYCLE, or WALKING')
+  }
 
   if (!ROUND_PHASES.has(checkpoint.round.phase)) {
     reject('round.phase is invalid')
@@ -518,17 +531,60 @@ export function validateSoloRecoveryCheckpoint(
   return validated
 }
 
+export function validateSoloRecoveryCheckpointV1(
+  checkpoint,
+  { expectedIdentityKey } = {},
+) {
+  return validateSoloRecoveryCheckpointShape(checkpoint, {
+    expectedIdentityKey,
+    schemaVersion: SOLO_RECOVERY_LEGACY_SCHEMA_VERSION,
+    requireRoundTravelMode: false,
+  })
+}
+
+export function validateSoloRecoveryCheckpoint(
+  checkpoint,
+  { expectedIdentityKey } = {},
+) {
+  return validateSoloRecoveryCheckpointShape(checkpoint, {
+    expectedIdentityKey,
+    schemaVersion: SOLO_RECOVERY_SCHEMA_VERSION,
+    requireRoundTravelMode: true,
+  })
+}
+
+export function migrateSoloRecoveryCheckpointV1(
+  checkpoint,
+  { expectedIdentityKey } = {},
+) {
+  const validatedV1 = validateSoloRecoveryCheckpointV1(checkpoint, {
+    expectedIdentityKey,
+  })
+  const migrated = structuredClone(validatedV1)
+  migrated.schemaVersion = SOLO_RECOVERY_SCHEMA_VERSION
+  migrated.round.travelMode = DEFAULT_TRAVEL_MODE
+  return validateSoloRecoveryCheckpoint(migrated, { expectedIdentityKey })
+}
+
 export function parseSoloRecoveryCheckpoint(checkpoint, options) {
   try {
+    const isLegacyV1 = checkpoint?.schemaVersion ===
+      SOLO_RECOVERY_LEGACY_SCHEMA_VERSION
     return {
       ok: true,
-      checkpoint: validateSoloRecoveryCheckpoint(checkpoint, options),
+      checkpoint: isLegacyV1
+        ? migrateSoloRecoveryCheckpointV1(checkpoint, options)
+        : validateSoloRecoveryCheckpoint(checkpoint, options),
+      migratedFromSchemaVersion: isLegacyV1
+        ? SOLO_RECOVERY_LEGACY_SCHEMA_VERSION
+        : null,
       error: null,
     }
   } catch (error) {
     return {
       ok: false,
       checkpoint: null,
+      migratedFromSchemaVersion: null,
       error,
     }
   }
