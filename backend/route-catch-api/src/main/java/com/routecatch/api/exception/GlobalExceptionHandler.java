@@ -302,6 +302,32 @@ public class GlobalExceptionHandler {
 		);
 	}
 
+	@ExceptionHandler(UnsupportedTravelModeException.class)
+	public ResponseEntity<ApiErrorResponse> handleUnsupportedTravelMode(
+		UnsupportedTravelModeException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.BAD_REQUEST,
+			"UNSUPPORTED_TRAVEL_MODE",
+			exception.getMessage(),
+			request
+		);
+	}
+
+	@ExceptionHandler(TravelModeUnavailableException.class)
+	public ResponseEntity<ApiErrorResponse> handleTravelModeUnavailable(
+		TravelModeUnavailableException exception,
+		HttpServletRequest request
+	) {
+		return errorResponse(
+			HttpStatus.SERVICE_UNAVAILABLE,
+			"TRAVEL_MODE_UNAVAILABLE",
+			exception.getMessage(),
+			request
+		);
+	}
+
 	@ExceptionHandler(MovementRejectedException.class)
 	public ResponseEntity<ApiErrorResponse> handleMovementRejected(
 		MovementRejectedException exception,

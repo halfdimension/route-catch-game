@@ -9,8 +9,8 @@ import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
-import com.routecatch.api.dto.RouteRequest;
 import com.routecatch.api.exception.RoutingEngineException;
+import com.routecatch.api.routing.RoutingCoordinate;
 import com.sun.net.httpserver.HttpServer;
 
 class OsrmRoutingServiceTests {
@@ -18,16 +18,18 @@ class OsrmRoutingServiceTests {
 	@Test
 	void unavailableOsrmThrowsCleanRoutingEngineException() {
 		OsrmRoutingService service = new OsrmRoutingService("http://127.0.0.1:1");
-		RouteRequest request = new RouteRequest(
+		RoutingCoordinate source = new RoutingCoordinate(
 			28.6139,
-			77.2090,
+			77.2090
+		);
+		RoutingCoordinate destination = new RoutingCoordinate(
 			28.6200,
 			77.2150
 		);
 
 		RoutingEngineException exception = assertThrows(
 			RoutingEngineException.class,
-			() -> service.fetchRoute(request)
+			() -> service.findDrivingRoute(source, destination)
 		);
 
 		assertEquals("ROUTING_ENGINE_UNAVAILABLE", exception.getErrorCode());
@@ -54,16 +56,18 @@ class OsrmRoutingServiceTests {
 			OsrmRoutingService service = new OsrmRoutingService(
 				"http://127.0.0.1:" + server.getAddress().getPort()
 			);
-			RouteRequest request = new RouteRequest(
+			RoutingCoordinate source = new RoutingCoordinate(
 				28.6139,
-				77.2090,
+				77.2090
+			);
+			RoutingCoordinate destination = new RoutingCoordinate(
 				28.6200,
 				77.2150
 			);
 
 			RoutingEngineException exception = assertThrows(
 				RoutingEngineException.class,
-				() -> service.fetchRoute(request)
+				() -> service.findDrivingRoute(source, destination)
 			);
 
 			assertEquals("NoRoute", exception.getErrorCode());

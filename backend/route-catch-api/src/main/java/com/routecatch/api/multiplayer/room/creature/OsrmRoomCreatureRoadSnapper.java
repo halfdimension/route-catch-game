@@ -4,10 +4,9 @@ import java.util.Optional;
 
 import org.springframework.stereotype.Component;
 
-import com.routecatch.api.dto.CoordinateDto;
-import com.routecatch.api.dto.NearestRequest;
-import com.routecatch.api.dto.NearestResponse;
 import com.routecatch.api.exception.RoutingEngineException;
+import com.routecatch.api.routing.NearestPointResult;
+import com.routecatch.api.routing.RoutingCoordinate;
 import com.routecatch.api.service.OsrmRoutingService;
 
 @Component
@@ -23,16 +22,22 @@ public class OsrmRoomCreatureRoadSnapper
 	@Override
 	public Optional<GeoPoint> snap(GeoPoint candidate) {
 		try {
-			NearestResponse response = routingService.fetchNearest(
-				new NearestRequest(candidate.latitude(), candidate.longitude())
+			NearestPointResult response = routingService.findNearestDrivingPoint(
+				new RoutingCoordinate(
+					candidate.latitude(),
+					candidate.longitude()
+				)
 			);
-			CoordinateDto point = response.snappedPoint();
+			RoutingCoordinate point = response.snappedPoint();
 
 			if (point == null) {
 				return Optional.empty();
 			}
 
-			GeoPoint snapped = new GeoPoint(point.lat(), point.lon());
+			GeoPoint snapped = new GeoPoint(
+				point.latitude(),
+				point.longitude()
+			);
 			return snapped.isValid() ? Optional.of(snapped) : Optional.empty();
 		} catch (RoutingEngineException exception) {
 			return Optional.empty();

@@ -12,15 +12,18 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.ResourceAccessException;
 
-import com.routecatch.api.dto.CoordinateDto;
-import com.routecatch.api.dto.NearestRequest;
-import com.routecatch.api.dto.NearestResponse;
-import com.routecatch.api.dto.RouteRequest;
-import com.routecatch.api.dto.RouteResponse;
 import com.routecatch.api.exception.RoutingEngineException;
+import com.routecatch.api.exception.TravelModeUnavailableException;
+import com.routecatch.api.routing.NearestPointQuery;
+import com.routecatch.api.routing.NearestPointResult;
+import com.routecatch.api.routing.RouteQuery;
+import com.routecatch.api.routing.RouteResult;
+import com.routecatch.api.routing.RoutingCoordinate;
+import com.routecatch.api.routing.TravelMode;
+import com.routecatch.api.routing.TravelRoutingProvider;
 
 @Service
-public class OsrmRoutingService {
+public class OsrmRoutingService implements TravelRoutingProvider {
 
 	private static final Pattern OSRM_CODE_PATTERN =
 		Pattern.compile("\"code\"\\s*:\\s*\"([^\"]+)\"");
@@ -35,12 +38,24 @@ public class OsrmRoutingService {
 			.build();
 	}
 
-	public RouteResponse fetchRoute(RouteRequest request) {
+	@Override
+	public RouteResult route(RouteQuery query) {
+		if (query.travelMode() != TravelMode.CAR) {
+			throw new TravelModeUnavailableException(query.travelMode());
+		}
+
+		return findDrivingRoute(query.source(), query.destination());
+	}
+
+	public RouteResult findDrivingRoute(
+		RoutingCoordinate source,
+		RoutingCoordinate destination
+	) {
 		String routeCoordinates = "%s,%s;%s,%s".formatted(
-			request.sourceLon(),
-			request.sourceLat(),
-			request.destinationLon(),
-			request.destinationLat()
+			source.longitude(),
+			source.latitude(),
+			destination.longitude(),
+			destination.latitude()
 		);
 
 		OsrmRouteResponse osrmResponse;
@@ -88,21 +103,38 @@ public class OsrmRoutingService {
 			);
 		}
 
-		List<CoordinateDto> coordinates = route.geometry().coordinates().stream()
-			.map(coordinate -> new CoordinateDto(coordinate.get(1), coordinate.get(0)))
+		List<RoutingCoordinate> coordinates = route.geometry().coordinates().stream()
+			.map(coordinate -> new RoutingCoordinate(
+				coordinate.get(1),
+				coordinate.get(0)
+			))
 			.toList();
 
-		return new RouteResponse(
+		return new RouteResult(
 			coordinates,
 			route.distance(),
 			route.duration(),
-			new CoordinateDto(request.sourceLat(), request.sourceLon()),
-			new CoordinateDto(request.destinationLat(), request.destinationLon())
+			source,
+			destination
 		);
 	}
 
-	public NearestResponse fetchNearest(NearestRequest request) {
-		String point = "%s,%s".formatted(request.lon(), request.lat());
+	@Override
+	public NearestPointResult findNearestPoint(NearestPointQuery query) {
+		if (query.travelMode() != TravelMode.CAR) {
+			throw new TravelModeUnavailableException(query.travelMode());
+		}
+
+		return findNearestDrivingPoint(query.point());
+	}
+
+	public NearestPointResult findNearestDrivingPoint(
+		RoutingCoordinate coordinate
+	) {
+		String point = "%s,%s".formatted(
+			coordinate.longitude(),
+			coordinate.latitude()
+		);
 
 		OsrmNearestResponse osrmResponse;
 
@@ -146,8 +178,11 @@ public class OsrmRoutingService {
 			);
 		}
 
-		return new NearestResponse(
-			new CoordinateDto(waypoint.location().get(1), waypoint.location().get(0)),
+		return new NearestPointResult(
+			new RoutingCoordinate(
+				waypoint.location().get(1),
+				waypoint.location().get(0)
+			),
 			waypoint.distance(),
 			waypoint.name()
 		);

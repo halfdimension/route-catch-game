@@ -23,6 +23,23 @@ public record RouteRequest(
 	@NotNull
 	@DecimalMin(value = "-180.0", message = "must be between -180 and 180")
 	@DecimalMax(value = "180.0", message = "must be between -180 and 180")
-	Double destinationLon
+	Double destinationLon,
+
+	String travelMode
 ) {
+
+	public RouteRequest(
+		Double sourceLat,
+		Double sourceLon,
+		Double destinationLat,
+		Double destinationLon
+	) {
+		this(
+			sourceLat,
+			sourceLon,
+			destinationLat,
+			destinationLon,
+			null
+		);
+	}
 }
