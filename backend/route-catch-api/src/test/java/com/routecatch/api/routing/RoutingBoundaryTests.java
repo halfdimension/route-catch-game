@@ -17,6 +17,7 @@ import com.routecatch.api.multiplayer.room.creature.OsrmRoomCreatureRoadSnapper;
 import com.routecatch.api.multiplayer.room.creature.RoomCreatureService;
 import com.routecatch.api.multiplayer.room.movement.routing.MovementRouteClient;
 import com.routecatch.api.multiplayer.room.movement.routing.OsrmMovementRouteClient;
+import com.routecatch.api.routing.valhalla.ValhallaRoutingService;
 import com.routecatch.api.service.OsrmRoutingService;
 
 class RoutingBoundaryTests {
@@ -52,6 +53,16 @@ class RoutingBoundaryTests {
 			OsrmRoutingService.class
 		);
 		assertNoFieldOfType(RoomCreatureService.class, TravelRoutingService.class);
+		assertNoFieldOfType(
+			OsrmRoomCreatureRoadSnapper.class,
+			ValhallaRoutingService.class
+		);
+		assertNoFieldOfType(
+			RoomCreatureService.class,
+			ValhallaRoutingService.class
+		);
+		assertNoFieldOfType(OsrmRoomCreatureRoadSnapper.class, TravelMode.class);
+		assertNoFieldOfType(RoomCreatureService.class, TravelMode.class);
 	}
 
 	@Test
@@ -66,6 +77,11 @@ class RoutingBoundaryTests {
 			OsrmMovementRouteClient.class,
 			TravelRoutingService.class
 		);
+		assertNoFieldOfType(
+			OsrmMovementRouteClient.class,
+			ValhallaRoutingService.class
+		);
+		assertNoFieldOfType(OsrmMovementRouteClient.class, TravelMode.class);
 	}
 
 	private Constructor<?> soleConstructor(Class<?> type) {

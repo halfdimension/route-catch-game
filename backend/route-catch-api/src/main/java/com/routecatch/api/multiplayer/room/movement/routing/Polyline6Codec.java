@@ -1,50 +1,24 @@
 package com.routecatch.api.multiplayer.room.movement.routing;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import com.routecatch.api.multiplayer.room.movement.model.MovementCoordinate;
+import com.routecatch.api.routing.Polyline6Decoder;
 
 public final class Polyline6Codec {
 
-	private static final double POLYLINE6_SCALE = 1_000_000.0;
 	private static final double EARTH_RADIUS_METERS = 6_371_000.0;
 
 	private Polyline6Codec() {
 	}
 
 	public static List<MovementCoordinate> decode(String encodedPolyline6) {
-		if (encodedPolyline6 == null || encodedPolyline6.isBlank()) {
-			throw new IllegalArgumentException("Encoded polyline6 must not be blank");
-		}
-
-		List<MovementCoordinate> coordinates = new ArrayList<>();
-		int index = 0;
-		long latitude = 0;
-		long longitude = 0;
-
-		while (index < encodedPolyline6.length()) {
-			DecodedValue latitudeDelta = decodeValue(encodedPolyline6, index);
-			DecodedValue longitudeDelta = decodeValue(
-				encodedPolyline6,
-				latitudeDelta.nextIndex()
-			);
-
-			try {
-				latitude = Math.addExact(latitude, latitudeDelta.value());
-				longitude = Math.addExact(longitude, longitudeDelta.value());
-			} catch (ArithmeticException exception) {
-				throw malformedPolyline("Coordinate delta overflow", exception);
-			}
-
-			coordinates.add(new MovementCoordinate(
-				latitude / POLYLINE6_SCALE,
-				longitude / POLYLINE6_SCALE
-			));
-			index = longitudeDelta.nextIndex();
-		}
-
-		return List.copyOf(coordinates);
+		return Polyline6Decoder.decode(encodedPolyline6).stream()
+			.map(coordinate -> new MovementCoordinate(
+				coordinate.latitude(),
+				coordinate.longitude()
+			))
+			.toList();
 	}
 
 	public static MovementCoordinate interpolate(
@@ -130,48 +104,6 @@ public final class Polyline6Codec {
 		return sum(segmentLengths(coordinates));
 	}
 
-	private static DecodedValue decodeValue(String encodedPolyline6, int startIndex) {
-		if (startIndex >= encodedPolyline6.length()) {
-			throw malformedPolyline("Incomplete coordinate pair");
-		}
-
-		long result = 0L;
-		int shift = 0;
-		int index = startIndex;
-
-		while (true) {
-			if (index >= encodedPolyline6.length()) {
-				throw malformedPolyline("Truncated encoded value");
-			}
-
-			int encodedChunk = encodedPolyline6.charAt(index) - 63;
-			index += 1;
-
-			if (encodedChunk < 0 || encodedChunk > 63) {
-				throw malformedPolyline("Invalid encoded character");
-			}
-
-			long chunk = encodedChunk & 0x1fL;
-
-			if (shift > 60 || chunk > (Long.MAX_VALUE >> shift)) {
-				throw malformedPolyline("Encoded value overflow");
-			}
-
-			result |= chunk << shift;
-
-			if (encodedChunk < 0x20) {
-				break;
-			}
-
-			shift += 5;
-		}
-
-		long value = (result & 1L) == 0L
-			? result >> 1
-			: ~(result >> 1);
-		return new DecodedValue(value, index);
-	}
-
 	private static double[] segmentLengths(
 		List<MovementCoordinate> coordinates
 	) {
@@ -240,20 +172,4 @@ public final class Polyline6Codec {
 		);
 	}
 
-	private static IllegalArgumentException malformedPolyline(String detail) {
-		return new IllegalArgumentException("Malformed encoded polyline6: " + detail);
-	}
-
-	private static IllegalArgumentException malformedPolyline(
-		String detail,
-		RuntimeException cause
-	) {
-		return new IllegalArgumentException(
-			"Malformed encoded polyline6: " + detail,
-			cause
-		);
-	}
-
-	private record DecodedValue(long value, int nextIndex) {
-	}
 }

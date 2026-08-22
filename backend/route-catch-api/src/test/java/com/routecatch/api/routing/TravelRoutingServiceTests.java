@@ -8,7 +8,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import com.routecatch.api.exception.TravelModeUnavailableException;
+import com.routecatch.api.exception.RoutingEngineException;
 
 class TravelRoutingServiceTests {
 
@@ -22,71 +22,134 @@ class TravelRoutingServiceTests {
 	);
 
 	@Test
-	void carRouteUsesExactlyTheConfiguredCarProvider() {
-		RecordingProvider carProvider = new RecordingProvider();
-		TravelRoutingService service = new TravelRoutingService(carProvider);
-		RouteQuery query = new RouteQuery(
-			TravelMode.CAR,
-			SOURCE,
-			DESTINATION
-		);
-
-		RouteResult result = service.route(query);
-
-		assertSame(carProvider.routeResult, result);
-		assertSame(query, carProvider.routeQuery);
-		assertEquals(1, carProvider.routeCalls);
-	}
-
-	@Test
-	void carNearestUsesExactlyTheConfiguredCarProvider() {
-		RecordingProvider carProvider = new RecordingProvider();
-		TravelRoutingService service = new TravelRoutingService(carProvider);
-		NearestPointQuery query = new NearestPointQuery(
-			TravelMode.CAR,
-			SOURCE
-		);
-
-		NearestPointResult result = service.findNearestPoint(query);
-
-		assertSame(carProvider.nearestResult, result);
-		assertSame(query, carProvider.nearestQuery);
-		assertEquals(1, carProvider.nearestCalls);
-	}
-
-	@Test
-	void nonCarModesNeverFallBackToTheCarProvider() {
-		for (TravelMode travelMode : List.of(
-			TravelMode.MOTORCYCLE,
-			TravelMode.WALKING
-		)) {
+	void routeDelegatesEachModeToExactlyItsConfiguredProvider() {
+		for (TravelMode travelMode : TravelMode.values()) {
 			RecordingProvider carProvider = new RecordingProvider();
-			TravelRoutingService service = new TravelRoutingService(carProvider);
+			RecordingProvider valhallaProvider = new RecordingProvider();
+			TravelRoutingService service = new TravelRoutingService(
+				carProvider,
+				valhallaProvider
+			);
+			RouteQuery query = new RouteQuery(
+				travelMode,
+				SOURCE,
+				DESTINATION
+			);
+			RecordingProvider expectedProvider = travelMode == TravelMode.CAR
+				? carProvider
+				: valhallaProvider;
+			RecordingProvider unusedProvider = travelMode == TravelMode.CAR
+				? valhallaProvider
+				: carProvider;
 
-			TravelModeUnavailableException routeException = assertThrows(
-				TravelModeUnavailableException.class,
+			RouteResult result = service.route(query);
+
+			assertSame(expectedProvider.routeResult, result);
+			assertSame(query, expectedProvider.routeQuery);
+			assertEquals(1, expectedProvider.routeCalls);
+			assertEquals(0, unusedProvider.routeCalls);
+		}
+	}
+
+	@Test
+	void nearestPointDelegatesEachModeToExactlyItsConfiguredProvider() {
+		for (TravelMode travelMode : TravelMode.values()) {
+			RecordingProvider carProvider = new RecordingProvider();
+			RecordingProvider valhallaProvider = new RecordingProvider();
+			TravelRoutingService service = new TravelRoutingService(
+				carProvider,
+				valhallaProvider
+			);
+			NearestPointQuery query = new NearestPointQuery(
+				travelMode,
+				SOURCE
+			);
+			RecordingProvider expectedProvider = travelMode == TravelMode.CAR
+				? carProvider
+				: valhallaProvider;
+			RecordingProvider unusedProvider = travelMode == TravelMode.CAR
+				? valhallaProvider
+				: carProvider;
+
+			NearestPointResult result = service.findNearestPoint(query);
+
+			assertSame(expectedProvider.nearestResult, result);
+			assertSame(query, expectedProvider.nearestQuery);
+			assertEquals(1, expectedProvider.nearestCalls);
+			assertEquals(0, unusedProvider.nearestCalls);
+		}
+	}
+
+	@Test
+	void routeProviderFailuresPropagateWithoutFallback() {
+		for (TravelMode travelMode : TravelMode.values()) {
+			RecordingProvider carProvider = new RecordingProvider();
+			RecordingProvider valhallaProvider = new RecordingProvider();
+			TravelRoutingService service = new TravelRoutingService(
+				carProvider,
+				valhallaProvider
+			);
+			RecordingProvider expectedProvider = travelMode == TravelMode.CAR
+				? carProvider
+				: valhallaProvider;
+			RecordingProvider unusedProvider = travelMode == TravelMode.CAR
+				? valhallaProvider
+				: carProvider;
+			RoutingEngineException providerFailure = providerFailure();
+			expectedProvider.routeFailure = providerFailure;
+
+			RoutingEngineException actualFailure = assertThrows(
+				RoutingEngineException.class,
 				() -> service.route(new RouteQuery(
 					travelMode,
 					SOURCE,
 					DESTINATION
 				))
 			);
-			TravelModeUnavailableException nearestException = assertThrows(
-				TravelModeUnavailableException.class,
+
+			assertSame(providerFailure, actualFailure);
+			assertEquals(1, expectedProvider.routeCalls);
+			assertEquals(0, unusedProvider.routeCalls);
+		}
+	}
+
+	@Test
+	void nearestPointProviderFailuresPropagateWithoutFallback() {
+		for (TravelMode travelMode : TravelMode.values()) {
+			RecordingProvider carProvider = new RecordingProvider();
+			RecordingProvider valhallaProvider = new RecordingProvider();
+			TravelRoutingService service = new TravelRoutingService(
+				carProvider,
+				valhallaProvider
+			);
+			RecordingProvider expectedProvider = travelMode == TravelMode.CAR
+				? carProvider
+				: valhallaProvider;
+			RecordingProvider unusedProvider = travelMode == TravelMode.CAR
+				? valhallaProvider
+				: carProvider;
+			RoutingEngineException providerFailure = providerFailure();
+			expectedProvider.nearestFailure = providerFailure;
+
+			RoutingEngineException actualFailure = assertThrows(
+				RoutingEngineException.class,
 				() -> service.findNearestPoint(new NearestPointQuery(
 					travelMode,
 					SOURCE
 				))
 			);
 
-			assertEquals(
-				"Routing is not available for travel mode " + travelMode,
-				routeException.getMessage()
-			);
-			assertEquals(routeException.getMessage(), nearestException.getMessage());
-			assertEquals(0, carProvider.routeCalls);
-			assertEquals(0, carProvider.nearestCalls);
+			assertSame(providerFailure, actualFailure);
+			assertEquals(1, expectedProvider.nearestCalls);
+			assertEquals(0, unusedProvider.nearestCalls);
 		}
+	}
+
+	private RoutingEngineException providerFailure() {
+		return new RoutingEngineException(
+			"TEST_PROVIDER_FAILURE",
+			"Provider failed"
+		);
 	}
 
 	private static final class RecordingProvider
@@ -106,6 +169,8 @@ class TravelRoutingServiceTests {
 		);
 		private RouteQuery routeQuery;
 		private NearestPointQuery nearestQuery;
+		private RoutingEngineException routeFailure;
+		private RoutingEngineException nearestFailure;
 		private int routeCalls;
 		private int nearestCalls;
 
@@ -113,6 +178,11 @@ class TravelRoutingServiceTests {
 		public RouteResult route(RouteQuery query) {
 			routeCalls += 1;
 			routeQuery = query;
+
+			if (routeFailure != null) {
+				throw routeFailure;
+			}
+
 			return routeResult;
 		}
 
@@ -120,6 +190,11 @@ class TravelRoutingServiceTests {
 		public NearestPointResult findNearestPoint(NearestPointQuery query) {
 			nearestCalls += 1;
 			nearestQuery = query;
+
+			if (nearestFailure != null) {
+				throw nearestFailure;
+			}
+
 			return nearestResult;
 		}
 	}

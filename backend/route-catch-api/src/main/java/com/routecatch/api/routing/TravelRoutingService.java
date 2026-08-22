@@ -3,18 +3,20 @@ package com.routecatch.api.routing;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
-import com.routecatch.api.exception.TravelModeUnavailableException;
-
 @Service
 public class TravelRoutingService {
 
 	private final TravelRoutingProvider carRoutingProvider;
+	private final TravelRoutingProvider valhallaRoutingProvider;
 
 	public TravelRoutingService(
 		@Qualifier("osrmRoutingService")
-		TravelRoutingProvider carRoutingProvider
+		TravelRoutingProvider carRoutingProvider,
+		@Qualifier("valhallaRoutingService")
+		TravelRoutingProvider valhallaRoutingProvider
 	) {
 		this.carRoutingProvider = carRoutingProvider;
+		this.valhallaRoutingProvider = valhallaRoutingProvider;
 	}
 
 	public RouteResult route(RouteQuery query) {
@@ -28,8 +30,7 @@ public class TravelRoutingService {
 	private TravelRoutingProvider providerFor(TravelMode travelMode) {
 		return switch (travelMode) {
 			case CAR -> carRoutingProvider;
-			case MOTORCYCLE, WALKING ->
-				throw new TravelModeUnavailableException(travelMode);
+			case MOTORCYCLE, WALKING -> valhallaRoutingProvider;
 		};
 	}
 }
