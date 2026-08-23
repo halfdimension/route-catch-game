@@ -1,3 +1,5 @@
+import TravelModeSelector from './TravelModeSelector'
+
 function GameSessionPanel({
   gameState,
   selectedRoundSeconds,
@@ -15,6 +17,9 @@ function GameSessionPanel({
   isSessionPending,
   isAuthenticated,
   authenticatedDisplayName,
+  selectedTravelMode,
+  isTravelModeSelectionLocked,
+  onSelectedTravelModeChange,
 }) {
   function handleDurationChange(event) {
     onRoundDurationChange(Number(event.target.value))
@@ -62,6 +67,13 @@ function GameSessionPanel({
           </label>
         </div>
       )}
+
+      <TravelModeSelector
+        selectedTravelMode={selectedTravelMode}
+        isTravelModeSelectionLocked={isTravelModeSelectionLocked}
+        onSelectedTravelModeChange={onSelectedTravelModeChange}
+        disabled={isSessionPending}
+      />
 
       {isAuthenticated && (
         <p className="authenticated-session-note">

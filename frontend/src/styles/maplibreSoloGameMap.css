@@ -1418,6 +1418,33 @@
   color: #0f172a;
 }
 
+.travel-mode-selector.is-maplibre {
+  margin: 0;
+}
+
+.travel-mode-selector.is-maplibre legend {
+  color: var(--ml-hud-muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.travel-mode-selector.is-maplibre .travel-mode-options span {
+  border-color: var(--ml-hud-border);
+  color: var(--ml-hud-muted);
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 9px;
+}
+
+.travel-mode-selector.is-maplibre .travel-mode-options input:checked + span {
+  border-color: rgba(94, 234, 212, 0.52);
+  color: #ccfbf1;
+  background: rgba(94, 234, 212, 0.14);
+}
+
+.travel-mode-selector.is-maplibre .travel-mode-options input:focus-visible + span {
+  outline-color: var(--ml-hud-accent);
+}
+
 .maplibre-session-start,
 .maplibre-session-end {
   width: 100%;

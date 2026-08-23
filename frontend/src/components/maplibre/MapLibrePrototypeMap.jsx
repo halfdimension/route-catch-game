@@ -5,7 +5,7 @@ import {
   useState,
 } from 'react'
 import Map, { NavigationControl } from '@vis.gl/react-maplibre'
-import { fetchRoute } from '../../api/osrmClient'
+import { fetchRoute } from '../../api/routingClient'
 import { INITIAL_MAP_CENTER } from '../../config/mapConfig'
 import { toMapLibreCoordinate } from './mapLibreCoordinates'
 import MapLibrePrototypeMarkers from './MapLibrePrototypeMarkers'
@@ -106,7 +106,7 @@ function MapLibrePrototypeMap() {
 
       setRouteCoordinates([])
       setRouteError(
-        `Routing unavailable: ${error.message || 'the backend or OSRM did not respond.'}`,
+        `Routing unavailable: ${error.message || 'the routing service did not respond.'}`,
       )
     } finally {
       if (routeAbortControllerRef.current === abortController) {

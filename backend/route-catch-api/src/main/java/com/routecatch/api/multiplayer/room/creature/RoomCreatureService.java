@@ -14,11 +14,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import com.routecatch.api.auth.persistence.UserEntity;
-import com.routecatch.api.dto.RouteRequest;
 import com.routecatch.api.exception.RoutingEngineException;
 import com.routecatch.api.game.creature.CreatureCatalogService;
 import com.routecatch.api.game.creature.CreatureDefinition;
@@ -29,7 +29,7 @@ import com.routecatch.api.multiplayer.room.service.MultiplayerRoomService;
 import com.routecatch.api.multiplayer.room.service.RoomScoreService;
 import com.routecatch.api.multiplayer.room.round.RoomRoundCoordinator;
 import com.routecatch.api.multiplayer.room.round.RoundLifecycleException;
-import org.springframework.http.HttpStatus;
+import com.routecatch.api.routing.RoutingCoordinate;
 import com.routecatch.api.service.OsrmRoutingService;
 
 @Service
@@ -588,12 +588,13 @@ public class RoomCreatureService implements RoomCreaturePopulationStore {
 		}
 
 		try {
-			routingService.fetchRoute(new RouteRequest(
-				request.centerLat(),
-				request.centerLon(),
-				coordinate.latitude(),
-				coordinate.longitude()
-			));
+			routingService.findDrivingRoute(
+				new RoutingCoordinate(request.centerLat(), request.centerLon()),
+				new RoutingCoordinate(
+					coordinate.latitude(),
+					coordinate.longitude()
+				)
+			);
 			return true;
 		} catch (RoutingEngineException exception) {
 			return !List.of(

@@ -1,7 +1,9 @@
 import {
   calculateSoloCheckpointExpiresAt,
   SOLO_RECOVERY_ROUND_PHASES,
+  SOLO_RECOVERY_SCHEMA_VERSION,
 } from '../../src/recovery/soloRecoveryCheckpoint.js'
+import { DEFAULT_TRAVEL_MODE } from '../../src/config/travelMode.js'
 import { createAuthenticatedSoloIdentityKey } from '../../src/recovery/soloRecoveryIdentity.js'
 
 export const SOLO_RECOVERY_TEST_USER_ID =
@@ -18,6 +20,7 @@ export function createValidSoloCheckpoint({
   createdAtEpochMs = SOLO_RECOVERY_TEST_STARTED_AT,
   updatedAtEpochMs,
   score = 0,
+  travelMode = DEFAULT_TRAVEL_MODE,
 } = {}) {
   const endsAtEpochMs =
     phase === SOLO_RECOVERY_ROUND_PHASES.STARTING
@@ -30,7 +33,7 @@ export function createValidSoloCheckpoint({
   )
 
   return {
-    schemaVersion: 1,
+    schemaVersion: SOLO_RECOVERY_SCHEMA_VERSION,
     identityKey,
     round: {
       clientRoundId: '33333333-3333-4333-8333-333333333333',
@@ -42,6 +45,7 @@ export function createValidSoloCheckpoint({
           ? null
           : startedAtEpochMs,
       endsAtEpochMs,
+      travelMode,
     },
     player: {
       settledPosition: { lat: 28.5505, lon: 77.2688 },
@@ -68,4 +72,11 @@ export function createValidSoloCheckpoint({
       endsAtEpochMs,
     }),
   }
+}
+
+export function createValidSoloV1Checkpoint(options) {
+  const checkpoint = createValidSoloCheckpoint(options)
+  checkpoint.schemaVersion = 1
+  delete checkpoint.round.travelMode
+  return checkpoint
 }

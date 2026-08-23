@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../config/apiConfig.js'
+import { requireTravelMode } from '../config/travelMode.js'
 
 export class RouteRequestError extends Error {
   constructor(message, { status, errorCode, responseMessage } = {}) {
@@ -21,7 +22,7 @@ export function isRouteUnavailableError(error) {
   )
 }
 
-async function routeRequestError(response, fallbackMessage) {
+async function routingRequestError(response, fallbackMessage) {
   let errorBody = null
 
   try {
@@ -40,24 +41,35 @@ async function routeRequestError(response, fallbackMessage) {
   )
 }
 
-export async function fetchRoute(source, destination, options = {}) {
+function travelModePayload(travelMode) {
+  return travelMode === undefined
+    ? {}
+    : { travelMode: requireTravelMode(travelMode) }
+}
+
+export async function fetchRoute(
+  source,
+  destination,
+  { travelMode, ...requestOptions } = {},
+) {
   const response = await fetch(`${API_BASE_URL}/api/routes`, {
-    ...options,
+    ...requestOptions,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(options.headers || {}),
+      ...(requestOptions.headers || {}),
     },
     body: JSON.stringify({
       sourceLat: source.lat,
       sourceLon: source.lon,
       destinationLat: destination.lat,
       destinationLon: destination.lon,
+      ...travelModePayload(travelMode),
     }),
   })
 
   if (!response.ok) {
-    throw await routeRequestError(
+    throw await routingRequestError(
       response,
       `Route request failed with status ${response.status}`,
     )
@@ -79,20 +91,29 @@ export async function fetchRoute(source, destination, options = {}) {
   }
 }
 
-export async function fetchNearestRoadPoint(point) {
+export async function fetchNearestRoadPoint(
+  point,
+  { travelMode, ...requestOptions } = {},
+) {
   const response = await fetch(`${API_BASE_URL}/api/nearest`, {
+    ...requestOptions,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(requestOptions.headers || {}),
     },
     body: JSON.stringify({
       lat: point.lat,
       lon: point.lon,
+      ...travelModePayload(travelMode),
     }),
   })
 
   if (!response.ok) {
-    throw new Error(`Nearest request failed with status ${response.status}`)
+    throw await routingRequestError(
+      response,
+      `Nearest request failed with status ${response.status}`,
+    )
   }
 
   const data = await response.json()

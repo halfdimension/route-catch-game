@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRouteAnimationPlan } from '../src/hooks/useRouteAnimation.js'
+import { TRAVEL_MODES } from '../src/config/travelMode.js'
 import {
   SOLO_RECOVERED_CATCH_OUTBOX_SUBMISSION_ENABLED,
   SOLO_RECOVERY_ROUTE_DISTANCE_EPSILON_METERS,
@@ -9,8 +10,10 @@ import {
   createSoloPendingCatchId,
   isSoloCheckpointResumable,
   isSoloCheckpointStorageExpired,
+  migrateSoloRecoveryCheckpointV1,
   parseSoloRecoveryCheckpoint,
   validateSoloRecoveryCheckpoint,
+  validateSoloRecoveryCheckpointV1,
 } from '../src/recovery/soloRecoveryCheckpoint.js'
 import {
   SOLO_RECOVERY_IDENTITY_STATUS,
@@ -22,13 +25,14 @@ import {
 } from '../src/recovery/soloRecoveryIdentity.js'
 import {
   createValidSoloCheckpoint,
+  createValidSoloV1Checkpoint,
   SOLO_RECOVERY_TEST_STARTED_AT as STARTED_AT,
   SOLO_RECOVERY_TEST_USER_ID as USER_ID,
 } from './helpers/soloRecoveryFixtures.js'
 
 const OTHER_USER_ID = '22222222-2222-4222-8222-222222222222'
 
-test('valid v1 checkpoint is accepted without merging defaults', () => {
+test('valid v2 checkpoint is accepted without merging defaults', () => {
   const checkpoint = createValidSoloCheckpoint()
   const validated = validateSoloRecoveryCheckpoint(checkpoint, {
     expectedIdentityKey: checkpoint.identityKey,
@@ -38,7 +42,84 @@ test('valid v1 checkpoint is accepted without merging defaults', () => {
   assert.notEqual(validated, checkpoint)
 })
 
-test('valid v1 checkpoint accepts measured movement with duplicate coordinates', () => {
+test('v2 checkpoint requires each exact active-round travel mode', () => {
+  for (const travelMode of Object.values(TRAVEL_MODES)) {
+    const checkpoint = createValidSoloCheckpoint({ travelMode })
+    assert.equal(
+      validateSoloRecoveryCheckpoint(checkpoint).round.travelMode,
+      travelMode,
+    )
+  }
+
+  for (const travelMode of [
+    undefined,
+    null,
+    'car',
+    'walking',
+    'motorcycle',
+    'BICYCLE',
+    'TELEPORT',
+    true,
+    false,
+    1,
+    {},
+    [],
+  ]) {
+    const checkpoint = createValidSoloCheckpoint()
+    if (travelMode === undefined) {
+      delete checkpoint.round.travelMode
+    } else {
+      checkpoint.round.travelMode = travelMode
+    }
+    assert.throws(
+      () => validateSoloRecoveryCheckpoint(checkpoint),
+      /round\.travelMode/,
+    )
+    assert.equal(parseSoloRecoveryCheckpoint(checkpoint).ok, false)
+  }
+})
+
+test('validated v1 migrates narrowly to v2 with active CAR mode', () => {
+  const v1 = createValidSoloV1Checkpoint({ score: 25 })
+  const validatedV1 = validateSoloRecoveryCheckpointV1(v1)
+  const migrated = migrateSoloRecoveryCheckpointV1(v1)
+  const parsed = parseSoloRecoveryCheckpoint(v1)
+
+  assert.deepEqual(validatedV1, v1)
+  assert.equal(migrated.schemaVersion, 2)
+  assert.equal(migrated.round.travelMode, TRAVEL_MODES.CAR)
+  assert.equal(migrated.score, 25)
+  assert.equal(validateSoloRecoveryCheckpoint(migrated).schemaVersion, 2)
+  assert.equal(parsed.ok, true)
+  assert.equal(parsed.migratedFromSchemaVersion, 1)
+  assert.deepEqual(parsed.checkpoint, migrated)
+  assert.equal(v1.schemaVersion, 1)
+  assert.equal(Object.hasOwn(v1.round, 'travelMode'), false)
+})
+
+test('malformed v1 and unsupported versions are never migrated', () => {
+  const malformedV1 = createValidSoloV1Checkpoint()
+  malformedV1.player.settledPosition.lat = 91
+  const unsupported = createValidSoloCheckpoint()
+  unsupported.schemaVersion = 99
+
+  assert.throws(
+    () => migrateSoloRecoveryCheckpointV1(malformedV1),
+    /latitude range/,
+  )
+  assert.equal(parseSoloRecoveryCheckpoint(malformedV1).ok, false)
+  assert.equal(parseSoloRecoveryCheckpoint(unsupported).ok, false)
+
+  const missingV2Mode = createValidSoloCheckpoint()
+  delete missingV2Mode.round.travelMode
+  assert.equal(parseSoloRecoveryCheckpoint(missingV2Mode).ok, false)
+
+  const lowercaseV2Mode = createValidSoloCheckpoint()
+  lowercaseV2Mode.round.travelMode = 'walking'
+  assert.equal(parseSoloRecoveryCheckpoint(lowercaseV2Mode).ok, false)
+})
+
+test('valid v2 checkpoint accepts measured movement with duplicate coordinates', () => {
   const checkpoint = createValidSoloCheckpoint()
   checkpoint.movement = {
     movementRecoveryId: '55555555-5555-4555-8555-555555555555',
@@ -60,7 +141,7 @@ test('valid v1 checkpoint accepts measured movement with duplicate coordinates',
 
 test('unsupported schema versions and corrupted values are rejected', () => {
   const unsupported = createValidSoloCheckpoint()
-  unsupported.schemaVersion = 2
+  unsupported.schemaVersion = 3
 
   assert.equal(parseSoloRecoveryCheckpoint(unsupported).ok, false)
   assert.equal(parseSoloRecoveryCheckpoint('corrupted').ok, false)

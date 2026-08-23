@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fetchRoute, isRouteUnavailableError } from '../api/osrmClient.js'
+import { fetchRoute, isRouteUnavailableError } from '../api/routingClient.js'
 import { API_BASE_URL } from '../config/apiConfig.js'
 import {
   DEFAULT_SIMULATION_SPEED,
   INITIAL_PLAYER_POSITION,
 } from '../config/gameConfig.js'
+import {
+  DEFAULT_TRAVEL_MODE,
+  requireTravelMode,
+} from '../config/travelMode.js'
 import {
   SOLO_RECOVERY_MOVEMENT_PHASES,
   SOLO_RECOVERY_MOVEMENT_PURPOSES,
@@ -29,6 +33,7 @@ export function usePlayerState({
   resolveRouteInterval,
   onRouteIntervalEvents,
   captureRouteOperation,
+  routeRequest = fetchRoute,
   getEpochTimeMs = Date.now,
 } = {}) {
   const [playerPosition, setPlayerPosition] = useState(INITIAL_PLAYER_POSITION)
@@ -46,6 +51,7 @@ export function usePlayerState({
   const movementRef = useRef(null)
   const onMovementTransitionRef = useRef(onMovementTransition)
   const captureRouteOperationRef = useRef(captureRouteOperation)
+  const routeRequestRef = useRef(routeRequest)
   const mountedRef = useRef(false)
   const navigationFrameChannelRef = useRef(null)
 
@@ -118,7 +124,8 @@ export function usePlayerState({
   useEffect(() => {
     onMovementTransitionRef.current = onMovementTransition
     captureRouteOperationRef.current = captureRouteOperation
-  }, [captureRouteOperation, onMovementTransition])
+    routeRequestRef.current = routeRequest
+  }, [captureRouteOperation, onMovementTransition, routeRequest])
 
   useEffect(() => {
     mountedRef.current = true
@@ -194,16 +201,28 @@ export function usePlayerState({
       return false
     }
 
+    const captureOperation = captureRouteOperationRef.current
     const lifecycleOperation = options.lifecycleOperation ??
-      captureRouteOperationRef.current?.()
+      captureOperation?.() ??
+      (captureOperation
+        ? null
+        : {
+            travelMode: DEFAULT_TRAVEL_MODE,
+            isCurrent: () => true,
+          })
     const operationIsCurrent = () => (
       mountedRef.current &&
+      lifecycleOperation !== null &&
       lifecycleOperation?.isCurrent?.() !== false &&
       options.shouldStart?.() !== false
     )
     if (!operationIsCurrent()) {
       return false
     }
+    const travelMode = requireTravelMode(
+      options.travelMode ?? lifecycleOperation?.travelMode,
+      'Captured SOLO route travel mode',
+    )
 
     const previousMovement = movementRef.current
     const cancelled = cancelAnimation()
@@ -243,8 +262,9 @@ export function usePlayerState({
     }
 
     try {
-      const route = await fetchRoute(sourcePosition, destination, {
+      const route = await routeRequestRef.current(sourcePosition, destination, {
         signal: abortController.signal,
+        travelMode,
       })
       const nextRouteCoordinates = route.coordinates
 
@@ -485,6 +505,7 @@ export function usePlayerState({
         notifyTransitions: false,
         shouldStart,
         lifecycleOperation: {
+          travelMode: checkpoint.round.travelMode,
           isCurrent: () => shouldStart?.() !== false,
         },
       })

@@ -563,6 +563,74 @@ button:focus-visible {
   grid-template-columns: 1fr;
 }
 
+.travel-mode-selector {
+  min-width: 0;
+  margin: 0 0 7px;
+  padding: 0;
+  border: 0;
+}
+
+.travel-mode-selector legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.travel-mode-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.travel-mode-options label {
+  position: relative;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.travel-mode-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.travel-mode-options span {
+  display: block;
+  overflow: hidden;
+  padding: 5px 3px;
+  border: 1px solid #c8d0d9;
+  border-radius: 6px;
+  color: #475569;
+  background: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+}
+
+.travel-mode-options input:checked + span {
+  border-color: #2563eb;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.travel-mode-options input:focus-visible + span {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.travel-mode-selector:disabled .travel-mode-options label {
+  cursor: not-allowed;
+}
+
+.travel-mode-selector:disabled .travel-mode-options span {
+  opacity: 0.68;
+}
+
 .round-duration-control,
 .player-name-control {
   display: grid;

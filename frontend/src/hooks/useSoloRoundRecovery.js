@@ -10,6 +10,10 @@ import {
   getGameSession,
 } from '../api/gameSessionClient.js'
 import {
+  DEFAULT_TRAVEL_MODE,
+  requireTravelMode,
+} from '../config/travelMode.js'
+import {
   SOLO_RECOVERY_MOVEMENT_PHASES,
   SOLO_RECOVERY_MOVEMENT_PURPOSES,
   SOLO_RECOVERED_CATCH_OUTBOX_SUBMISSION_ENABLED,
@@ -125,9 +129,19 @@ export function useSoloRoundRecovery({
   const [warning, setWarning] = useState('')
   const [catchReplayWarning, setCatchReplayWarning] = useState('')
   const [identityKey, setIdentityKey] = useState(null)
+  const [selectedTravelMode, setSelectedTravelModeState] = useState(
+    DEFAULT_TRAVEL_MODE,
+  )
+  const [activeTravelMode, setActiveTravelModeState] = useState(null)
+  const [travelModeSelectionLocked, setTravelModeSelectionLocked] = useState(
+    false,
+  )
   const [replayTriggerVersion, setReplayTriggerVersion] = useState(0)
   const bootstrapStateRef = useRef(bootstrapState)
   const identityKeyRef = useRef(null)
+  const selectedTravelModeRef = useRef(DEFAULT_TRAVEL_MODE)
+  const activeTravelModeRef = useRef(null)
+  const activeTravelModeOwnerRef = useRef(null)
   const guestIdentityKeyRef = useRef(null)
   const previousIdentityKeyRef = useRef(null)
   const writerRef = useRef(null)
@@ -218,14 +232,188 @@ export function useSoloRoundRecovery({
     return writer
   }, [reportStorageFailure, store, writerOrderingRegistry])
 
+  const clearActiveTravelMode = useCallback(() => {
+    activeTravelModeRef.current = null
+    activeTravelModeOwnerRef.current = null
+    if (mountedRef.current) {
+      setActiveTravelModeState(null)
+    }
+  }, [])
+
+  const resetSelectedTravelMode = useCallback(() => {
+    selectedTravelModeRef.current = DEFAULT_TRAVEL_MODE
+    if (mountedRef.current) {
+      setSelectedTravelModeState(DEFAULT_TRAVEL_MODE)
+    }
+  }, [])
+
+  const isTravelModeSelectionLockedNow = useCallback((
+    roundPhase = activeCheckpointRef.current?.round.phase ?? null,
+  ) => Boolean(
+    activeRoundLaunchRef.current !== null ||
+    roundPhase === SOLO_RECOVERY_ROUND_PHASES.STARTING ||
+    roundPhase === SOLO_RECOVERY_ROUND_PHASES.RUNNING
+  ), [])
+
+  const syncTravelModeSelectionLock = useCallback((roundPhase) => {
+    const locked = isTravelModeSelectionLockedNow(roundPhase)
+    if (mountedRef.current) {
+      setTravelModeSelectionLocked(locked)
+    }
+    return locked
+  }, [isTravelModeSelectionLockedNow])
+
+  const updateSelectedTravelMode = useCallback((nextTravelMode) => {
+    const validatedTravelMode = requireTravelMode(
+      nextTravelMode,
+      'Selected travel mode',
+    )
+    if (
+      bootstrapStateRef.current !== SOLO_RECOVERY_BOOTSTRAP_STATES.READY ||
+      !identityKeyRef.current ||
+      isTravelModeSelectionLockedNow()
+    ) {
+      return false
+    }
+
+    selectedTravelModeRef.current = validatedTravelMode
+    setSelectedTravelModeState(validatedTravelMode)
+    return true
+  }, [isTravelModeSelectionLockedNow])
+
+  const captureSelectedTravelMode = useCallback((owner) => {
+    const capturedTravelMode = requireTravelMode(
+      selectedTravelModeRef.current,
+      'Selected travel mode',
+    )
+    activeTravelModeRef.current = capturedTravelMode
+    activeTravelModeOwnerRef.current = {
+      ...owner,
+      travelMode: capturedTravelMode,
+    }
+    setActiveTravelModeState(capturedTravelMode)
+    return capturedTravelMode
+  }, [])
+
+  const hydrateActiveTravelMode = useCallback((checkpoint) => {
+    const previousSelectedTravelMode = requireTravelMode(
+      selectedTravelModeRef.current,
+      'Previous selected travel mode',
+    )
+    const previousActiveTravelMode = activeTravelModeRef.current
+    const previousActiveTravelModeOwner = activeTravelModeOwnerRef.current
+    const previousActiveCheckpoint = activeCheckpointRef.current
+    const recoveredTravelMode = requireTravelMode(
+      checkpoint.round.travelMode,
+      'Recovered active travel mode',
+    )
+    const owner = {
+      identityKey: checkpoint.identityKey,
+      clientRoundId: checkpoint.round.clientRoundId,
+      backendSessionId: checkpoint.round.backendSessionId,
+      travelMode: recoveredTravelMode,
+    }
+    selectedTravelModeRef.current = recoveredTravelMode
+    activeTravelModeRef.current = recoveredTravelMode
+    activeTravelModeOwnerRef.current = owner
+    setSelectedTravelModeState(recoveredTravelMode)
+    setActiveTravelModeState(recoveredTravelMode)
+    syncTravelModeSelectionLock(checkpoint.round.phase)
+    return Object.freeze({
+      owner,
+      previousSelectedTravelMode,
+      previousActiveTravelMode,
+      previousActiveTravelModeOwner,
+      previousActiveCheckpoint,
+    })
+  }, [syncTravelModeSelectionLock])
+
+  const rollbackProvisionalTravelMode = useCallback((provisionalAdoption) => {
+    if (
+      !provisionalAdoption ||
+      activeTravelModeOwnerRef.current !== provisionalAdoption.owner
+    ) {
+      return false
+    }
+
+    const restoredTravelMode = requireTravelMode(
+      provisionalAdoption.previousSelectedTravelMode,
+      'Previous selected travel mode',
+    )
+    const previousCheckpoint = provisionalAdoption.previousActiveCheckpoint
+    const previousOwner = provisionalAdoption.previousActiveTravelModeOwner
+    const previousActiveTravelMode =
+      provisionalAdoption.previousActiveTravelMode
+    const previousAdoptedRoundIsStillCurrent = Boolean(
+      previousCheckpoint &&
+      activeCheckpointRef.current === previousCheckpoint &&
+      previousOwner &&
+      previousActiveTravelMode === previousCheckpoint.round.travelMode &&
+      previousOwner.travelMode === previousActiveTravelMode &&
+      roundMatchesScope(previousCheckpoint, previousOwner)
+    )
+
+    if (previousAdoptedRoundIsStillCurrent) {
+      activeTravelModeRef.current = previousActiveTravelMode
+      activeTravelModeOwnerRef.current = previousOwner
+      selectedTravelModeRef.current = restoredTravelMode
+      if (mountedRef.current) {
+        setActiveTravelModeState(previousActiveTravelMode)
+        setSelectedTravelModeState(restoredTravelMode)
+      }
+      syncTravelModeSelectionLock(previousCheckpoint.round.phase)
+      return true
+    }
+
+    const currentCheckpoint = activeCheckpointRef.current
+    const priorRoundAdvancedWhileProvisional = Boolean(
+      previousCheckpoint &&
+      currentCheckpoint &&
+      previousOwner &&
+      roundMatchesScope(currentCheckpoint, previousOwner)
+    )
+    if (priorRoundAdvancedWhileProvisional) {
+      // Same-round writes replace the checkpoint object. Bind a fresh owner to
+      // the current object instead of resurrecting the captured owner token.
+      const currentTravelMode = requireTravelMode(
+        currentCheckpoint.round.travelMode,
+        'Current active travel mode',
+      )
+      activeTravelModeRef.current = currentTravelMode
+      activeTravelModeOwnerRef.current = {
+        identityKey: currentCheckpoint.identityKey,
+        clientRoundId: currentCheckpoint.round.clientRoundId,
+        backendSessionId: currentCheckpoint.round.backendSessionId,
+        travelMode: currentTravelMode,
+      }
+      selectedTravelModeRef.current = restoredTravelMode
+      if (mountedRef.current) {
+        setActiveTravelModeState(currentTravelMode)
+        setSelectedTravelModeState(restoredTravelMode)
+      }
+      syncTravelModeSelectionLock(currentCheckpoint.round.phase)
+      return true
+    }
+
+    clearActiveTravelMode()
+    selectedTravelModeRef.current = restoredTravelMode
+    if (mountedRef.current) {
+      setSelectedTravelModeState(restoredTravelMode)
+    }
+    syncTravelModeSelectionLock(null)
+    return true
+  }, [clearActiveTravelMode, syncTravelModeSelectionLock])
+
   const invalidateLifecycle = useCallback(() => {
     lifecycleGenerationRef.current += 1
     replayGenerationRef.current += 1
     replayEligibilityRef.current = null
     catchSubmissionAttemptsRef.current.clear()
     activeRoundLaunchRef.current = null
+    clearActiveTravelMode()
+    syncTravelModeSelectionLock(null)
     return lifecycleGenerationRef.current
-  }, [])
+  }, [clearActiveTravelMode, syncTravelModeSelectionLock])
 
   const isOperationCurrent = useCallback((scope, {
     requireLaunch = false,
@@ -336,12 +524,14 @@ export function useSoloRoundRecovery({
     bootstrapGenerationRef.current = generation
     const effectState = { active: true }
     let bootstrapScopeForRun = null
+    let provisionalTravelModeAdoption = null
 
     if (loadingAuth !== false) {
       const previousWriter = writerRef.current
       const previousIdentityKey = identityKeyRef.current
       identityKeyRef.current = null
       invalidateLifecycle()
+      resetSelectedTravelMode()
       activeCheckpointRef.current = null
       if (previousIdentityKey) {
         bootstrapFlightsRef.current.delete(previousIdentityKey)
@@ -406,6 +596,7 @@ export function useSoloRoundRecovery({
           nextIdentityKey.startsWith('guest:')
 
         invalidateLifecycle()
+        resetSelectedTravelMode()
         activeCheckpointRef.current = null
         resetRuntimeRef.current?.()
         adoptBackendSessionRef.current?.(null)
@@ -496,6 +687,14 @@ export function useSoloRoundRecovery({
         writesEnabledRef.current = false
       }
       setWarning(bootstrap.warning)
+      if (bootstrap.checkpoint) {
+        provisionalTravelModeAdoption = hydrateActiveTravelMode(
+          bootstrap.checkpoint,
+        )
+      } else {
+        clearActiveTravelMode()
+        syncTravelModeSelectionLock(null)
+      }
       let gameplayHydration = null
       if (
         bootstrap.kind === SOLO_RECOVERY_BOOTSTRAP_KINDS.RESUME &&
@@ -510,6 +709,7 @@ export function useSoloRoundRecovery({
         }
       }
       activeCheckpointRef.current = bootstrap.checkpoint
+      provisionalTravelModeAdoption = null
       if (bootstrap.checkpoint) {
         replayEligibilityRef.current = {
           identityKey: bootstrap.checkpoint.identityKey,
@@ -629,6 +829,8 @@ export function useSoloRoundRecovery({
 
     void runBootstrap().catch(() => {
       if (isBootstrapScopeCurrent(bootstrapScopeForRun)) {
+        rollbackProvisionalTravelMode(provisionalTravelModeAdoption)
+        provisionalTravelModeAdoption = null
         writesEnabledRef.current = false
         setWarning(SOLO_RECOVERY_UNAVAILABLE_WARNING)
         updateBootstrapState(SOLO_RECOVERY_BOOTSTRAP_STATES.READY)
@@ -652,11 +854,16 @@ export function useSoloRoundRecovery({
     endBackendSession,
     getBackendSession,
     getEpochTimeMs,
+    clearActiveTravelMode,
+    hydrateActiveTravelMode,
     invalidateLifecycle,
     isBootstrapScopeCurrent,
     isAuthenticated,
     loadingAuth,
+    resetSelectedTravelMode,
+    rollbackProvisionalTravelMode,
     store,
+    syncTravelModeSelectionLock,
     updateBootstrapState,
   ])
 
@@ -670,21 +877,29 @@ export function useSoloRoundRecovery({
       return null
     }
 
+    const operationId = nextOperationIdRef.current + 1
+    const travelMode = captureSelectedTravelMode({
+      identityKey: identityKeyRef.current,
+      lifecycleGeneration: lifecycleGenerationRef.current,
+      operationId,
+    })
     const scope = {
       identityKey: identityKeyRef.current,
       lifecycleGeneration: lifecycleGenerationRef.current,
       replayGeneration: replayGenerationRef.current,
-      operationId: nextOperationIdRef.current + 1,
+      operationId,
       clientRoundId: createSoloClientRoundId(),
       backendSessionId: null,
+      travelMode,
       writer: writerRef.current,
       writerGeneration: writerRef.current.writerGeneration,
     }
     nextOperationIdRef.current = scope.operationId
     activeRoundLaunchRef.current = scope
+    syncTravelModeSelectionLock(null)
     setCatchReplayWarning('')
     return scope
-  }, [])
+  }, [captureSelectedTravelMode, syncTravelModeSelectionLock])
 
   const beginRestartOperation = useCallback(() => {
     if (
@@ -700,40 +915,70 @@ export function useSoloRoundRecovery({
     setCatchReplayWarning('')
     const deletion = terminalDeleteAndRotateWriter()
     const cleanupScope = captureCurrentWriterScope()
+    const operationId = nextOperationIdRef.current + 1
+    const travelMode = captureSelectedTravelMode({
+      identityKey: identityKeyRef.current,
+      lifecycleGeneration: lifecycleGenerationRef.current,
+      operationId,
+    })
     const scope = {
       identityKey: identityKeyRef.current,
       lifecycleGeneration: lifecycleGenerationRef.current,
       replayGeneration: replayGenerationRef.current,
-      operationId: nextOperationIdRef.current + 1,
+      operationId,
       clientRoundId: createSoloClientRoundId(),
       backendSessionId: null,
+      travelMode,
       writer: writerRef.current,
       writerGeneration: writerRef.current.writerGeneration,
     }
     nextOperationIdRef.current = scope.operationId
     activeRoundLaunchRef.current = scope
+    syncTravelModeSelectionLock(null)
     return {
       scope,
       cleanup: monitorPersistenceOperation(deletion, cleanupScope),
     }
   }, [
+    captureSelectedTravelMode,
     captureCurrentWriterScope,
     invalidateLifecycle,
     monitorPersistenceOperation,
+    syncTravelModeSelectionLock,
     terminalDeleteAndRotateWriter,
   ])
 
   const completeRoundOperation = useCallback((scope) => {
     if (activeRoundLaunchRef.current?.operationId === scope?.operationId) {
       activeRoundLaunchRef.current = null
+      if (activeTravelModeOwnerRef.current?.operationId === scope.operationId) {
+        const checkpoint = activeCheckpointRef.current
+        if (checkpoint === null) {
+          clearActiveTravelMode()
+        } else {
+          activeTravelModeRef.current = checkpoint.round.travelMode
+          activeTravelModeOwnerRef.current = {
+            identityKey: checkpoint.identityKey,
+            clientRoundId: checkpoint.round.clientRoundId,
+            backendSessionId: checkpoint.round.backendSessionId,
+            travelMode: checkpoint.round.travelMode,
+          }
+          setActiveTravelModeState(checkpoint.round.travelMode)
+        }
+      }
+      syncTravelModeSelectionLock(
+        activeCheckpointRef.current?.round.phase ?? null,
+      )
     }
-  }, [])
+  }, [clearActiveTravelMode, syncTravelModeSelectionLock])
 
   const establishRound = useCallback(async (backendSession, scope) => {
     const timeline = createBackendSoloRoundTimeline(backendSession)
     if (
       !timeline ||
       !isOperationCurrent(scope, { requireLaunch: true }) ||
+      activeTravelModeOwnerRef.current?.operationId !== scope.operationId ||
+      activeTravelModeRef.current !== scope.travelMode ||
       !isBackendSessionCompatibleWithIdentity(
         backendSession,
         scope.identityKey,
@@ -761,6 +1006,7 @@ export function useSoloRoundRecovery({
         spawning: { paused: false, nextSpawnAtEpochMs: null },
         backendSync: { pendingCatches: [] },
       },
+      travelMode: scope.travelMode,
       clientRoundId: scope.clientRoundId,
       nowEpochMs: getEpochTimeMs(),
     })
@@ -788,6 +1034,15 @@ export function useSoloRoundRecovery({
     }
 
     activeCheckpointRef.current = checkpoint
+    syncTravelModeSelectionLock(checkpoint.round.phase)
+    activeTravelModeOwnerRef.current = {
+      identityKey: scope.identityKey,
+      lifecycleGeneration: scope.lifecycleGeneration,
+      operationId: scope.operationId,
+      clientRoundId: scope.clientRoundId,
+      backendSessionId: backendSession.sessionId,
+      travelMode: scope.travelMode,
+    }
     replayEligibilityRef.current = {
       ...establishedScope,
       replayGeneration: scope.replayGeneration,
@@ -801,7 +1056,12 @@ export function useSoloRoundRecovery({
       checkpoint,
       scope: establishedScope,
     }
-  }, [getEpochTimeMs, isOperationCurrent, reportStorageFailure])
+  }, [
+    getEpochTimeMs,
+    isOperationCurrent,
+    reportStorageFailure,
+    syncTravelModeSelectionLock,
+  ])
 
   const captureActiveRoundScope = useCallback(() => {
     const checkpoint = activeCheckpointRef.current
@@ -814,6 +1074,7 @@ export function useSoloRoundRecovery({
       replayGeneration: replayGenerationRef.current,
       clientRoundId: checkpoint.round.clientRoundId,
       backendSessionId: checkpoint.round.backendSessionId,
+      travelMode: checkpoint.round.travelMode,
       writer: writerRef.current,
       writerGeneration: writerRef.current?.writerGeneration,
     }
@@ -1592,6 +1853,7 @@ export function useSoloRoundRecovery({
         return { stale: true }
       }
       activeCheckpointRef.current = reconciling
+      syncTravelModeSelectionLock(reconciling.round.phase)
       let persistence = { ok: false, disabled: true }
       if (writesEnabledRef.current) {
         persistence = await waitBounded(writer.replace(reconciling))
@@ -1642,6 +1904,7 @@ export function useSoloRoundRecovery({
     captureCurrentWriterScope,
     monitorPersistenceOperation,
     reportStorageFailure,
+    syncTravelModeSelectionLock,
     terminalDeleteAndRotateWriter,
   ])
 
@@ -1685,6 +1948,10 @@ export function useSoloRoundRecovery({
     isReady:
       effectiveBootstrapState === SOLO_RECOVERY_BOOTSTRAP_STATES.READY,
     identityKey,
+    selectedTravelMode,
+    activeTravelMode,
+    isTravelModeSelectionLocked: travelModeSelectionLocked,
+    setSelectedTravelMode: updateSelectedTravelMode,
     warning: warning || catchReplayWarning,
     catchReplayWarning,
     beginRoundOperation,

@@ -424,7 +424,10 @@ function App() {
     soloRecovery.isReady && gameState === 'running',
     level,
     handleTargetExpired,
-    { onTargetTransition: handleTargetStateTransition },
+    {
+      onTargetTransition: handleTargetStateTransition,
+      captureSpawnOperation: soloRecovery.captureRuntimeOperation,
+    },
   )
 
   const applyRecoveredSoloGameplay = useCallback((checkpoint) => {
@@ -1520,6 +1523,7 @@ function App() {
   )
 
   const gameplay = {
+    activeTravelMode: soloRecovery.activeTravelMode,
     activeRoomGameStatus,
     activeRoomStatus,
     activeMultiplayerRoom,
@@ -1550,6 +1554,8 @@ function App() {
     handleTargetClick,
     historyRefreshVersion,
     isRecoveryReady: soloRecovery.isReady,
+    isTravelModeSelectionLocked:
+      soloRecovery.isTravelModeSelectionLocked,
     recoveryBootstrapState: soloRecovery.bootstrapState,
     recoveryWarning: soloRecovery.warning,
     isAuthenticated,
@@ -1591,11 +1597,13 @@ function App() {
     routingTargetId,
     routingSharedRoomCreatureId,
     score,
+    selectedTravelMode: soloRecovery.selectedTravelMode,
     selectedRoundSeconds,
     sessionNotice,
     setPlayerName,
     setSelectedRoundSeconds,
     setSimulationSpeed,
+    setSelectedTravelMode: soloRecovery.setSelectedTravelMode,
     sharedRoomCatchMessage,
     sharedRoomCreatures,
     simulationSpeed,

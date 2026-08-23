@@ -11,6 +11,7 @@ import { usePlayerState } from '../src/hooks/usePlayerState.js'
 import { useRouteAnimation } from '../src/hooks/useRouteAnimation.js'
 import { SOLO_NAVIGATION_START_KINDS } from '../src/hooks/navigationFrameChannel.js'
 import { useSoloRoundRecovery } from '../src/hooks/useSoloRoundRecovery.js'
+import { TRAVEL_MODES } from '../src/config/travelMode.js'
 import { resolveRecoveredSoloMovement } from '../src/recovery/soloRecoveryRuntime.js'
 import {
   SOLO_ROUTE_EVENT_TYPES,
@@ -773,7 +774,9 @@ test('player hydration settles a route completed during downtime without animati
 test('recovered MAP routing reuses the normal route request path once', async () => {
   await withManualRuntime(async (runtime) => {
     const epochMs = SOLO_RECOVERY_TEST_STARTED_AT + 10_000
-    const checkpoint = createValidSoloCheckpoint()
+    const checkpoint = createValidSoloCheckpoint({
+      travelMode: TRAVEL_MODES.WALKING,
+    })
     checkpoint.movement = {
       movementRecoveryId: '55555555-5555-4555-8555-555555555555',
       phase: 'ROUTING',
@@ -814,6 +817,7 @@ test('recovered MAP routing reuses the normal route request path once', async ()
         sourceLon: checkpoint.player.settledPosition.lon,
         destinationLat: 28.65,
         destinationLon: 77.26,
+        travelMode: checkpoint.round.travelMode,
       })
       assert.deepEqual(hook.current.routeCoordinates, RECOVERY_ROUTE)
       const frames = []
@@ -828,6 +832,101 @@ test('recovered MAP routing reuses the normal route request path once', async ()
       unsubscribe()
     } finally {
       globalThis.fetch = originalFetch
+      await hook.unmount()
+    }
+  })
+})
+
+test('active movement routing uses captured CAR after a setup change attempt', async () => {
+  await withManualRuntime(async () => {
+    const records = new Map()
+    const store = {
+      async read(identityKey) {
+        return {
+          ok: true,
+          operation: 'read',
+          checkpoint: structuredClone(records.get(identityKey) ?? null),
+        }
+      },
+      async replace(identityKey, checkpoint) {
+        records.set(identityKey, structuredClone(checkpoint))
+        return { ok: true, operation: 'replace' }
+      },
+      async delete(identityKey) {
+        records.delete(identityKey)
+        return { ok: true, operation: 'delete' }
+      },
+      close() {},
+    }
+    const session = {
+      sessionId: '44444444-4444-4444-8444-444444444444',
+      status: 'RUNNING',
+      durationSeconds: 60,
+      startedAt: new Date(SOLO_RECOVERY_TEST_STARTED_AT).toISOString(),
+      userId: SOLO_RECOVERY_TEST_USER_ID,
+    }
+    const routeCalls = []
+    const hook = await mountHook(RecoveryPlayerHookHarness, {
+      recovery: {
+        loadingAuth: false,
+        isAuthenticated: true,
+        currentUser: { userId: SOLO_RECOVERY_TEST_USER_ID },
+        recoveryStore: store,
+        getBackendSession: async () => assert.fail('unexpected recovery'),
+        endBackendSession: async () => assert.fail('unexpected backend end'),
+        getEpochTimeMs: () => SOLO_RECOVERY_TEST_STARTED_AT + 10_000,
+        hydrateRound: () => {},
+        adoptBackendSession: () => {},
+      },
+      player: {
+        getEpochTimeMs: () => SOLO_RECOVERY_TEST_STARTED_AT + 10_000,
+        routeRequest: async (source, destination, options) => {
+          routeCalls.push({ source, destination, options })
+          return { coordinates: RECOVERY_ROUTE }
+        },
+      },
+    })
+
+    try {
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      assert.equal(hook.current.recovery.isReady, true)
+
+      let selectionAccepted
+      let operation
+      let rejected
+      let established
+      await act(async () => {
+        selectionAccepted = hook.current.recovery.setSelectedTravelMode(
+          TRAVEL_MODES.CAR,
+        )
+        operation = hook.current.recovery.beginRoundOperation()
+        rejected = hook.current.recovery.setSelectedTravelMode(
+          TRAVEL_MODES.WALKING,
+        )
+        established = await hook.current.recovery.establishRound(
+          session,
+          operation,
+        )
+        hook.current.recovery.completeRoundOperation(operation)
+      })
+      assert.equal(selectionAccepted, true)
+      assert.equal(rejected, false)
+      assert.equal(established.checkpoint.round.travelMode, TRAVEL_MODES.CAR)
+
+      await act(async () => {
+        await hook.current.player.moveToDestination({
+          lat: 28.65,
+          lon: 77.26,
+        })
+      })
+      assert.equal(routeCalls.length, 1)
+      assert.equal(routeCalls[0].options.travelMode, TRAVEL_MODES.CAR)
+      assert.ok(routeCalls[0].options.signal instanceof AbortSignal)
+    } finally {
       await hook.unmount()
     }
   })
@@ -857,6 +956,7 @@ test('recovered routing response cannot start after lifecycle invalidation or ex
     const hook = await mountHook(PlayerHookHarness, {
       getEpochTimeMs: () => nowEpochMs,
       captureRouteOperation: () => ({
+        travelMode: TRAVEL_MODES.CAR,
         isCurrent: () => lifecycleCurrent,
       }),
     })
@@ -949,6 +1049,7 @@ test('routing A response cannot start movement after identity B becomes current'
       captureRouteOperation: () => {
         const capturedIdentity = currentIdentity
         return {
+          travelMode: TRAVEL_MODES.CAR,
           isCurrent: () => currentIdentity === capturedIdentity,
         }
       },
@@ -1199,6 +1300,7 @@ for (const targetCase of ['valid', 'expired', 'missing', 'caught', 'unknown']) {
         const body = JSON.parse(options.body)
         assert.equal(body.destinationLat, 28.65)
         assert.equal(body.destinationLon, 77.26)
+        assert.equal(body.travelMode, checkpoint.round.travelMode)
         return {
           ok: true,
           async json() {

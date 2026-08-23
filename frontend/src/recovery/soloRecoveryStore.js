@@ -185,6 +185,7 @@ export function createSoloRecoveryStore({
           ok: true,
           operation: 'read',
           checkpoint: parsed.checkpoint,
+          migratedFromSchemaVersion: parsed.migratedFromSchemaVersion,
         }
       } catch (error) {
         return {

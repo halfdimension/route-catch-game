@@ -6,6 +6,7 @@ import {
 import {
   SOLO_RECOVERY_MOVEMENT_PHASES,
   SOLO_RECOVERY_ROUND_PHASES,
+  SOLO_RECOVERY_SCHEMA_VERSION,
   calculateSoloCheckpointExpiresAt,
   createSoloClientRoundId,
   isSoloCheckpointStorageExpired,
@@ -119,6 +120,7 @@ export function buildSoloRunningCheckpoint({
   simulationSpeedMetersPerSecond,
   movement = null,
   gameplayState,
+  travelMode,
   previousCheckpoint = null,
   clientRoundId,
   nowEpochMs = Date.now(),
@@ -138,6 +140,9 @@ export function buildSoloRunningCheckpoint({
     backendSessionId,
     timeline,
   })
+  const resolvedTravelMode = preservePrevious
+    ? previousCheckpoint.round.travelMode
+    : travelMode
   const createdAtEpochMs = preservePrevious
     ? previousCheckpoint.createdAtEpochMs
     : nowEpochMs
@@ -161,7 +166,7 @@ export function buildSoloRunningCheckpoint({
   )
 
   return validateSoloRecoveryCheckpoint({
-    schemaVersion: 1,
+    schemaVersion: SOLO_RECOVERY_SCHEMA_VERSION,
     identityKey,
     round: {
       clientRoundId: nextClientRoundId,
@@ -170,6 +175,7 @@ export function buildSoloRunningCheckpoint({
       durationSeconds: timeline.durationSeconds,
       startedAtEpochMs: timeline.startedAtEpochMs,
       endsAtEpochMs: timeline.endsAtEpochMs,
+      travelMode: resolvedTravelMode,
     },
     player: {
       settledPosition: cloneOr(playerPosition, null),

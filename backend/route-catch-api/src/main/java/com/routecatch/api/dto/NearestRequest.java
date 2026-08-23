@@ -13,6 +13,12 @@ public record NearestRequest(
 	@NotNull
 	@DecimalMin(value = "-180.0", message = "must be between -180 and 180")
 	@DecimalMax(value = "180.0", message = "must be between -180 and 180")
-	Double lon
+	Double lon,
+
+	String travelMode
 ) {
+
+	public NearestRequest(Double lat, Double lon) {
+		this(lat, lon, null);
+	}
 }
