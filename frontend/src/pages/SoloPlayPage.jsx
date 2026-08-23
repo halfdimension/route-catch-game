@@ -150,6 +150,9 @@ function SoloPlayPage({ gameplay }) {
               isSessionPending={gameplay.isSessionPending}
               isAuthenticated={gameplay.isAuthenticated}
               authenticatedDisplayName={gameplay.currentUser?.displayName}
+              selectedTravelMode={gameplay.selectedTravelMode}
+              activeTravelMode={gameplay.activeTravelMode}
+              onSelectedTravelModeChange={gameplay.setSelectedTravelMode}
             />
             <GameControlsPanel
               isSpawningPaused={gameplay.isSpawningPaused}

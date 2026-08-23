@@ -1,3 +1,5 @@
+import TravelModeSelector from '../TravelModeSelector'
+
 function MapLibreSessionControls({ gameplay }) {
   function handleDurationChange(event) {
     gameplay.setSelectedRoundSeconds(Number(event.target.value))
@@ -7,16 +9,12 @@ function MapLibreSessionControls({ gameplay }) {
     gameplay.setPlayerName(event.target.value)
   }
 
-  if (gameplay.gameState === 'ended') {
-    return null
-  }
-
   return (
     <section
       className={`maplibre-hud-panel maplibre-session-controls maplibre-hud-interactive is-${gameplay.gameState}`}
       aria-label="Round controls"
     >
-      {gameplay.gameState === 'ready' && (
+      {gameplay.gameState !== 'running' && (
         <>
           <div className="maplibre-session-heading">
             <span className="maplibre-hud-eyebrow">Solo expedition</span>
@@ -50,16 +48,26 @@ function MapLibreSessionControls({ gameplay }) {
               </select>
             </label>
           </div>
-          <button
-            type="button"
-            className="maplibre-session-start"
-            onClick={gameplay.handleStartGame}
-            disabled={gameplay.isSessionPending}
-          >
-            {gameplay.isSessionPending ? 'Starting…' : 'Start round'}
-          </button>
+          {gameplay.gameState === 'ready' && (
+            <button
+              type="button"
+              className="maplibre-session-start"
+              onClick={gameplay.handleStartGame}
+              disabled={gameplay.isSessionPending}
+            >
+              {gameplay.isSessionPending ? 'Starting…' : 'Start round'}
+            </button>
+          )}
         </>
       )}
+
+      <TravelModeSelector
+        selectedTravelMode={gameplay.selectedTravelMode}
+        activeTravelMode={gameplay.activeTravelMode}
+        onSelectedTravelModeChange={gameplay.setSelectedTravelMode}
+        disabled={gameplay.isSessionPending}
+        className="is-maplibre"
+      />
 
       {gameplay.gameState === 'running' && (
         <button

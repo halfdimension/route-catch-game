@@ -424,7 +424,10 @@ function App() {
     soloRecovery.isReady && gameState === 'running',
     level,
     handleTargetExpired,
-    { onTargetTransition: handleTargetStateTransition },
+    {
+      onTargetTransition: handleTargetStateTransition,
+      captureSpawnOperation: soloRecovery.captureRuntimeOperation,
+    },
   )
 
   const applyRecoveredSoloGameplay = useCallback((checkpoint) => {

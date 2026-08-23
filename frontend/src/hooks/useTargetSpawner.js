@@ -5,15 +5,41 @@ import {
   useRef,
   useState,
 } from 'react'
-import { fetchNearestRoadPoint, fetchRoute } from '../api/osrmClient.js'
+import { fetchNearestRoadPoint, fetchRoute } from '../api/routingClient.js'
 import {
   TARGET_RARITY_RULES,
   TARGET_SPAWN_INTERVAL_MS,
 } from '../config/gameConfig.js'
 import { getCreaturesByRarity } from '../data/creatureCatalog.js'
+import {
+  DEFAULT_TRAVEL_MODE,
+  requireTravelMode,
+} from '../config/travelMode.js'
 import { getSpawnRarityWeights } from './usePlayerProgression.js'
+import { getRouteDistanceMeters } from './useRouteAnimation.js'
 
 const EARTH_RADIUS_METERS = 6371000
+export const SOLO_TARGET_SPAWN_MAX_ATTEMPTS = 3
+export const SOLO_TARGET_ROUTE_MIN_GEOMETRY_METERS = 0.01
+// Allow normal routing correlation precision while requiring the route to
+// terminate near the mode-aware snapped candidate.
+export const SOLO_TARGET_ROUTE_ENDPOINT_TOLERANCE_METERS = 25
+
+export class SoloTargetSpawnStaleError extends Error {
+  constructor() {
+    super('The SOLO target spawn operation is no longer current')
+    this.name = 'SoloTargetSpawnStaleError'
+  }
+}
+
+export class SoloTargetSpawnError extends Error {
+  constructor(attempts, cause) {
+    super(`Could not create a compatible SOLO target after ${attempts} attempts`)
+    this.name = 'SoloTargetSpawnError'
+    this.attempts = attempts
+    this.cause = cause
+  }
+}
 
 function getRandomRarity(playerLevel) {
   const weights = getSpawnRarityWeights(playerLevel)
@@ -75,6 +101,81 @@ function getDifficulty(estimatedGameTravelSeconds, lifetimeSeconds) {
   return 'Almost Impossible'
 }
 
+function isUsableGeoPoint(point) {
+  return (
+    Number.isFinite(point?.lat) &&
+    point.lat >= -90 &&
+    point.lat <= 90 &&
+    Number.isFinite(point?.lon) &&
+    point.lon >= -180 &&
+    point.lon <= 180
+  )
+}
+
+function isUsableRouteCoordinate(coordinate) {
+  return (
+    Array.isArray(coordinate) &&
+    coordinate.length >= 2 &&
+    Number.isFinite(coordinate[0]) &&
+    coordinate[0] >= -90 &&
+    coordinate[0] <= 90 &&
+    Number.isFinite(coordinate[1]) &&
+    coordinate[1] >= -180 &&
+    coordinate[1] <= 180
+  )
+}
+
+function getMeasuredRouteGeometryMeters(coordinates) {
+  return coordinates.slice(1).reduce(
+    (distanceMeters, coordinate, index) => (
+      distanceMeters + getRouteDistanceMeters(
+        coordinates[index],
+        coordinate,
+      )
+    ),
+    0,
+  )
+}
+
+export function isUsableSoloTargetRoute(route, snappedTarget) {
+  if (
+    !Array.isArray(route?.coordinates) ||
+    route.coordinates.length < 2 ||
+    !route.coordinates.every(isUsableRouteCoordinate) ||
+    !Number.isFinite(route.distanceMeters) ||
+    route.distanceMeters <= 0 ||
+    !isUsableGeoPoint(snappedTarget)
+  ) {
+    return false
+  }
+
+  const measuredGeometryMeters = getMeasuredRouteGeometryMeters(
+    route.coordinates,
+  )
+  if (
+    !Number.isFinite(measuredGeometryMeters) ||
+    measuredGeometryMeters <= SOLO_TARGET_ROUTE_MIN_GEOMETRY_METERS
+  ) {
+    return false
+  }
+
+  const endpoint = route.coordinates.at(-1)
+  const endpointDistanceMeters = getRouteDistanceMeters(endpoint, [
+    snappedTarget.lat,
+    snappedTarget.lon,
+  ])
+  return (
+    Number.isFinite(endpointDistanceMeters) &&
+    endpointDistanceMeters <= SOLO_TARGET_ROUTE_ENDPOINT_TOLERANCE_METERS
+  )
+}
+
+function assertSpawnIsCurrent(isCurrent) {
+  if (isCurrent() === false) {
+    throw new SoloTargetSpawnStaleError()
+  }
+}
+
 export function getNextSoloSpawnDeadline(
   scheduledAtEpochMs,
   nowEpochMs,
@@ -103,76 +204,103 @@ export async function createSoloTarget(
   simulationSpeedMetersPerSecond,
   playerLevel,
   getEpochTimeMs = Date.now,
+  {
+    travelMode = DEFAULT_TRAVEL_MODE,
+    isCurrent = () => true,
+    nearestRoadPoint = fetchNearestRoadPoint,
+    routeBetween = fetchRoute,
+    maxAttempts = SOLO_TARGET_SPAWN_MAX_ATTEMPTS,
+  } = {},
 ) {
-  const rarity = getRandomRarity(playerLevel)
-  const rules = TARGET_RARITY_RULES[rarity]
-  const creature = getRandomCreature(rarity)
-  const distanceMeters = getRandomBetween(
-    rules.minDistanceMeters,
-    rules.maxDistanceMeters,
+  const capturedTravelMode = requireTravelMode(
+    travelMode,
+    'SOLO target spawn travel mode',
   )
-  const bearingRadians = getRandomBetween(0, Math.PI * 2)
-  const rawPosition = getPointAtDistance(
-    playerPosition,
-    distanceMeters,
-    bearingRadians,
-  )
-  let spawnPosition = rawPosition
-  let snappedToRoad = false
-  let routeDistanceMeters = null
-  let routeDurationSeconds = null
-  let estimatedGameTravelSeconds = null
-  let difficulty = 'Unknown'
-
-  try {
-    spawnPosition = await fetchNearestRoadPoint(rawPosition)
-    snappedToRoad = true
-  } catch (error) {
-    console.warn('Nearest road lookup failed; using raw target point:', error)
+  if (!Number.isInteger(maxAttempts) || maxAttempts <= 0) {
+    throw new TypeError('SOLO target spawn maxAttempts must be a positive integer')
   }
 
-  try {
-    const route = await fetchRoute(playerPosition, spawnPosition)
-    routeDistanceMeters = route.distanceMeters
-    routeDurationSeconds = route.durationSeconds
-    if (routeDistanceMeters !== null && simulationSpeedMetersPerSecond > 0) {
-      estimatedGameTravelSeconds =
-        routeDistanceMeters / simulationSpeedMetersPerSecond
-      difficulty = getDifficulty(
+  let lastError = null
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    assertSpawnIsCurrent(isCurrent)
+    const rarity = getRandomRarity(playerLevel)
+    const rules = TARGET_RARITY_RULES[rarity]
+    const creature = getRandomCreature(rarity)
+    const distanceMeters = getRandomBetween(
+      rules.minDistanceMeters,
+      rules.maxDistanceMeters,
+    )
+    const bearingRadians = getRandomBetween(0, Math.PI * 2)
+    const rawPosition = getPointAtDistance(
+      playerPosition,
+      distanceMeters,
+      bearingRadians,
+    )
+
+    try {
+      const spawnPosition = await nearestRoadPoint(rawPosition, {
+        travelMode: capturedTravelMode,
+      })
+      assertSpawnIsCurrent(isCurrent)
+      if (!isUsableGeoPoint(spawnPosition)) {
+        throw new Error('Nearest response returned an unusable snapped point')
+      }
+
+      const route = await routeBetween(playerPosition, spawnPosition, {
+        travelMode: capturedTravelMode,
+      })
+      assertSpawnIsCurrent(isCurrent)
+      if (!isUsableSoloTargetRoute(route, spawnPosition)) {
+        throw new Error('Route response returned an unusable target route')
+      }
+
+      const estimatedGameTravelSeconds =
+        simulationSpeedMetersPerSecond > 0
+          ? route.distanceMeters / simulationSpeedMetersPerSecond
+          : null
+      const difficulty = estimatedGameTravelSeconds === null
+        ? 'Unknown'
+        : getDifficulty(
+            estimatedGameTravelSeconds,
+            rules.lifetimeMs / 1000,
+          )
+      const spawnedAt = getEpochTimeMs()
+
+      return {
+        id: crypto.randomUUID(),
+        lat: spawnPosition.lat,
+        lon: spawnPosition.lon,
+        rawLat: rawPosition.lat,
+        rawLon: rawPosition.lon,
+        snappedToRoad: true,
+        creatureId: creature.id,
+        name: creature.name,
+        type: creature.type,
+        rarity,
+        score: creature.score,
+        color: creature.color,
+        symbol: creature.symbol,
+        shortDescription: creature.shortDescription,
+        imageUrl: creature.imageUrl,
+        soundUrl: creature.soundUrl,
+        spawnedAt,
+        expiresAt: spawnedAt + rules.lifetimeMs,
+        lifetimeMs: rules.lifetimeMs,
+        routeDistanceMeters: route.distanceMeters,
+        routeDurationSeconds: route.durationSeconds,
         estimatedGameTravelSeconds,
-        rules.lifetimeMs / 1000,
-      )
+        difficulty,
+      }
+    } catch (error) {
+      if (error instanceof SoloTargetSpawnStaleError) {
+        throw error
+      }
+      lastError = error
     }
-  } catch (error) {
-    console.warn('Target route lookup failed; difficulty unknown:', error)
   }
 
-  const spawnedAt = getEpochTimeMs()
-  return {
-    id: crypto.randomUUID(),
-    lat: spawnPosition.lat,
-    lon: spawnPosition.lon,
-    rawLat: rawPosition.lat,
-    rawLon: rawPosition.lon,
-    snappedToRoad,
-    creatureId: creature.id,
-    name: creature.name,
-    type: creature.type,
-    rarity,
-    score: creature.score,
-    color: creature.color,
-    symbol: creature.symbol,
-    shortDescription: creature.shortDescription,
-    imageUrl: creature.imageUrl,
-    soundUrl: creature.soundUrl,
-    spawnedAt,
-    expiresAt: spawnedAt + rules.lifetimeMs,
-    lifetimeMs: rules.lifetimeMs,
-    routeDistanceMeters,
-    routeDurationSeconds,
-    estimatedGameTravelSeconds,
-    difficulty,
-  }
+  throw new SoloTargetSpawnError(maxAttempts, lastError)
 }
 
 export function useTargetSpawner(
@@ -185,6 +313,7 @@ export function useTargetSpawner(
     getEpochTimeMs = Date.now,
     onTargetTransition,
     spawnTarget = createSoloTarget,
+    captureSpawnOperation,
   } = {},
 ) {
   const [targets, setTargets] = useState([])
@@ -206,6 +335,7 @@ export function useTargetSpawner(
   const onTargetExpiredRef = useRef(onTargetExpired)
   const onTargetTransitionRef = useRef(onTargetTransition)
   const getEpochTimeMsRef = useRef(getEpochTimeMs)
+  const captureSpawnOperationRef = useRef(captureSpawnOperation)
 
   const spawningSnapshot = useCallback(() => ({
     paused: isSpawningPausedRef.current,
@@ -311,8 +441,10 @@ export function useTargetSpawner(
     onTargetExpiredRef.current = onTargetExpired
     onTargetTransitionRef.current = onTargetTransition
     getEpochTimeMsRef.current = getEpochTimeMs
+    captureSpawnOperationRef.current = captureSpawnOperation
   }, [
     canSpawnTargets,
+    captureSpawnOperation,
     getEpochTimeMs,
     onTargetExpired,
     onTargetTransition,
@@ -360,18 +492,55 @@ export function useTargetSpawner(
       if (spawnInFlightRef.current?.generation === generation) {
         return
       }
+      const lifecycleOperation = captureSpawnOperationRef.current
+        ? captureSpawnOperationRef.current()
+        : {
+            travelMode: DEFAULT_TRAVEL_MODE,
+            isCurrent: () => true,
+          }
+      if (
+        !lifecycleOperation ||
+        lifecycleOperation.isCurrent?.() === false
+      ) {
+        return
+      }
       const operation = {
         generation,
         operationId: nextSpawnOperationIdRef.current + 1,
+        lifecycleOperation,
+        travelMode: requireTravelMode(
+          lifecycleOperation.travelMode,
+          'Captured SOLO spawn travel mode',
+        ),
       }
       nextSpawnOperationIdRef.current = operation.operationId
       spawnInFlightRef.current = operation
-      void Promise.resolve().then(() => spawnTarget(
-        playerPositionRef.current,
-        simulationSpeedRef.current,
-        playerLevelRef.current,
-        getEpochTimeMsRef.current,
-      )).then((target) => {
+      const operationIsCurrent = () => (
+        mountedRef.current &&
+        canSpawnTargetsRef.current &&
+        !isSpawningPausedRef.current &&
+        generation === spawnGenerationRef.current &&
+        spawnInFlightRef.current === operation &&
+        lifecycleOperation.isCurrent?.() !== false
+      )
+      void Promise.resolve().then(() => {
+        if (!operationIsCurrent()) {
+          throw new SoloTargetSpawnStaleError()
+        }
+        return spawnTarget(
+          playerPositionRef.current,
+          simulationSpeedRef.current,
+          playerLevelRef.current,
+          getEpochTimeMsRef.current,
+          {
+            travelMode: operation.travelMode,
+            isCurrent: operationIsCurrent,
+          },
+        )
+      }).then((target) => {
+        if (!operationIsCurrent()) {
+          return
+        }
         if (
           !mountedRef.current ||
           !canSpawnTargetsRef.current ||
@@ -387,9 +556,8 @@ export function useTargetSpawner(
         publishTransition('TARGET_SPAWNED', { target: structuredClone(target) })
       }).catch((error) => {
         if (
-          mountedRef.current &&
-          generation === spawnGenerationRef.current &&
-          spawnInFlightRef.current === operation
+          operationIsCurrent() &&
+          !(error instanceof SoloTargetSpawnStaleError)
         ) {
           console.warn('Target spawn failed before state update:', error)
         }

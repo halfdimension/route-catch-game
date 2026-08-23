@@ -402,6 +402,10 @@ for (const travelMode of Object.values(TRAVEL_MODES)) {
         assert.equal(hook.current.isReady, true)
         assert.equal(hook.current.activeTravelMode, travelMode)
         assert.equal(hook.current.selectedTravelMode, travelMode)
+        assert.equal(
+          hook.current.captureRuntimeOperation().travelMode,
+          travelMode,
+        )
         assert.equal(store.record.schemaVersion, 2)
         assert.equal(store.record.round.travelMode, travelMode)
         await act(async () => {
@@ -432,6 +436,10 @@ test('v1 recovery hydrates CAR in memory and the next scoped write persists v2',
       assert.equal(hook.current.isReady, true)
       assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.CAR)
       assert.equal(hook.current.selectedTravelMode, TRAVEL_MODES.CAR)
+      assert.equal(
+        hook.current.captureRuntimeOperation().travelMode,
+        TRAVEL_MODES.CAR,
+      )
       assert.ok(store.replacements.length > 0)
       assert.equal(store.record.schemaVersion, 2)
       assert.equal(store.record.round.travelMode, TRAVEL_MODES.CAR)

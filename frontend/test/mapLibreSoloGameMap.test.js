@@ -501,6 +501,7 @@ test('solo route coordinates remain display-only map input', () => {
   assert.match(soloMapSource, /coordinates=\{routeCoordinates\}/)
   assert.doesNotMatch(soloMapSource, /fetchRoute/)
   assert.doesNotMatch(soloMapSource, /osrmClient/)
+  assert.doesNotMatch(soloMapSource, /routingClient/)
 })
 
 test('successful map load clears the loading notice without manual resizing', () => {
@@ -680,6 +681,7 @@ test('HUD remains presentational and MapLibre controls remain usable', () => {
   for (const hudSource of hudSources) {
     assert.doesNotMatch(hudSource, /fetch\s*\(/)
     assert.doesNotMatch(hudSource, /osrmClient/)
+    assert.doesNotMatch(hudSource, /routingClient/)
     assert.doesNotMatch(hudSource, /gameSessionClient/)
   }
 
