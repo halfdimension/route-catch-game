@@ -63,7 +63,9 @@ function MapLibreSessionControls({ gameplay }) {
 
       <TravelModeSelector
         selectedTravelMode={gameplay.selectedTravelMode}
-        activeTravelMode={gameplay.activeTravelMode}
+        isTravelModeSelectionLocked={
+          gameplay.isTravelModeSelectionLocked
+        }
         onSelectedTravelModeChange={gameplay.setSelectedTravelMode}
         disabled={gameplay.isSessionPending}
         className="is-maplibre"

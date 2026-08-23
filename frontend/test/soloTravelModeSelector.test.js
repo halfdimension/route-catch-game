@@ -54,11 +54,15 @@ test('rendered selector supports editing, locking, and re-selection', async (con
   const onSelectedTravelModeChange = (travelMode) => {
     selections.push(travelMode)
   }
-  const selector = (selectedTravelMode, disabled) => React.createElement(
+  const selector = (
+    selectedTravelMode,
+    isTravelModeSelectionLocked,
+    disabled = false,
+  ) => React.createElement(
     TravelModeSelector,
     {
       selectedTravelMode,
-      activeTravelMode: null,
+      isTravelModeSelectionLocked,
       onSelectedTravelModeChange,
       disabled,
     },
@@ -173,7 +177,7 @@ test('Leaflet and MapLibre setup surfaces use the same selector authority', () =
   for (const source of [leafletSessionSource, mapLibreSessionSource]) {
     assert.match(source, /<TravelModeSelector/)
     assert.match(source, /selectedTravelMode=/)
-    assert.match(source, /activeTravelMode=/)
+    assert.match(source, /isTravelModeSelectionLocked=/)
     assert.match(source, /onSelectedTravelModeChange=/)
     assert.match(source, /isSessionPending/)
   }

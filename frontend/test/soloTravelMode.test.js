@@ -9,7 +9,10 @@ import {
   requireTravelMode,
 } from '../src/config/travelMode.js'
 import { useSoloRoundRecovery } from '../src/hooks/useSoloRoundRecovery.js'
-import { parseSoloRecoveryCheckpoint } from '../src/recovery/soloRecoveryCheckpoint.js'
+import {
+  SOLO_RECOVERY_ROUND_PHASES,
+  parseSoloRecoveryCheckpoint,
+} from '../src/recovery/soloRecoveryCheckpoint.js'
 import {
   createValidSoloCheckpoint,
   createValidSoloV1Checkpoint,
@@ -38,6 +41,75 @@ function runningSession(
     score: 0,
     caughtCount: 0,
     userId,
+  }
+}
+
+function endedSession(sessionId = SESSION_IDS[0]) {
+  return {
+    ...runningSession(sessionId),
+    status: 'ENDED',
+    endedAt: new Date(
+      SOLO_RECOVERY_TEST_STARTED_AT + 60_000,
+    ).toISOString(),
+  }
+}
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve
+    reject = nextReject
+  })
+  return { promise, reject, resolve }
+}
+
+function targetFixture() {
+  return {
+    id: '66666666-6666-4666-8666-666666666666',
+    creatureId: 'sparkbit',
+    lat: 28.5505,
+    lon: 77.2688,
+    rarity: 'common',
+    score: 10,
+    spawnedAt: SOLO_RECOVERY_TEST_STARTED_AT + 1_000,
+    expiresAt: SOLO_RECOVERY_TEST_STARTED_AT + 50_000,
+    lifetimeMs: 49_000,
+  }
+}
+
+function checkpointWithPendingCatch({
+  phase = SOLO_RECOVERY_ROUND_PHASES.RECONCILING,
+  travelMode = TRAVEL_MODES.WALKING,
+} = {}) {
+  const target = {
+    ...targetFixture(),
+    caughtAt: SOLO_RECOVERY_TEST_STARTED_AT + 10_000,
+  }
+  const checkpoint = createValidSoloCheckpoint({
+    phase,
+    score: target.score,
+    travelMode,
+  })
+  checkpoint.caughtTargets = [target]
+  checkpoint.backendSync.pendingCatches = [{
+    catchId: '77777777-7777-4777-8777-777777777777',
+    targetId: target.id,
+    creatureId: target.creatureId,
+    caughtAtEpochMs: target.caughtAt,
+  }]
+  checkpoint.xp = checkpoint.score
+  return checkpoint
+}
+
+function successfulCatchResponse(sessionId, catchId) {
+  return {
+    sessionId,
+    catchId,
+    status: 'ENDED',
+    score: 10,
+    caughtCount: 1,
+    acceptedCatchScore: 10,
   }
 }
 
@@ -239,6 +311,7 @@ for (const travelMode of Object.values(TRAVEL_MODES)) {
       try {
         assert.equal(hook.current.isReady, true)
         assert.equal(hook.current.activeTravelMode, null)
+        assert.equal(hook.current.isTravelModeSelectionLocked, false)
         await act(async () => {
           assert.equal(hook.current.setSelectedTravelMode(travelMode), true)
         })
@@ -249,6 +322,13 @@ for (const travelMode of Object.values(TRAVEL_MODES)) {
         })
         assert.equal(operation.travelMode, travelMode)
         assert.equal(hook.current.activeTravelMode, travelMode)
+        assert.equal(hook.current.isTravelModeSelectionLocked, true)
+        await act(async () => {
+          assert.equal(
+            hook.current.setSelectedTravelMode(DEFAULT_TRAVEL_MODE),
+            false,
+          )
+        })
 
         let established
         await act(async () => {
@@ -260,6 +340,7 @@ for (const travelMode of Object.values(TRAVEL_MODES)) {
         })
         assert.equal(established.checkpoint.round.travelMode, travelMode)
         assert.equal(hook.store.record.round.travelMode, travelMode)
+        assert.equal(hook.current.isTravelModeSelectionLocked, true)
       } finally {
         await hook.unmount()
       }
@@ -295,6 +376,7 @@ test('active mode is immutable, reset enables the next selection, and stale fini
         await hook.current.resetRound()
       })
       assert.equal(hook.current.activeTravelMode, null)
+      assert.equal(hook.current.isTravelModeSelectionLocked, false)
       await act(async () => {
         assert.equal(
           hook.current.setSelectedTravelMode(TRAVEL_MODES.WALKING),
@@ -402,6 +484,7 @@ for (const travelMode of Object.values(TRAVEL_MODES)) {
         assert.equal(hook.current.isReady, true)
         assert.equal(hook.current.activeTravelMode, travelMode)
         assert.equal(hook.current.selectedTravelMode, travelMode)
+        assert.equal(hook.current.isTravelModeSelectionLocked, true)
         assert.equal(
           hook.current.captureRuntimeOperation().travelMode,
           travelMode,
@@ -421,6 +504,306 @@ for (const travelMode of Object.values(TRAVEL_MODES)) {
     })
   })
 }
+
+test('recovered STARTING ownership remains selection-locked', async () => {
+  await withBrowserWindow(async () => {
+    const checkpoint = createValidSoloCheckpoint({
+      phase: SOLO_RECOVERY_ROUND_PHASES.STARTING,
+      travelMode: TRAVEL_MODES.WALKING,
+    })
+    const hook = await mountRecoveryHook({
+      store: createMemoryRecoveryStore(checkpoint),
+      getBackendSession: async () => {
+        throw new Error('Backend start status is temporarily unavailable')
+      },
+    })
+    try {
+      assert.equal(hook.current.isReady, true)
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.WALKING)
+      assert.equal(hook.current.selectedTravelMode, TRAVEL_MODES.WALKING)
+      assert.equal(hook.current.isTravelModeSelectionLocked, true)
+      await act(async () => {
+        assert.equal(
+          hook.current.setSelectedTravelMode(TRAVEL_MODES.MOTORCYCLE),
+          false,
+        )
+      })
+      assert.equal(hook.store.record.round.phase,
+        SOLO_RECOVERY_ROUND_PHASES.STARTING)
+      assert.equal(hook.store.record.round.travelMode, TRAVEL_MODES.WALKING)
+    } finally {
+      await hook.unmount()
+    }
+  })
+})
+
+test('clean finish unlocks setup and restart captures the next selected mode', async () => {
+  await withBrowserWindow(async () => {
+    const hook = await mountRecoveryHook()
+    try {
+      let operation
+      let established
+      await act(async () => {
+        operation = hook.current.beginRoundOperation()
+        established = await hook.current.establishRound(
+          runningSession(),
+          operation,
+        )
+        hook.current.completeRoundOperation(operation)
+      })
+      assert.equal(hook.current.isTravelModeSelectionLocked, true)
+
+      await act(async () => {
+        await hook.current.finishRound({
+          backendEnded: true,
+          expectedScope: established.scope,
+        })
+      })
+      assert.equal(hook.current.activeTravelMode, null)
+      assert.equal(hook.current.isTravelModeSelectionLocked, false)
+      await act(async () => {
+        assert.equal(
+          hook.current.setSelectedTravelMode(TRAVEL_MODES.WALKING),
+          true,
+        )
+      })
+
+      let restart
+      await act(async () => {
+        restart = hook.current.beginRestartOperation()
+        await restart.cleanup
+      })
+      assert.equal(restart.scope.travelMode, TRAVEL_MODES.WALKING)
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.WALKING)
+      assert.equal(hook.current.isTravelModeSelectionLocked, true)
+    } finally {
+      await hook.unmount()
+    }
+  })
+})
+
+test('backend close failure retains CAR reconciliation truth but unlocks next-round selection', async () => {
+  await withBrowserWindow(async () => {
+    const hook = await mountRecoveryHook()
+    try {
+      let operation
+      let established
+      await act(async () => {
+        operation = hook.current.beginRoundOperation()
+        established = await hook.current.establishRound(
+          runningSession(),
+          operation,
+        )
+        hook.current.completeRoundOperation(operation)
+      })
+
+      await act(async () => {
+        await hook.current.finishRound({
+          backendEnded: false,
+          expectedScope: established.scope,
+        })
+      })
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.CAR)
+      assert.equal(hook.current.isTravelModeSelectionLocked, false)
+      assert.equal(hook.store.record.round.phase,
+        SOLO_RECOVERY_ROUND_PHASES.RECONCILING)
+      assert.equal(hook.store.record.round.travelMode, TRAVEL_MODES.CAR)
+
+      await act(async () => {
+        assert.equal(
+          hook.current.setSelectedTravelMode(TRAVEL_MODES.WALKING),
+          true,
+        )
+      })
+      assert.equal(hook.current.selectedTravelMode, TRAVEL_MODES.WALKING)
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.CAR)
+      assert.equal(hook.store.record.round.travelMode, TRAVEL_MODES.CAR)
+    } finally {
+      await hook.unmount()
+    }
+  })
+})
+
+test('pending reconciliation preserves WALKING while the next round captures MOTORCYCLE and rejects a late old ACK', async () => {
+  await withBrowserWindow(async () => {
+    const catchResponse = deferred()
+    const hook = await mountRecoveryHook({
+      submitBackendCatchForSession: async () => catchResponse.promise,
+    })
+    try {
+      await act(async () => {
+        assert.equal(
+          hook.current.setSelectedTravelMode(TRAVEL_MODES.WALKING),
+          true,
+        )
+      })
+      let operationA
+      let establishedA
+      await act(async () => {
+        operationA = hook.current.beginRoundOperation()
+        establishedA = await hook.current.establishRound(
+          runningSession(SESSION_IDS[0]),
+          operationA,
+        )
+        hook.current.completeRoundOperation(operationA)
+      })
+
+      const target = targetFixture()
+      let caught
+      await act(async () => {
+        assert.equal(
+          hook.current.queueRuntimeCheckpoint({ targets: [target] }),
+          true,
+        )
+        caught = hook.current.applyTargetCatch({
+          targetId: target.id,
+          caughtAtEpochMs: SOLO_RECOVERY_TEST_STARTED_AT + 10_000,
+        })
+        await caught.durability
+      })
+      assert.equal(caught.applied, true)
+      let oldSubmission
+      await act(async () => {
+        oldSubmission = hook.current.submitPendingCatch(caught)
+        await Promise.resolve()
+      })
+
+      await act(async () => {
+        await hook.current.finishRound({
+          backendEnded: true,
+          expectedScope: establishedA.scope,
+        })
+      })
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.WALKING)
+      assert.equal(hook.current.isTravelModeSelectionLocked, false)
+      assert.equal(
+        hook.current.captureActiveRoundScope().travelMode,
+        TRAVEL_MODES.WALKING,
+      )
+      assert.equal(hook.store.record.round.phase,
+        SOLO_RECOVERY_ROUND_PHASES.RECONCILING)
+      assert.equal(
+        hook.store.record.round.travelMode,
+        TRAVEL_MODES.WALKING,
+      )
+
+      await act(async () => {
+        assert.equal(
+          hook.current.setSelectedTravelMode(TRAVEL_MODES.MOTORCYCLE),
+          true,
+        )
+      })
+      assert.equal(hook.current.selectedTravelMode, TRAVEL_MODES.MOTORCYCLE)
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.WALKING)
+      assert.equal(
+        hook.store.record.round.travelMode,
+        TRAVEL_MODES.WALKING,
+      )
+
+      let restart
+      await act(async () => {
+        restart = hook.current.beginRestartOperation()
+        await restart.cleanup
+      })
+      assert.equal(restart.scope.travelMode, TRAVEL_MODES.MOTORCYCLE)
+
+      let establishedB
+      await act(async () => {
+        establishedB = await hook.current.establishRound(
+          runningSession(SESSION_IDS[1]),
+          restart.scope,
+        )
+        hook.current.completeRoundOperation(restart.scope)
+      })
+      assert.equal(establishedB.checkpoint.round.travelMode,
+        TRAVEL_MODES.MOTORCYCLE)
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.MOTORCYCLE)
+
+      catchResponse.resolve(successfulCatchResponse(
+        SESSION_IDS[0],
+        caught.pendingCatch.catchId,
+      ))
+      await act(async () => {
+        await oldSubmission
+        await Promise.resolve()
+      })
+      assert.equal(hook.current.selectedTravelMode, TRAVEL_MODES.MOTORCYCLE)
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.MOTORCYCLE)
+      assert.equal(hook.current.isTravelModeSelectionLocked, true)
+      assert.equal(
+        hook.store.record.round.travelMode,
+        TRAVEL_MODES.MOTORCYCLE,
+      )
+    } finally {
+      catchResponse.resolve(null)
+      await hook.unmount()
+    }
+  })
+})
+
+test('recovered RECONCILING keeps old WALKING truth while selection and ACK completion prepare MOTORCYCLE', async () => {
+  await withBrowserWindow(async () => {
+    const checkpoint = checkpointWithPendingCatch()
+    const store = createMemoryRecoveryStore(checkpoint)
+    const catchResponse = deferred()
+    let submittedCatchId = null
+    const hook = await mountRecoveryHook({
+      store,
+      getBackendSession: async () => endedSession(
+        checkpoint.round.backendSessionId,
+      ),
+      submitBackendCatchForSession: async (_sessionId, catchId) => {
+        submittedCatchId = catchId
+        return catchResponse.promise
+      },
+      getEpochTimeMs: () => checkpoint.round.endsAtEpochMs + 2_000,
+    })
+    try {
+      assert.equal(hook.current.isReady, true)
+      assert.equal(submittedCatchId,
+        checkpoint.backendSync.pendingCatches[0].catchId)
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.WALKING)
+      assert.equal(hook.current.selectedTravelMode, TRAVEL_MODES.WALKING)
+      assert.equal(hook.current.isTravelModeSelectionLocked, false)
+      assert.equal(hook.current.captureRuntimeOperation().travelMode, undefined)
+
+      await act(async () => {
+        assert.equal(
+          hook.current.setSelectedTravelMode(TRAVEL_MODES.MOTORCYCLE),
+          true,
+        )
+      })
+      assert.equal(hook.current.selectedTravelMode, TRAVEL_MODES.MOTORCYCLE)
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.WALKING)
+      assert.equal(store.record.round.travelMode, TRAVEL_MODES.WALKING)
+
+      catchResponse.resolve(successfulCatchResponse(
+        checkpoint.round.backendSessionId,
+        checkpoint.backendSync.pendingCatches[0].catchId,
+      ))
+      await flushRecovery()
+      assert.equal(store.record.backendSync.pendingCatches.length, 0)
+      assert.equal(store.record.round.phase,
+        SOLO_RECOVERY_ROUND_PHASES.RECONCILING)
+      assert.equal(store.record.round.travelMode, TRAVEL_MODES.WALKING)
+      assert.equal(hook.current.selectedTravelMode, TRAVEL_MODES.MOTORCYCLE)
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.WALKING)
+      assert.equal(hook.current.isTravelModeSelectionLocked, false)
+
+      let restart
+      await act(async () => {
+        restart = hook.current.beginRestartOperation()
+        await restart.cleanup
+      })
+      assert.equal(restart.scope.travelMode, TRAVEL_MODES.MOTORCYCLE)
+      assert.equal(hook.current.activeTravelMode, TRAVEL_MODES.MOTORCYCLE)
+      assert.equal(hook.current.isTravelModeSelectionLocked, true)
+    } finally {
+      catchResponse.resolve(null)
+      await hook.unmount()
+    }
+  })
+})
 
 test('v1 recovery hydrates CAR in memory and the next scoped write persists v2', async () => {
   await withBrowserWindow(async () => {

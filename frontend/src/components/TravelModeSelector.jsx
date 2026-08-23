@@ -2,12 +2,12 @@ import { SOLO_TRAVEL_MODE_OPTIONS } from '../config/travelMode.js'
 
 function TravelModeSelector({
   selectedTravelMode,
-  activeTravelMode,
+  isTravelModeSelectionLocked = false,
   onSelectedTravelModeChange,
   disabled = false,
   className = '',
 }) {
-  const isLocked = disabled || activeTravelMode !== null
+  const isLocked = disabled || isTravelModeSelectionLocked
 
   return (
     <fieldset

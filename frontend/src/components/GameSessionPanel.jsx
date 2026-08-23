@@ -18,7 +18,7 @@ function GameSessionPanel({
   isAuthenticated,
   authenticatedDisplayName,
   selectedTravelMode,
-  activeTravelMode,
+  isTravelModeSelectionLocked,
   onSelectedTravelModeChange,
 }) {
   function handleDurationChange(event) {
@@ -70,7 +70,7 @@ function GameSessionPanel({
 
       <TravelModeSelector
         selectedTravelMode={selectedTravelMode}
-        activeTravelMode={activeTravelMode}
+        isTravelModeSelectionLocked={isTravelModeSelectionLocked}
         onSelectedTravelModeChange={onSelectedTravelModeChange}
         disabled={isSessionPending}
       />

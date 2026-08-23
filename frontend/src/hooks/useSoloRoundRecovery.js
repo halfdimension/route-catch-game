@@ -133,6 +133,9 @@ export function useSoloRoundRecovery({
     DEFAULT_TRAVEL_MODE,
   )
   const [activeTravelMode, setActiveTravelModeState] = useState(null)
+  const [travelModeSelectionLocked, setTravelModeSelectionLocked] = useState(
+    false,
+  )
   const [replayTriggerVersion, setReplayTriggerVersion] = useState(0)
   const bootstrapStateRef = useRef(bootstrapState)
   const identityKeyRef = useRef(null)
@@ -244,15 +247,31 @@ export function useSoloRoundRecovery({
     }
   }, [])
 
+  const isTravelModeSelectionLockedNow = useCallback((
+    roundPhase = activeCheckpointRef.current?.round.phase ?? null,
+  ) => Boolean(
+    activeRoundLaunchRef.current !== null ||
+    roundPhase === SOLO_RECOVERY_ROUND_PHASES.STARTING ||
+    roundPhase === SOLO_RECOVERY_ROUND_PHASES.RUNNING
+  ), [])
+
+  const syncTravelModeSelectionLock = useCallback((roundPhase) => {
+    const locked = isTravelModeSelectionLockedNow(roundPhase)
+    if (mountedRef.current) {
+      setTravelModeSelectionLocked(locked)
+    }
+    return locked
+  }, [isTravelModeSelectionLockedNow])
+
   const updateSelectedTravelMode = useCallback((nextTravelMode) => {
     const validatedTravelMode = requireTravelMode(
       nextTravelMode,
       'Selected travel mode',
     )
     if (
-      activeTravelModeRef.current !== null ||
-      activeRoundLaunchRef.current !== null ||
-      activeCheckpointRef.current !== null
+      bootstrapStateRef.current !== SOLO_RECOVERY_BOOTSTRAP_STATES.READY ||
+      !identityKeyRef.current ||
+      isTravelModeSelectionLockedNow()
     ) {
       return false
     }
@@ -260,7 +279,7 @@ export function useSoloRoundRecovery({
     selectedTravelModeRef.current = validatedTravelMode
     setSelectedTravelModeState(validatedTravelMode)
     return true
-  }, [])
+  }, [isTravelModeSelectionLockedNow])
 
   const captureSelectedTravelMode = useCallback((owner) => {
     const capturedTravelMode = requireTravelMode(
@@ -299,6 +318,7 @@ export function useSoloRoundRecovery({
     activeTravelModeOwnerRef.current = owner
     setSelectedTravelModeState(recoveredTravelMode)
     setActiveTravelModeState(recoveredTravelMode)
+    syncTravelModeSelectionLock(checkpoint.round.phase)
     return Object.freeze({
       owner,
       previousSelectedTravelMode,
@@ -306,7 +326,7 @@ export function useSoloRoundRecovery({
       previousActiveTravelModeOwner,
       previousActiveCheckpoint,
     })
-  }, [])
+  }, [syncTravelModeSelectionLock])
 
   const rollbackProvisionalTravelMode = useCallback((provisionalAdoption) => {
     if (
@@ -341,6 +361,7 @@ export function useSoloRoundRecovery({
         setActiveTravelModeState(previousActiveTravelMode)
         setSelectedTravelModeState(restoredTravelMode)
       }
+      syncTravelModeSelectionLock(previousCheckpoint.round.phase)
       return true
     }
 
@@ -370,6 +391,7 @@ export function useSoloRoundRecovery({
         setActiveTravelModeState(currentTravelMode)
         setSelectedTravelModeState(restoredTravelMode)
       }
+      syncTravelModeSelectionLock(currentCheckpoint.round.phase)
       return true
     }
 
@@ -378,8 +400,9 @@ export function useSoloRoundRecovery({
     if (mountedRef.current) {
       setSelectedTravelModeState(restoredTravelMode)
     }
+    syncTravelModeSelectionLock(null)
     return true
-  }, [clearActiveTravelMode])
+  }, [clearActiveTravelMode, syncTravelModeSelectionLock])
 
   const invalidateLifecycle = useCallback(() => {
     lifecycleGenerationRef.current += 1
@@ -388,8 +411,9 @@ export function useSoloRoundRecovery({
     catchSubmissionAttemptsRef.current.clear()
     activeRoundLaunchRef.current = null
     clearActiveTravelMode()
+    syncTravelModeSelectionLock(null)
     return lifecycleGenerationRef.current
-  }, [clearActiveTravelMode])
+  }, [clearActiveTravelMode, syncTravelModeSelectionLock])
 
   const isOperationCurrent = useCallback((scope, {
     requireLaunch = false,
@@ -669,6 +693,7 @@ export function useSoloRoundRecovery({
         )
       } else {
         clearActiveTravelMode()
+        syncTravelModeSelectionLock(null)
       }
       let gameplayHydration = null
       if (
@@ -838,6 +863,7 @@ export function useSoloRoundRecovery({
     resetSelectedTravelMode,
     rollbackProvisionalTravelMode,
     store,
+    syncTravelModeSelectionLock,
     updateBootstrapState,
   ])
 
@@ -870,9 +896,10 @@ export function useSoloRoundRecovery({
     }
     nextOperationIdRef.current = scope.operationId
     activeRoundLaunchRef.current = scope
+    syncTravelModeSelectionLock(null)
     setCatchReplayWarning('')
     return scope
-  }, [captureSelectedTravelMode])
+  }, [captureSelectedTravelMode, syncTravelModeSelectionLock])
 
   const beginRestartOperation = useCallback(() => {
     if (
@@ -907,6 +934,7 @@ export function useSoloRoundRecovery({
     }
     nextOperationIdRef.current = scope.operationId
     activeRoundLaunchRef.current = scope
+    syncTravelModeSelectionLock(null)
     return {
       scope,
       cleanup: monitorPersistenceOperation(deletion, cleanupScope),
@@ -916,6 +944,7 @@ export function useSoloRoundRecovery({
     captureCurrentWriterScope,
     invalidateLifecycle,
     monitorPersistenceOperation,
+    syncTravelModeSelectionLock,
     terminalDeleteAndRotateWriter,
   ])
 
@@ -937,8 +966,11 @@ export function useSoloRoundRecovery({
           setActiveTravelModeState(checkpoint.round.travelMode)
         }
       }
+      syncTravelModeSelectionLock(
+        activeCheckpointRef.current?.round.phase ?? null,
+      )
     }
-  }, [clearActiveTravelMode])
+  }, [clearActiveTravelMode, syncTravelModeSelectionLock])
 
   const establishRound = useCallback(async (backendSession, scope) => {
     const timeline = createBackendSoloRoundTimeline(backendSession)
@@ -1002,6 +1034,7 @@ export function useSoloRoundRecovery({
     }
 
     activeCheckpointRef.current = checkpoint
+    syncTravelModeSelectionLock(checkpoint.round.phase)
     activeTravelModeOwnerRef.current = {
       identityKey: scope.identityKey,
       lifecycleGeneration: scope.lifecycleGeneration,
@@ -1023,7 +1056,12 @@ export function useSoloRoundRecovery({
       checkpoint,
       scope: establishedScope,
     }
-  }, [getEpochTimeMs, isOperationCurrent, reportStorageFailure])
+  }, [
+    getEpochTimeMs,
+    isOperationCurrent,
+    reportStorageFailure,
+    syncTravelModeSelectionLock,
+  ])
 
   const captureActiveRoundScope = useCallback(() => {
     const checkpoint = activeCheckpointRef.current
@@ -1815,6 +1853,7 @@ export function useSoloRoundRecovery({
         return { stale: true }
       }
       activeCheckpointRef.current = reconciling
+      syncTravelModeSelectionLock(reconciling.round.phase)
       let persistence = { ok: false, disabled: true }
       if (writesEnabledRef.current) {
         persistence = await waitBounded(writer.replace(reconciling))
@@ -1865,6 +1904,7 @@ export function useSoloRoundRecovery({
     captureCurrentWriterScope,
     monitorPersistenceOperation,
     reportStorageFailure,
+    syncTravelModeSelectionLock,
     terminalDeleteAndRotateWriter,
   ])
 
@@ -1910,6 +1950,7 @@ export function useSoloRoundRecovery({
     identityKey,
     selectedTravelMode,
     activeTravelMode,
+    isTravelModeSelectionLocked: travelModeSelectionLocked,
     setSelectedTravelMode: updateSelectedTravelMode,
     warning: warning || catchReplayWarning,
     catchReplayWarning,

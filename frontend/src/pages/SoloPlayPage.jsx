@@ -151,7 +151,9 @@ function SoloPlayPage({ gameplay }) {
               isAuthenticated={gameplay.isAuthenticated}
               authenticatedDisplayName={gameplay.currentUser?.displayName}
               selectedTravelMode={gameplay.selectedTravelMode}
-              activeTravelMode={gameplay.activeTravelMode}
+              isTravelModeSelectionLocked={
+                gameplay.isTravelModeSelectionLocked
+              }
               onSelectedTravelModeChange={gameplay.setSelectedTravelMode}
             />
             <GameControlsPanel

@@ -1554,6 +1554,8 @@ function App() {
     handleTargetClick,
     historyRefreshVersion,
     isRecoveryReady: soloRecovery.isReady,
+    isTravelModeSelectionLocked:
+      soloRecovery.isTravelModeSelectionLocked,
     recoveryBootstrapState: soloRecovery.bootstrapState,
     recoveryWarning: soloRecovery.warning,
     isAuthenticated,
