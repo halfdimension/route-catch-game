@@ -2,171 +2,151 @@
 
 [![Route Catch Game CI](https://github.com/halfdimension/route-catch-game/actions/workflows/ci.yml/badge.svg)](https://github.com/halfdimension/route-catch-game/actions/workflows/ci.yml)
 
-**A full-stack creature-catching game played across real road routes.**
+**A full-stack creature-catching game played across real travel routes.**
 
-Route Catch Game combines responsive SOLO play with authenticated multiplayer
-rooms. A React frontend renders the world with Leaflet by default or MapLibre
-for opt-in SOLO play, while a Spring Boot backend integrates OSRM routing, JWT
-authentication, WebSocket/STOMP communication, and PostgreSQL persistence.
+Route Catch Game combines responsive SOLO play with authenticated,
+backend-authoritative multiplayer rooms. React renders the map with Leaflet by
+default or MapLibre for opt-in SOLO play. Spring Boot provides a
+provider-neutral routing API over OSRM and Valhalla, JWT authentication,
+WebSocket/STOMP multiplayer coordination, and PostgreSQL persistence.
 
 `React 19` · `Vite 8` · `Leaflet` · `MapLibre` · `Java 21` ·
 `Spring Boot 4.1` · `JWT` · `WebSocket/STOMP` · `PostgreSQL` · `Flyway` ·
-`OSRM` · `Docker Compose`
+`OSRM` · `Valhalla`
 
-## Highlights
+## Current Capabilities
 
-- Real-road routes and nearest-road snapping through OSRM.
-- Timed SOLO rounds with animated route movement, route-based catches, and
-  common, rare, and legendary chase targets.
-- Immediate score, XP, levels, catch feedback, and persisted session history.
-- Active SOLO round recovery after browser refresh, including reconstructed
-  player movement, route, targets, caught state, score, timer, and pending catch
-  synchronization.
-- Stable catch UUIDs and idempotent backend synchronization prevent a recovered
-  SOLO catch from being scored twice.
-- Leaflet as the default SOLO and multiplayer renderer, plus an opt-in MapLibre
-  SOLO renderer with `OVERVIEW`, `FOLLOW`, and `FREE` navigation modes.
-- JWT registration/login, identity-scoped stats and history, and leaderboard
-  views.
-- Authenticated multiplayer rooms with presence, shared creatures, timed
-  rounds, backend-generated movement routes, catch ownership, and scoring.
-- Backend-authoritative multiplayer round, route, creature, catch-transition,
-  and score state, with the catch-distance caveat described below.
-- Completed multiplayer results, rankings, catch snapshots, and personal match
-  history persisted in PostgreSQL.
+- Timed SOLO rounds with animated route movement, target spawning, route-based
+  catches, score, XP, levels, and session history.
+- Three provider-neutral SOLO travel modes: `CAR`, `MOTORCYCLE`, and `WALKING`.
+- `CAR` route/nearest requests through OSRM; `MOTORCYCLE` and `WALKING`
+  through Valhalla motorcycle and pedestrian costing.
+- A Spring Boot routing façade; the browser does not call either routing
+  provider as authoritative application infrastructure.
+- No silent provider fallback. A failure of the selected provider is exposed.
+- Identity-scoped SOLO refresh recovery using checkpoint schema v2, including
+  active travel mode, absolute round time, reconstructed movement, targets,
+  score/XP, and pending catch synchronization.
+- Mode-compatible SOLO target publication: the same active mode is used for
+  nearest snapping and a validation route before a target becomes visible.
+- Leaflet as the default SOLO and multiplayer renderer.
+- Opt-in MapLibre SOLO rendering with `OVERVIEW`, `FOLLOW`, and `FREE` camera
+  modes.
+- JWT registration/login and authenticated REST/STOMP communication.
+- Multiplayer rooms with backend-owned round lifecycle, OSRM movement plans,
+  shared creatures, one-winner catch transitions, scoring, sequencing,
+  generation guards, and result finalization.
+- Durable completed multiplayer rounds, participant rankings, catch snapshots,
+  and current-user match history in PostgreSQL.
 
-## Architecture
+There is no `BICYCLE` travel mode. Travel-mode selection is a SOLO feature;
+multiplayer remains on its established OSRM-only authoritative routing path.
 
-```mermaid
-flowchart LR
-    frontend["React frontend<br/>Leaflet + opt-in MapLibre SOLO"]
-    backend["Spring Boot backend"]
-    osrm["OSRM routing engine"]
-    postgres[("PostgreSQL")]
-    flyway["Flyway schema migrations"]
+## Architecture at a Glance
 
-    frontend -->|REST / JSON| backend
-    frontend -->|WebSocket / STOMP| backend
-    backend -->|Routes + nearest-road snapping| osrm
-    backend -->|JPA transactions| postgres
-    flyway -->|Creates and evolves schema| postgres
+```text
+Browser / React / Vite
+          |
+          | REST + WebSocket/STOMP
+          v
+     Spring Boot
+       /   |    \
+      /    |     \
+     v     v      v
+   OSRM  Valhalla PostgreSQL
 ```
 
-The browser talks to Spring Boot rather than directly to OSRM or PostgreSQL.
-Flyway owns database schema changes; Hibernate validates the resulting schema.
+Responsibilities:
 
-### SOLO and Multiplayer Use Different Authority Models
+| Component | Current responsibility |
+|---|---|
+| OSRM | SOLO `CAR` route/nearest; multiplayer authoritative routes; multiplayer creature road snapping |
+| Valhalla | SOLO `MOTORCYCLE` and `WALKING` route/nearest |
+| PostgreSQL | Users; SOLO sessions/catches/history; durable completed multiplayer results/history |
+| IndexedDB | Transient, identity-scoped SOLO active-round recovery checkpoint |
 
-**SOLO** is deliberately responsive and frontend-driven. The frontend owns the
-live timer, target lifecycle, route animation, catches, score, and progression;
-the backend provides OSRM adapters, session support, catalog validation, and
-persistence. A transient browser checkpoint can restore an interrupted active
-round without turning SOLO into server-authoritative gameplay.
+SOLO and multiplayer deliberately use different authority models. SOLO remains
+responsive and frontend-driven. Multiplayer route, shared-creature,
+catch-transition, score, and round authority lives in the backend. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the structural overview and
+[`POKEMON_GAME_CONTEXT.md`](POKEMON_GAME_CONTEXT.md) for the canonical
+engineering handoff.
 
-**Multiplayer** is progressively backend-authoritative. The backend owns the
-important round lifecycle, shared creature population, route generation and
-movement plans, one-winner catch transitions, scoring, finalization, and
-completed-result persistence. The frontend sends movement intent and renders
-the authoritative timeline and room events.
+## SOLO Travel Modes
 
-One trust boundary remains: multiplayer catch distance is currently calculated
-by the backend from coordinates submitted by the client. Creature ownership,
-concurrency, catch recording, and scoring are backend-owned, but the distance
-input is not yet fully tamper-resistant.
+At launch or restart, the current setup choice is captured as the immutable
+active mode for that round:
+
+```text
+selectedTravelMode  ->  activeTravelMode
+```
+
+The selector is locked during synchronous launch, `STARTING`, and `RUNNING`.
+It becomes editable in `RECONCILING`, so a player may choose the next round's
+mode while old catch synchronization completes. That new choice does not
+rewrite the old checkpoint's mode.
+
+Travel mode controls routing semantics. It does not control visual movement
+speed. `simulationSpeedMetersPerSecond` remains the game movement-speed
+authority, and provider duration does not drive the animation speed.
 
 ## SOLO Refresh Recovery
 
-Normal SOLO play remains memory-first. During an active round, a versioned,
-identity-scoped checkpoint provides short-lived recovery evidence:
+The current checkpoint schema is version 2. It requires
+`checkpoint.round.travelMode` and restores the active mode from that field.
+A genuine schema-v1 record is validated as v1, migrated in memory to v2 with
+`CAR`, and then validated as v2. The IndexedDB database version remains 1.
+
+Recovery preserves semantic state, not rendered frames or provider identity:
 
 ```text
 browser refresh
-    -> transient IndexedDB checkpoint
-    -> absolute wall-clock reconstruction
-    -> restore player, route, targets, catches, timer, score, and XP
-    -> continue gameplay
+    -> resolve authenticated/guest identity
+    -> read and validate transient IndexedDB checkpoint
+    -> reconstruct absolute round time and route distance
+    -> restore activeTravelMode, movement, targets, score/XP, and pending sync
+    -> continue through Leaflet or MapLibre
 ```
 
-- Movement resumes from its reconstructed route distance instead of restarting
-  at the beginning.
-- Time spent reloading counts against both movement and the round timer.
-- Known target expiry, caught state, and movement intent are reconstructed.
-- Pending catch replay reuses stable catch UUIDs; the backend treats an exact
-  retry as idempotent and does not award score twice.
-- An already-moving recovered MapLibre route enters `FOLLOW` directly instead
-  of repeating the fresh-route overview.
+Checkpoints are TTL-bound recovery evidence, not permanent history. PostgreSQL
+remains the durable store for sessions, catches, and completed results.
 
-PostgreSQL remains the durable store for sessions and history. IndexedDB is a
-TTL-bound recovery mechanism, not permanent game history. See the
-[canonical engineering context](POKEMON_GAME_CONTEXT.md) for checkpoint,
-timeline, and concurrency internals.
+## Renderers
 
-## Map Renderers
+Leaflet is the current default SOLO renderer and the multiplayer renderer.
 
-**Leaflet / React Leaflet** is the default gameplay renderer and the only
-current multiplayer renderer.
-
-**MapLibre GL / React MapLibre** is an opt-in SOLO renderer. Enable it from the
-`frontend` directory:
+MapLibre is opt-in for SOLO:
 
 ```bash
-VITE_SOLO_MAP_RENDERER=maplibre \
-VITE_ENABLE_DEBUG_CONTROLS=true \
-npm run dev
+cd frontend
+VITE_SOLO_MAP_RENDERER=maplibre npm run dev
 ```
 
-Its navigation camera uses three presentation modes:
+Development controls can additionally be enabled with:
 
-- `OVERVIEW` frames a fresh route and destination before movement.
-- `FOLLOW` tracks the moving player with route-aware heading and look-ahead.
-- `FREE` lets the player explore manually and then resume follow mode.
+```env
+VITE_ENABLE_DEBUG_CONTROLS=true
+```
 
-MapLibre camera state is presentation-only; Leaflet and MapLibre consume the
-same SOLO gameplay state. MapLibre is not wired into multiplayer.
+MapLibre consumes the same gameplay and travel-mode truth as Leaflet. Its
+camera modes are presentation-only:
+
+- `OVERVIEW` frames a fresh route.
+- `FOLLOW` tracks the moving player.
+- `FREE` permits manual exploration and can resume follow.
+
+Recovered already-moving MapLibre routes enter `FOLLOW` directly. MapLibre is
+not wired into multiplayer and was not fully live-browser validated for every
+mode during PR #18; productionization remains future work.
 
 ## Screenshots
 
-The existing captures show the Leaflet SOLO experience. They predate the
-MapLibre renderer and do not represent every current multiplayer or recovery
-feature.
+The existing screenshots show an older Leaflet SOLO UI and do not prove the
+current TravelMode, Valhalla, MapLibre, recovery-v2, or multiplayer-result
+features. See [`docs/screenshots/README.md`](docs/screenshots/README.md) for
+their exact status and future capture guidance.
 
-### Active Chase Gameplay
-
-![Leaflet SOLO gameplay with an active creature chase](docs/screenshots/gameplay.png)
-
-### Persisted SOLO Session and Catch History
-
-![Leaflet SOLO stats drawer showing persisted history](docs/screenshots/stats-drawer.png)
-
-### SOLO Session Leaderboard
-
-![Leaflet SOLO leaderboard showing completed sessions](docs/screenshots/leaderboard.png)
-
-For a concise walkthrough, see the [demo script](docs/DEMO_SCRIPT.md). Capture
-guidance is in [docs/screenshots/README.md](docs/screenshots/README.md).
-
-## Tech Stack
-
-**Frontend**
-
-- React 19, Vite 8, and JavaScript
-- Leaflet 1.9 / React Leaflet 5
-- MapLibre GL 5 / React MapLibre 8
-- STOMP client, React Router, CSS, and ESLint
-
-**Backend**
-
-- Java 21 and Spring Boot 4.1
-- Spring MVC, Validation, Security, and Data JPA
-- JWT with JJWT
-- WebSocket/STOMP
-- Flyway and Maven
-
-**Infrastructure**
-
-- PostgreSQL
-- OSRM using the MLD algorithm
-- Docker Compose for local PostgreSQL
+![Older Leaflet SOLO gameplay capture](docs/screenshots/gameplay.png)
 
 ## Local Development
 
@@ -174,12 +154,31 @@ guidance is in [docs/screenshots/README.md](docs/screenshots/README.md).
 
 - Bash and `curl`
 - Java 21
-- Node.js `20.19+`, `22.13+`, or `24+` and npm
-- Docker with Docker Compose, or an equivalent local PostgreSQL installation
-- A built OSRM server and prepared MLD dataset
-- Optional: `psql` for manual database setup and inspection
+- Node.js 22 and npm
+- Docker with Docker Compose, or an equivalent PostgreSQL installation
+- A built OSRM server with a prepared MLD dataset
+- A separately prepared Valhalla instance for `MOTORCYCLE`/`WALKING`
+- Optional: `psql` for database inspection
 
-### Environment
+### Default Local Services
+
+| Service | Default address |
+|---|---|
+| Vite | `http://localhost:5173` |
+| Spring Boot | `http://localhost:8080` |
+| OSRM | `http://localhost:5000` |
+| Valhalla | `http://localhost:8002` |
+| PostgreSQL | `localhost:5432` |
+
+The backend defaults are committed in
+`backend/route-catch-api/src/main/resources/application.properties`:
+
+```properties
+osrm.base-url=http://localhost:5000
+valhalla.base-url=http://localhost:8002
+valhalla.connect-timeout=2s
+valhalla.read-timeout=10s
+```
 
 Create the frontend environment file:
 
@@ -187,28 +186,13 @@ Create the frontend environment file:
 cp frontend/.env.example frontend/.env
 ```
 
-Its default API URL is:
+Its normal API setting is:
 
 ```env
 VITE_API_BASE_URL=http://localhost:8080
 ```
 
-Docker Compose defaults to:
-
-```env
-POSTGRES_DB=route_catch_game
-POSTGRES_USER=route_catch_user
-POSTGRES_PASSWORD=route_catch_pass
-```
-
-The backend's matching local defaults are in
-`backend/route-catch-api/src/main/resources/application.properties`, including
-`osrm.base-url=http://localhost:5000`.
-
-### Start the Services
-
-Run these in order from the repository root, using separate terminals for the
-long-running processes.
+### Start the Stack
 
 1. Start PostgreSQL:
 
@@ -216,149 +200,94 @@ long-running processes.
    docker compose up -d postgres
    ```
 
-2. Start OSRM:
+2. Start a separately prepared Valhalla instance on `localhost:8002` if the
+   demo or development session will use `MOTORCYCLE` or `WALKING`.
+
+   The repository does **not** contain a portable Valhalla launcher, tile-build
+   workflow, or container service. Historical PR #18 validation used an
+   externally prepared local Valhalla instance at that address.
+
+3. Start the committed application helper:
 
    ```bash
-   ./scripts/run-osrm.sh
+   ./scripts/run-all.sh
    ```
 
-3. Start Spring Boot:
+`run-all.sh` starts OSRM, Spring Boot, and Vite. It does not start PostgreSQL or
+Valhalla. The committed `check-system.sh` checks PostgreSQL, OSRM, backend
+health, and default CAR route/nearest calls; it does not check Valhalla.
 
-   ```bash
-   ./scripts/run-backend.sh
-   ```
-
-4. Start Vite:
-
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-
-Open `http://localhost:5173`. The backend and OSRM default to ports `8080` and
-`5000`; PostgreSQL defaults to `5432`.
-
-The checked-in all-in-one helper is also available after PostgreSQL is ready:
+Services can also be started separately:
 
 ```bash
-./scripts/run-all.sh
+./scripts/run-osrm.sh
+./scripts/run-backend.sh
+./scripts/run-frontend.sh
 ```
 
-Run `./scripts/check-system.sh` to check prerequisites and service health.
+### Current Local-Tooling Limitations
 
-### OSRM Path Configuration
-
-The checked-in OSRM scripts currently contain machine-specific paths:
-
-```text
-/home/halfdimension/Projects/practice/osrm-backend/build/osrm-routed
-/home/halfdimension/Projects/osrm-data/northern-zone-latest.osrm
-```
-
-Update `scripts/run-osrm.sh` and `scripts/check-system.sh` if the binary or
-dataset lives elsewhere. The dataset prefix must include the `.ebg`,
-`.partition`, and `.cells` MLD companion files.
+The OSRM scripts contain author-machine binary and dataset paths. They must be
+adapted on another machine. No uncommitted local-tooling experiment is part of
+the current behavior. Portable routing startup and provider readiness work is
+listed only in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### PostgreSQL and Flyway
 
-The Compose service stores data in the `route-catch-postgres-data` named volume.
-Flyway currently applies:
-
-- `V1__create_game_tables.sql`
-- `V2__seed_creature_catalog.sql`
-- `V3__add_player_name_to_game_sessions.sql`
-- `V4__create_users_and_link_sessions.sql`
-- `V5__create_multiplayer_round_results.sql`
-
-V5 adds durable completed multiplayer rounds, participant results, and catch
-snapshots. SOLO catch idempotency reuses the catch UUID primary key created in
-V1 and required no additional migration. JPA uses `ddl-auto=validate`.
-
-Without Docker, create the matching local role and database once:
-
-```bash
-sudo -u postgres psql
-```
-
-```sql
-CREATE USER route_catch_user WITH PASSWORD 'route_catch_pass';
-CREATE DATABASE route_catch_game OWNER route_catch_user;
-\q
-```
-
-To stop PostgreSQL while preserving data:
-
-```bash
-docker compose down
-```
-
-To intentionally delete the local database volume and rebuild it:
-
-```bash
-docker compose down -v
-docker compose up -d postgres
-```
-
-`docker compose down -v` permanently deletes local users, sessions, catches,
-and multiplayer history stored in that volume.
-
-## Selected API Surface
-
-The README lists representative routes; use the current controllers as the
-ultimate contract.
+Compose uses the documented local defaults:
 
 ```text
-Authentication
-POST /api/auth/register
-POST /api/auth/login
-GET  /api/auth/me
+database  route_catch_game
+user      route_catch_user
+password  route_catch_pass
+```
 
-Routing
+Flyway owns schema evolution and Hibernate uses `ddl-auto=validate`. Current
+migrations are V1 through V5; V5 creates durable multiplayer round, participant,
+and catch-snapshot tables. SOLO catch idempotency reuses the V1 catch UUID
+primary key and required no new migration.
+
+## Representative API Surface
+
+```text
 POST /api/routes
 POST /api/nearest
 GET  /api/health
 
-SOLO sessions and history
-GET  /api/game/creatures
+POST /api/auth/register
+POST /api/auth/login
+GET  /api/auth/me
+
 POST /api/game/sessions
 POST /api/game/sessions/{sessionId}/start
-POST /api/game/sessions/{sessionId}/end
 POST /api/game/sessions/{sessionId}/catches
-GET  /api/game/me/stats
-GET  /api/game/me/sessions
-GET  /api/game/leaderboard
+POST /api/game/sessions/{sessionId}/end
 
-Multiplayer rooms and live state
-POST /api/multiplayer/rooms
-POST /api/multiplayer/rooms/{roomCode}/join
-POST /api/multiplayer/rooms/{roomCode}/game/start
-GET  /api/multiplayer/rooms/{roomCode}/game
-GET  /api/multiplayer/rooms/{roomCode}/movements
-GET  /api/multiplayer/rooms/{roomCode}/creatures
-POST /api/multiplayer/rooms/{roomCode}/creatures/{instanceId}/catch
-
-Completed multiplayer results
 GET /api/multiplayer/rooms/{roomCode}/rounds/{roundId}/result
 GET /api/multiplayer/rooms/{roomCode}/rounds/latest/result
 GET /api/multiplayer/me/rounds?page=0&size=20
 ```
 
-Authenticated STOMP clients connect at `/ws`, publish presence and movement
-commands under `/app/rooms/{roomCode}/...`, and subscribe to room presence,
-creature, movement, and `GAME_ENDED` event topics under
+Routing requests accept an optional, case-sensitive `travelMode`. Missing or
+JSON `null` defaults to `CAR`; valid values are `CAR`, `MOTORCYCLE`, and
+`WALKING`. Unsupported values return `400 UNSUPPORTED_TRAVEL_MODE`. Responses
+do not echo `travelMode`. See [`docs/API.md`](docs/API.md) for the contract.
+
+Authenticated STOMP clients connect at `/ws`, send presence and movement
+commands under `/app/rooms/{roomCode}/...`, and subscribe to presence,
+creature, movement, and room-event topics under
 `/topic/rooms/{roomCode}/...`.
 
 ## Testing and Quality
 
-Backend tests use H2 in PostgreSQL compatibility mode:
+Backend suite:
 
 ```bash
 cd backend/route-catch-api
 ./mvnw clean test
 ```
 
-Frontend verification:
+Frontend suite and quality checks:
 
 ```bash
 cd frontend
@@ -368,53 +297,46 @@ npm run lint
 npm run build
 ```
 
-GitHub Actions runs Maven tests plus the frontend production build and lint on
-pushes to `main` and pull requests targeting `main`. The workflow does not
-currently run the frontend Node test suite, so it should be run locally during
-feature verification. Map rendering and camera feel also receive manual browser
-validation; there is not yet a full browser E2E suite.
+GitHub Actions runs the Maven tests plus frontend build and lint. It does not
+currently run the complete frontend Node test suite. The repository has no full
+browser E2E suite.
 
-## What This Project Demonstrates
-
-- Full-stack system design across React, Spring Boot, PostgreSQL, and OSRM.
-- Real routing-engine integration and frontend route-animation/game-state
-  architecture.
-- Explicit frontend/backend authority boundaries for SOLO and multiplayer.
-- Concurrency-safe shared catches, idempotent synchronization, transactional
-  persistence, and immutable completed-round snapshots.
-- JWT identity and authenticated REST/WebSocket communication.
-- Browser refresh/crash recovery with durable-versus-transient state separation.
-- Lifecycle, generation, and ABA race protection around asynchronous gameplay.
-- Renderer abstraction across Leaflet and MapLibre without duplicating game
-  rules.
-- Automated backend/frontend verification plus focused manual map validation.
+Historical PR #18 verification recorded 407 passing backend tests, the passing
+frontend full suite and MapLibre source suite, passing lint/build, live route
+and nearest validation for all three modes, and full Leaflet SOLO flows for all
+three modes. That is a historical checkpoint, not a promise about every future
+commit or a claim of full MapLibre browser validation.
 
 ## Current Limitations
 
-- MapLibre is SOLO-only; multiplayer uses Leaflet.
-- Active multiplayer rooms, presence, movement plans, creatures, spawn loops,
-  and finalization context remain single-JVM/in-memory. A backend restart does
-  not reconstruct an active round, and the current design is not ready for
-  arbitrary horizontal scaling.
-- Multiplayer has no SOLO-style active-round browser checkpoint recovery. REST
-  snapshots and persisted completed results cover selected reconnect and
-  completion-recovery paths.
-- Multiplayer catch distance still trusts client-submitted coordinates, even
-  though catch ownership and scoring are enforced by the backend.
-- SOLO checkpoints are transient and TTL-bound. Known targets recover, but
-  random spawn opportunities missed while the browser is unavailable are not
-  deterministically replayed.
-- There is no Redis/Kafka distributed multiplayer authority or durable message
-  broker/outbox; PostgreSQL is the durable store for historical state.
-- Local OSRM scripts contain machine-specific paths, and no complete hosted
-  deployment pipeline is configured.
+- Valhalla startup/data/deployment is not repository-managed; an external local
+  instance is required for `MOTORCYCLE` and `WALKING`.
+- There is no provider fallback. Provider outages fail the selected request.
+- The backend health endpoint reports application health only and may be `UP`
+  while OSRM or Valhalla is unavailable.
+- MapLibre is opt-in SOLO-only and lacks full browser E2E/live parity coverage.
+- A recovered Leaflet route can restore correct route/movement semantics while
+  reopening at broader camera framing than desired.
+- SOLO checkpoints are transient and TTL-bound; missed random spawn
+  opportunities are not replayed deterministically.
+- Active multiplayer rooms, movement, creatures, sequences, spawn loops, and
+  finalization context remain single-JVM/in-memory and are not reconstructed
+  after backend restart.
+- Completed multiplayer results are durable in PostgreSQL despite that active
+  state limitation.
+- Multiplayer catch distance still uses client-submitted position input.
+- There is no Redis/broker authority, durable event outbox, arbitrary
+  horizontal multiplayer scaling, or complete hosted deployment pipeline.
 
-## Documentation
+## Documentation Hierarchy
 
-- [Canonical engineering context / current implementation handoff](POKEMON_GAME_CONTEXT.md)
-- [Architecture overview](docs/ARCHITECTURE.md) — supporting documentation that
-  may lag the canonical context and current source
-- [API reference](docs/API.md) — supporting endpoint documentation that may lag
-  the current controllers
-- [Demo script](docs/DEMO_SCRIPT.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [`POKEMON_GAME_CONTEXT.md`](POKEMON_GAME_CONTEXT.md): canonical engineering
+  handoff and detailed current implementation context.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): readable structural overview.
+- [`docs/API.md`](docs/API.md): public API and realtime contract.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md): proposed/future work only.
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md): operational diagnosis.
+- [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md): current demo walkthrough.
+
+Committed source, configuration, migrations, and tests remain the ultimate
+implementation truth.

@@ -1,18 +1,29 @@
-# API Reference
+# Route Catch Game API Reference
 
-Base URL:
+This reference describes the committed public contract at PR #18 (`d44655c`).
+Controllers and DTOs remain the ultimate contract.
+
+Default base URL:
 
 ```bash
 API_URL=http://localhost:8080
 ```
 
-All request and response bodies use JSON. Examples assume the backend,
-PostgreSQL, and OSRM are running.
+Request and response bodies use JSON. Error responses use:
+
+```json
+{
+  "errorCode": "ERROR_CODE",
+  "message": "Sanitized message",
+  "path": "/api/path",
+  "timestamp": "2026-08-28T12:00:00Z"
+}
+```
 
 ## Health
 
-```bash
-curl --fail "$API_URL/api/health"
+```http
+GET /api/health
 ```
 
 ```json
@@ -22,34 +33,188 @@ curl --fail "$API_URL/api/health"
 }
 ```
 
-## Authentication
+This is application health only. It does not probe OSRM, Valhalla, or
+PostgreSQL readiness, so it may be `UP` while a route provider is unavailable.
 
-Register:
+## Public TravelMode Contract
+
+Both public routing requests accept an optional `travelMode` string.
+
+| JSON input | Behavior |
+|---|---|
+| field omitted | defaults to `CAR` |
+| `null` | defaults to `CAR` |
+| `"CAR"` | valid; OSRM driving |
+| `"MOTORCYCLE"` | valid; Valhalla motorcycle |
+| `"WALKING"` | valid; Valhalla pedestrian |
+| any other value, including lowercase | `400 UNSUPPORTED_TRAVEL_MODE` |
+
+Values are case-sensitive. There is no `BICYCLE`. These strings are
+provider-neutral API values; Valhalla costing strings are internal and are not
+accepted as public modes.
+
+Successful route and nearest responses do not echo `travelMode`.
+
+## Route
+
+```http
+POST /api/routes
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "sourceLat": 28.6139,
+  "sourceLon": 77.209,
+  "destinationLat": 28.62,
+  "destinationLon": 77.215,
+  "travelMode": "WALKING"
+}
+```
+
+`sourceLat` and `destinationLat` are required numbers in `[-90, 90]`.
+`sourceLon` and `destinationLon` are required numbers in `[-180, 180]`.
+
+Response:
+
+```json
+{
+  "coordinates": [
+    {"lat": 28.6139, "lon": 77.209},
+    {"lat": 28.62, "lon": 77.215}
+  ],
+  "distanceMeters": 1250.0,
+  "durationSeconds": 900.5,
+  "source": {"lat": 28.6139, "lon": 77.209},
+  "destination": {"lat": 28.62, "lon": 77.215}
+}
+```
+
+`coordinates` are `{lat, lon}` objects regardless of the provider's native
+shape. Distance is normalized to metres and duration to seconds. `source` and
+`destination` are the requested normalized coordinates; there is no response
+`travelMode` field.
+
+Example:
 
 ```bash
-curl --fail \
+curl --fail-with-body \
   --request POST \
   --header "Content-Type: application/json" \
   --data '{
-    "username": "harsh",
-    "email": "harsh@example.com",
-    "displayName": "Harsh",
-    "password": "password123"
+    "sourceLat":28.6139,
+    "sourceLon":77.209,
+    "destinationLat":28.62,
+    "destinationLon":77.215,
+    "travelMode":"MOTORCYCLE"
   }' \
-  "$API_URL/api/auth/register"
+  "$API_URL/api/routes"
 ```
 
-Login:
+## Nearest Routable Point
+
+```http
+POST /api/nearest
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "lat": 28.6139,
+  "lon": 77.209,
+  "travelMode": "CAR"
+}
+```
+
+`lat` is required and constrained to `[-90, 90]`; `lon` is required and
+constrained to `[-180, 180]`.
+
+Response:
+
+```json
+{
+  "snappedPoint": {"lat": 28.61391, "lon": 77.20902},
+  "distanceMeters": 4.2,
+  "name": "Road name"
+}
+```
+
+`name` may be `null` when no nonblank road name is available.
+
+Example:
 
 ```bash
-curl --fail \
+curl --fail-with-body \
   --request POST \
   --header "Content-Type: application/json" \
-  --data '{"usernameOrEmail":"harsh","password":"password123"}' \
-  "$API_URL/api/auth/login"
+  --data '{"lat":28.6139,"lon":77.209,"travelMode":"WALKING"}' \
+  "$API_URL/api/nearest"
 ```
 
-Both return:
+## Routing Selection and Failure Contract
+
+The controllers depend on `TravelRoutingService`, which selects exactly one
+provider. A failed request is not silently retried through a different mode or
+provider.
+
+| Condition | HTTP | `errorCode` |
+|---|---:|---|
+| Unsupported/case-mismatched mode | 400 | `UNSUPPORTED_TRAVEL_MODE` |
+| Valhalla known no-route response | 400 | `ROUTE_NOT_FOUND` |
+| OSRM no-route/no-segment response | 400 | provider code such as `NoRoute` or `NoSegment` |
+| Selected provider unreachable | 502 | `ROUTING_ENGINE_UNAVAILABLE` |
+| Valhalla connection/read timeout | 504 | `ROUTING_ENGINE_TIMEOUT` |
+| No usable nearest edge/point | 502 | `NEAREST_POINT_NOT_FOUND` |
+| Malformed JSON or normalized invalid Valhalla response | 502 | `ROUTING_ENGINE_INVALID_RESPONSE` |
+| Recognized invalid OSRM response | 502 | `ROUTING_ENGINE_INVALID_RESPONSE` |
+| Other unsuccessful provider response | 502 | `ROUTING_ENGINE_ERROR` |
+
+Current nuance: the public CAR adapter maps an OSRM `ResourceAccessException`
+to `502 ROUTING_ENGINE_UNAVAILABLE`; it does not currently distinguish OSRM
+timeouts as the Valhalla adapter does. `TRAVEL_MODE_UNAVAILABLE` (503) protects
+an internal provider/mode mismatch but should not occur through the normal
+facade mapping. Valhalla comprehensively validates route/locate success bodies:
+malformed JSON and the invalid structures, route metrics, or route geometry
+handled by its normalizers map to `502 ROUTING_ENGINE_INVALID_RESPONSE`; no
+usable locate edge remains the separate nearest-point error above. OSRM
+recognizes some invalid responses, but its coordinate-array/shape validation is
+not as comprehensive. Do not rely on every arbitrary malformed OSRM payload
+returning that 502; an unexpected failure may reach the sanitized generic
+`500 INTERNAL_SERVER_ERROR` path.
+
+## Authentication
+
+```text
+POST /api/auth/register
+POST /api/auth/login
+GET  /api/auth/me
+```
+
+Register request:
+
+```json
+{
+  "username": "harsh",
+  "email": "harsh@example.com",
+  "displayName": "Harsh",
+  "password": "password123"
+}
+```
+
+Login request:
+
+```json
+{
+  "usernameOrEmail": "harsh",
+  "password": "password123"
+}
+```
+
+Register/login response:
 
 ```json
 {
@@ -60,174 +225,72 @@ Both return:
     "username": "harsh",
     "email": "harsh@example.com",
     "displayName": "Harsh",
-    "createdAt": "2026-06-13T12:00:00Z"
+    "createdAt": "2026-08-28T12:00:00Z"
   }
 }
 ```
 
-Store the token for protected examples:
+Protected REST requests use:
 
-```bash
-TOKEN=replace-with-jwt
+```http
+Authorization: Bearer <JWT>
 ```
 
-Current user:
+## SOLO Session API
 
-```bash
-curl --fail \
-  --header "Authorization: Bearer $TOKEN" \
-  "$API_URL/api/auth/me"
+### Endpoint Inventory
+
+```text
+GET  /api/game/creatures
+POST /api/game/sessions
+GET  /api/game/sessions?limit=20
+GET  /api/game/sessions/{sessionId}
+POST /api/game/sessions/{sessionId}/start
+POST /api/game/sessions/{sessionId}/end
+POST /api/game/sessions/{sessionId}/catches
+GET  /api/game/sessions/{sessionId}/catches
+
+GET /api/game/me/stats
+GET /api/game/me/sessions?limit=20
+GET /api/game/me/sessions/{sessionId}/catches
+GET /api/game/leaderboard?limit=10
+GET /api/game/players/{playerName}/stats
 ```
 
-`GET /api/auth/me` returns the `user` object shape shown above.
+Session creation accepts `durationSeconds` from 30 through 600 and an optional
+guest `playerName` up to 80 characters. A valid bearer token links the session
+to the authenticated UUID and uses that user's display name.
 
-## Route
+### Catch Submission and Idempotency
 
-```bash
-curl --fail \
-  --request POST \
-  --header "Content-Type: application/json" \
-  --data '{
-    "sourceLat": 28.6139,
-    "sourceLon": 77.2090,
-    "destinationLat": 28.6200,
-    "destinationLon": 77.2150
-  }' \
-  "$API_URL/api/routes"
-```
-
-The response contains:
-
-```json
-{
-  "coordinates": [{"lat": 28.6139, "lon": 77.209}],
-  "distanceMeters": 1200.5,
-  "durationSeconds": 180.2,
-  "source": {"lat": 28.6139, "lon": 77.209},
-  "destination": {"lat": 28.62, "lon": 77.215}
-}
-```
-
-## Nearest Road
-
-```bash
-curl --fail \
-  --request POST \
-  --header "Content-Type: application/json" \
-  --data '{"lat":28.6139,"lon":77.2090}' \
-  "$API_URL/api/nearest"
+```http
+POST /api/game/sessions/{sessionId}/catches
 ```
 
 ```json
 {
-  "snappedPoint": {"lat": 28.6139, "lon": 77.209},
-  "distanceMeters": 4.2,
-  "name": "Road name"
+  "creatureId": "voltfox",
+  "catchId": "optional-client-UUID"
 }
 ```
 
-## Creature Catalog
+`creatureId` is required. Legacy `creatureName`, `rarity`, and `scoreValue`
+request fields may deserialize but are not trusted; the backend resolves the
+catalog snapshot and score. `catchId` is optional:
 
-```bash
-curl --fail "$API_URL/api/game/creatures"
-```
+- Supplied: it becomes the stable logical catch ID.
+- Omitted: the backend generates a UUID for that request; separate legacy
+  retries are separate catches.
+- Same ID + same session + same creature: idempotent success with no second
+  score/count award.
+- Same ID + different session or creature: `409 CATCH_ID_CONFLICT`.
 
-Each item contains `creatureId`, `creatureName`, `rarity`, and `scoreValue`.
-
-## Create Session
-
-```bash
-curl --fail \
-  --request POST \
-  --header "Content-Type: application/json" \
-  --data '{"durationSeconds":60,"playerName":"Harsh"}' \
-  "$API_URL/api/game/sessions"
-```
-
-Duration must be between 30 and 600 seconds. `playerName` is optional, trimmed,
-limited to 80 characters, and defaults to `Guest`. The response uses this
-shape:
+Response:
 
 ```json
 {
   "sessionId": "UUID",
-  "status": "CREATED",
-  "createdAt": "2026-06-13T12:00:00Z",
-  "startedAt": null,
-  "endedAt": null,
-  "durationSeconds": 60,
-  "score": 0,
-  "caughtCount": 0,
-  "playerName": "Harsh",
-  "userId": null
-}
-```
-
-When a valid `Authorization: Bearer $TOKEN` header is provided, the session is
-linked to the authenticated user, `userId` is populated, and the backend uses
-the user's `displayName` as `playerName`.
-
-Set the returned ID for the following examples:
-
-```bash
-SESSION_ID=replace-with-session-uuid
-```
-
-## List Sessions
-
-```bash
-curl --fail "$API_URL/api/game/sessions"
-curl --fail "$API_URL/api/game/sessions?limit=5"
-```
-
-The default limit is 20. Valid limits are 1 through 100. Results use the
-session response shape and are ordered by creation time descending.
-
-## Get Session
-
-```bash
-curl --fail "$API_URL/api/game/sessions/$SESSION_ID"
-```
-
-A stale running session is auto-expired before it is returned.
-
-## Start Session
-
-```bash
-curl --fail \
-  --request POST \
-  "$API_URL/api/game/sessions/$SESSION_ID/start"
-```
-
-`CREATED` becomes `RUNNING`. Starting an already running session returns the
-same running session.
-
-## End Session
-
-```bash
-curl --fail \
-  --request POST \
-  "$API_URL/api/game/sessions/$SESSION_ID/end"
-```
-
-`CREATED` or `RUNNING` becomes `ENDED`. Ending an ended session is idempotent.
-
-## Submit Catch
-
-The backend requires the creature ID and resolves trusted score data from its
-catalog:
-
-```bash
-curl --fail \
-  --request POST \
-  --header "Content-Type: application/json" \
-  --data '{"creatureId":"voltfox"}' \
-  "$API_URL/api/game/sessions/$SESSION_ID/catches"
-```
-
-```json
-{
-  "sessionId": "UUID",
+  "catchId": "UUID",
   "status": "RUNNING",
   "score": 30,
   "caughtCount": 1,
@@ -238,185 +301,71 @@ curl --fail \
 }
 ```
 
-Only running sessions accept catches. Legacy name, rarity, or score fields may
-be accepted in the request DTO but are ignored.
+An exact persisted replay can succeed after the session has ended. A new catch
+against an ended session remains invalid.
 
-## List Session Catches
+## Multiplayer REST API
 
-```bash
-curl --fail "$API_URL/api/game/sessions/$SESSION_ID/catches"
+Multiplayer REST routes are security-protected. Host, membership, and frozen
+participant checks vary by operation. Notably, the current
+`GET /api/multiplayer/rooms/{roomCode}` controller read is authenticated but
+does not itself enforce membership; completed-result reads separately authorize
+persisted participation.
+
+### Rooms, Game, and Score
+
+```text
+POST  /api/multiplayer/rooms
+GET   /api/multiplayer/rooms/me
+GET   /api/multiplayer/rooms/{roomCode}
+POST  /api/multiplayer/rooms/{roomCode}/join
+POST  /api/multiplayer/rooms/{roomCode}/leave
+POST  /api/multiplayer/rooms/{roomCode}/close
+PATCH /api/multiplayer/rooms/{roomCode}/settings
+POST  /api/multiplayer/rooms/{roomCode}/game/start
+GET   /api/multiplayer/rooms/{roomCode}/game
+POST  /api/multiplayer/rooms/{roomCode}/game/end
+GET   /api/multiplayer/rooms/{roomCode}/scoreboard
 ```
 
-Results are ordered by catch time ascending:
+Game status is `WAITING`, `RUNNING`, `FINALIZING`, or `ENDED`. Room status is
+separately `OPEN`, `IN_PROGRESS`, or `CLOSED`. Start freezes the participant
+roster and assigns a round UUID and room-local generation. End reasons are
+`HOST_ENDED`, `TIME_EXPIRED`, and `ROOM_CLOSED`.
 
-```json
-[
-  {
-    "catchId": "UUID",
-    "sessionId": "UUID",
-    "creatureId": "voltfox",
-    "creatureName": "Voltfox",
-    "rarity": "rare",
-    "scoreValue": 30,
-    "caughtAt": "2026-06-13T12:01:00Z"
-  }
-]
+### Movement and Shared Creatures
+
+```text
+GET  /api/multiplayer/rooms/{roomCode}/movements
+GET  /api/multiplayer/rooms/{roomCode}/creatures
+POST /api/multiplayer/rooms/{roomCode}/creatures/spawn
+POST /api/multiplayer/rooms/{roomCode}/creatures/{instanceId}/catch
 ```
 
-## Current User Stats and History
+The spawn endpoint is a host-only manual development/admin override. Normal
+population is backend-scheduled. The catch request includes `playerLat` and
+`playerLon`; the backend owns the shared transition and score, but currently
+calculates distance from those submitted coordinates.
 
-These endpoints require `Authorization: Bearer $TOKEN` and use
-`game_sessions.user_id`, not player-name matching. Guest sessions are excluded.
+### Durable Completed Result
 
-Current user stats:
-
-```bash
-curl --fail \
-  --header "Authorization: Bearer $TOKEN" \
-  "$API_URL/api/game/me/stats"
+```text
+GET /api/multiplayer/rooms/{roomCode}/rounds/{roundId}/result
+GET /api/multiplayer/rooms/{roomCode}/rounds/latest/result
 ```
 
-```json
-{
-  "playerName": "Harsh",
-  "totalSessions": 3,
-  "completedSessions": 2,
-  "totalScore": 160,
-  "totalCatches": 5,
-  "bestScore": 100,
-  "bestCaughtCount": 3,
-  "averageScore": 80.0,
-  "latestSessionAt": "2026-06-13T12:00:00Z"
-}
-```
+Only an authenticated persisted participant may read the result. Completed
+results are backed by PostgreSQL and survive backend restart.
 
-Current user sessions:
-
-```bash
-curl --fail \
-  --header "Authorization: Bearer $TOKEN" \
-  "$API_URL/api/game/me/sessions?limit=20"
-```
-
-Results use the session response shape and are ordered by creation time
-descending. Valid limits are 1 through 100.
-
-Current user session catches:
-
-```bash
-curl --fail \
-  --header "Authorization: Bearer $TOKEN" \
-  "$API_URL/api/game/me/sessions/$SESSION_ID/catches"
-```
-
-The session must belong to the authenticated user. Results use the catch
-response shape.
-
-## Public Player Stats
-
-The name-based stats endpoint remains public for guest/demo flows:
-
-```bash
-curl --fail "$API_URL/api/game/players/Harsh/stats"
-```
-
-It returns the same stats shape but matches sessions by `player_name`.
-
-## Leaderboard
-
-```bash
-curl --fail "$API_URL/api/game/leaderboard"
-curl --fail "$API_URL/api/game/leaderboard?limit=20"
-```
-
-The default limit is 10 and valid limits are 1 through 100. Only ended sessions
-appear.
-
-```json
-[
-  {
-    "rank": 1,
-    "sessionId": "UUID",
-    "score": 100,
-    "caughtCount": 3,
-    "durationSeconds": 60,
-    "startedAt": "2026-06-13T12:00:00Z",
-    "endedAt": "2026-06-13T12:01:00Z",
-    "playerName": "Harsh"
-  }
-]
-```
-
-Ordering is score descending, caught count descending, ended time ascending,
-then creation time descending.
-
-## Multiplayer Room Games and Shared Creatures
-
-Starting a room game is host-only and changes the room to `IN_PROGRESS` with a
-`RUNNING` game:
-
-```bash
-curl --fail \
-  --request POST \
-  --header "Authorization: Bearer $TOKEN" \
-  --header "Content-Type: application/json" \
-  --data '{"durationSeconds": 300}' \
-  "$API_URL/api/multiplayer/rooms/A8F3KQ/game/start"
-```
-
-The response includes a unique `roundId` and a monotonically increasing,
-room-local `generation`. The authoritative lifecycle is
-`WAITING -> RUNNING -> FINALIZING -> ENDED`. `FINALIZING` is normally brief:
-gameplay is frozen atomically and the room reopens only after an immutable
-result has been stored. Explicit room closure remains final.
-
-Players present when `game/start` commits are the round participants. A member
-who joins an already-running room may observe it but cannot move, catch, or
-appear in that round's result. Every participant is ranked, including players
-with zero score.
-
-Host end, deadline expiry, and running-room closure all use the same
-generation-guarded finalizer. The first request changes `RUNNING` to
-`FINALIZING`; duplicate requests reuse the stored result, and delayed work for
-an older round cannot affect a restart. At the freeze boundary the backend:
-
-- rejects new/replacement movement and catch commands;
-- cancels active movement at its interpolated authoritative position;
-- prevents late movement completions from changing that position;
-- stops automatic spawning and invalidates remaining active creatures; and
-- snapshots scores and caught-creature history before publishing the result.
-
-Competition ranking uses score descending. Equal scores share a rank and later
-positions are skipped (`180, 150, 150, 90` becomes `1, 2, 2, 4`). Equal-score
-display order is catch count descending, display name case-insensitive
-ascending, then player UUID. These secondary fields do not change the shared
-rank.
-
-### Multiplayer Round Results
-
-An authenticated participant can recover a completed result even if its
-WebSocket event was missed:
-
-```bash
-curl --fail \
-  --header "Authorization: Bearer $TOKEN" \
-  "$API_URL/api/multiplayer/rooms/A8F3KQ/rounds/$ROUND_ID/result"
-
-curl --fail \
-  --header "Authorization: Bearer $TOKEN" \
-  "$API_URL/api/multiplayer/rooms/A8F3KQ/rounds/latest/result"
-```
-
-The response separates the public leaderboard from the requester's private
-catch details:
+Response:
 
 ```json
 {
   "publicResult": {
     "roundId": "UUID",
     "roomCode": "A8F3KQ",
-    "startedAt": "2026-07-26T10:00:00Z",
-    "endedAt": "2026-07-26T10:05:00Z",
+    "startedAt": "2026-08-28T10:00:00Z",
+    "endedAt": "2026-08-28T10:05:00Z",
     "endReason": "HOST_ENDED",
     "playerCount": 2,
     "leaderboard": [
@@ -446,94 +395,62 @@ catch details:
         "name": "Creature",
         "rarity": "rare",
         "scoreAwarded": 80,
-        "caughtAt": "2026-07-26T10:01:00Z"
+        "caughtAt": "2026-08-28T10:01:00Z"
       }
     ],
-    "startedAt": "2026-07-26T10:00:00Z",
-    "endedAt": "2026-07-26T10:05:00Z",
+    "startedAt": "2026-08-28T10:00:00Z",
+    "endedAt": "2026-08-28T10:05:00Z",
     "endReason": "HOST_ENDED"
   }
 }
 ```
 
-Other players' caught-creature lists are never included in `publicResult`.
-End reasons are `HOST_ENDED`, `TIME_EXPIRED`, or `ROOM_CLOSED`.
+The public leaderboard does not include other players' private catch lists.
+Competition rank is score-defined; ties share a rank and skip later numeric
+positions.
 
-The public event is published exactly once after the result is retrievable:
+Exact lookup checks a matching committed in-memory result before PostgreSQL.
+Latest lookup checks PostgreSQL first so an older memory entry cannot mask a
+newer committed result. “Latest” means latest completed room round, not latest
+round in that room played by the requester.
 
-```text
-/topic/rooms/{roomCode}/events
+### Current-User Multiplayer History
+
+```http
+GET /api/multiplayer/me/rounds?page=0&size=20
 ```
 
-It uses the existing room envelope and sequence with `eventType: "GAME_ENDED"`;
-the payload is `publicResult`. Movement and `GAME_ENDED` therefore share the
-same monotonic `roomSequence`, even though they use their respective room
-topics.
+`page` must be non-negative. `size` must be 1 through 100. The authenticated
+user UUID is taken from the principal, and only persisted `ENDED` rounds are
+returned in deterministic `endedAt DESC, roundId DESC` order.
 
-Completed multiplayer results are currently single-JVM and in memory. The
-replaceable `RoomRoundResultStore` retains the latest 100 rounds per room.
-Process restart loses them; PostgreSQL persistence is not implemented.
-
-While a generation is `RUNNING`, the backend automatically maintains active
-shared creatures:
-
-```text
-desiredActiveCount =
-  clamp(baseActiveCount + activePlayerCount * perPlayerActiveCount,
-        0,
-        maxActiveCount)
+```json
+{
+  "content": [
+    {
+      "roundId": "UUID",
+      "roomCode": "A8F3KQ",
+      "startedAt": "2026-08-28T10:00:00Z",
+      "endedAt": "2026-08-28T10:05:00Z",
+      "endReason": "HOST_ENDED",
+      "durationSeconds": 300,
+      "participantCount": 2,
+      "rank": 1,
+      "score": 180,
+      "creaturesCaught": 2
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
 ```
 
-Only non-expired `ACTIVE` creatures count. Each five-second cycle fills at most
-the configured deficit and never more than `maxSpawnsPerCycle`. For every
-placement, the backend prefers the eligible player with the fewest active
-creatures inside the spawn radius. An eligible position comes from the
-interpolated active movement plan first, a stored authoritative stationary
-position second, and valid presence only as a legacy fallback.
+History is a summary projection. Catch details are loaded only through the
+specific result endpoint.
 
-The backend generates a bounded-distance geographic candidate around that
-player, snaps it through OSRM `/nearest`, and rejects failed/invalid snaps,
-points too close to the player, duplicates, and points within the configured
-minimum separation from another active creature. Browser coordinates are not
-used by the automatic cycle.
-
-Room members list active creatures with:
-
-```bash
-curl --fail \
-  --header "Authorization: Bearer $TOKEN" \
-  "$API_URL/api/multiplayer/rooms/A8F3KQ/creatures"
-```
-
-Clients may subscribe to compatible lifecycle events:
-
-```text
-/topic/rooms/{roomCode}/creatures
-```
-
-Event types remain `CREATED`, `CAUGHT`, and `EXPIRED`.
-
-The existing host-only endpoint below is retained only as a manual
-development/admin override. Normal gameplay does not call it, it does not
-start another scheduler, and authoritative active-count, lifecycle, catalog,
-event, and separation validation still applies:
-
-```bash
-curl --fail \
-  --request POST \
-  --header "Authorization: Bearer $TOKEN" \
-  --header "Content-Type: application/json" \
-  --data \
-  '{"centerLat":28.6139,"centerLon":77.2090,"count":1,"ttlSeconds":120,"radiusMeters":500}' \
-  "$API_URL/api/multiplayer/rooms/A8F3KQ/creatures/spawn"
-```
-
-Automatic scheduling, room ownership, movement state, and shared-creature state
-are currently single-JVM and in memory. The scheduler/position/snapper
-abstractions are the boundary for future distributed room ownership; Redis or
-a broker is not implemented.
-
-## WebSocket Multiplayer
+## WebSocket/STOMP Contract
 
 Endpoint:
 
@@ -541,64 +458,20 @@ Endpoint:
 ws://localhost:8080/ws
 ```
 
-STOMP `CONNECT` must include:
+STOMP `CONNECT` requires `Authorization: Bearer <JWT>`.
 
 ```text
-Authorization: Bearer <JWT>
+SEND /app/rooms/{roomCode}/presence
+SEND /app/rooms/{roomCode}/movements/start
+SEND /app/rooms/{roomCode}/movements/cancel
+
+SUBSCRIBE /topic/rooms/{roomCode}/presence
+SUBSCRIBE /topic/rooms/{roomCode}/creatures
+SUBSCRIBE /topic/rooms/{roomCode}/movements
+SUBSCRIBE /topic/rooms/{roomCode}/events
 ```
 
-Publish presence updates:
-
-```text
-/app/rooms/{roomId}/presence
-```
-
-Payload:
-
-```json
-{
-  "lat": 28.6,
-  "lon": 77.2,
-  "status": "IDLE"
-}
-```
-
-Subscribe to room presence:
-
-```text
-/topic/rooms/{roomId}/presence
-```
-
-Broadcast payload:
-
-```json
-[
-  {
-    "userId": "UUID",
-    "username": "harsh",
-    "displayName": "Harsh",
-    "lat": 28.6,
-    "lon": 77.2,
-    "status": "IDLE",
-    "lastSeenAt": "2026-06-13T12:00:00Z"
-  }
-]
-```
-
-Presence is stored in memory for local/demo use. After Phase A2 it supplies
-identity and socket liveness, while its coordinate is only a sparse legacy
-fallback for players that have no movement plan. Multiplayer route progression
-comes from authoritative movement plans; shared creatures and scoring retain
-their separate authoritative room services.
-
-### Authoritative Movement Commands
-
-Room members can start a backend-owned movement plan while the room game is
-running:
-
-```text
-/app/rooms/{roomCode}/movements/start
-```
+Movement start payload:
 
 ```json
 {
@@ -612,31 +485,12 @@ running:
 }
 ```
 
-`destinationLat` and `destinationLon` are required for `MAP`. For `CREATURE`,
-the browser omits them:
+For `CREATURE`, destination coordinates are omitted and
+`targetCreatureInstanceId` is required; the backend resolves the authoritative
+creature position. Source coordinate, route geometry, and player identity are
+not accepted as client authority.
 
-```json
-{
-  "requestedSpeedMps": 80,
-  "destinationType": "CREATURE",
-  "targetCreatureInstanceId": "UUID",
-  "clientCommandId": "UUID",
-  "expectedMovementVersion": 0
-}
-```
-
-`expectedMovementVersion` is optional; when supplied, a stale command is
-rejected. `playerId`, source coordinates, route geometry, and client-displayed
-creature coordinates are never accepted as authority. For `CREATURE`,
-`targetCreatureInstanceId` is required and the server resolves the active
-creature's authoritative coordinate. When player speed control is disabled, the
-server uses the room maximum speed.
-
-Cancel the current movement with its authoritative identity and version:
-
-```text
-/app/rooms/{roomCode}/movements/cancel
-```
+Movement cancel payload:
 
 ```json
 {
@@ -646,88 +500,34 @@ Cancel the current movement with its authoritative identity and version:
 }
 ```
 
-Stale cancellation commands are harmless no-ops. Movement events are published
-to:
+Movement events are `MOVEMENT_STARTED`, `MOVEMENT_CANCELLED`, and
+`MOVEMENT_COMPLETED`. They carry event UUID, room sequence, server timestamp,
+and a versioned movement plan with OSRM polyline6 geometry. The authenticated
+movement snapshot returns the latest plan per player plus current room sequence
+for reconnect/gap recovery.
 
-```text
-/topic/rooms/{roomCode}/movements
-```
+`GAME_ENDED` is published on the room events topic only after durable result
+persistence. Publication failures receive bounded in-memory retries using the
+same event envelope. This is not exactly-once or durable event delivery; REST
+and PostgreSQL are result recovery truth.
 
-Each `MOVEMENT_STARTED`, `MOVEMENT_CANCELLED`, or `MOVEMENT_COMPLETED` event
-uses this envelope:
+SOLO `TravelMode` is absent from multiplayer REST/STOMP contracts.
 
-```json
-{
-  "eventId": "UUID",
-  "roomCode": "A8F3KQ",
-  "roomSequence": 1,
-  "eventType": "MOVEMENT_STARTED",
-  "serverTimestamp": "2026-07-18T08:00:00Z",
-  "payload": {
-    "movementId": "UUID",
-    "roomCode": "A8F3KQ",
-    "playerId": "UUID",
-    "version": 1,
-    "encodedPolyline6": "encoded route geometry",
-    "totalDistanceMeters": 1200.5,
-    "simulationSpeedMps": 80,
-    "startedAt": "2026-07-18T08:00:00Z",
-    "expectedEndAt": "2026-07-18T08:00:15.006250Z",
-    "source": {"latitude": 28.6139, "longitude": 77.209},
-    "destination": {"latitude": 28.62, "longitude": 77.215},
-    "currentPosition": {"latitude": 28.6139, "longitude": 77.209},
-    "destinationType": "MAP",
-    "targetCreatureInstanceId": null,
-    "status": "MOVING",
-    "createdAt": "2026-07-18T08:00:00Z",
-    "updatedAt": "2026-07-18T08:00:00Z"
-  }
-}
-```
+## General Error Categories
 
-`roomSequence` increases for committed movement events, and `version` increases
-for each accepted plan belonging to a room/player pair. `encodedPolyline6`
-uses the encoded-polyline algorithm at six decimal places (1e-6 degree
-precision), and Java `Instant` values serialize as ISO-8601 UTC strings.
+Common statuses include:
 
-### Movement Reconnect Snapshot
+| HTTP | Meaning |
+|---:|---|
+| 400 | Validation, malformed JSON, unsupported travel mode, invalid UUID/limit, or known no-route condition |
+| 401 | Missing/invalid authentication |
+| 403 | Room/result operation forbidden |
+| 404 | Requested resource not found |
+| 405 | Unsupported HTTP method |
+| 409 | Invalid lifecycle state, catch conflict, or multiplayer state conflict |
+| 500 | Sanitized unexpected/persistence/history/result failure |
+| 502 | Routing provider unavailable, recognized invalid response, nearest failure, or other provider error |
+| 504 | Valhalla routing timeout |
 
-After subscribing, clients can recover the latest plan for every player from:
-
-```bash
-curl --fail \
-  --header "Authorization: Bearer $TOKEN" \
-  "$API_URL/api/multiplayer/rooms/A8F3KQ/movements"
-```
-
-The response contains the canonical `roomCode`, current `roomSequence`, an ISO
-`serverTimestamp`, and a `movements` array using the payload shape above. The
-frontend subscribes before fetching this snapshot on room-play entry and every
-WebSocket reconnect, and fetches it again after a detected sequence gap.
-
-## Error Responses
-
-Errors use a consistent shape:
-
-```json
-{
-  "errorCode": "VALIDATION_ERROR",
-  "message": "sourceLat must be between -90 and 90",
-  "path": "/api/routes",
-  "timestamp": "2026-06-13T12:00:00Z"
-}
-```
-
-Common statuses:
-
-- `400`: validation, malformed JSON, invalid UUID, or invalid limit
-- `401`: missing or invalid authentication token
-- `404`: session or creature not found
-- `405`: unsupported HTTP method
-- `409`: invalid session state
-- `502`: OSRM unavailable or invalid routing response
-- `500`: unexpected server error with no raw exception details
-
-Round-specific error codes include `ROUND_NOT_RUNNING`, `ROUND_FINALIZING`,
-`ROUND_ALREADY_ENDED`, `ROUND_NOT_FOUND`, `ROUND_RESULT_NOT_READY`,
-`ROUND_RESULT_FORBIDDEN`, and `STALE_ROUND_GENERATION`.
+Infrastructure errors are sanitized; provider bodies, SQL, tokens, and server
+internals are not public response contracts.

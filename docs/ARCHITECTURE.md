@@ -1,470 +1,447 @@
-# Architecture
+# Route Catch Game Architecture
 
-Route Catch Game is a four-process local system. React handles realtime game
-presentation, Spring Boot exposes the application API, OSRM supplies routing,
-and PostgreSQL stores durable game records.
+This document is the readable structural overview of the committed architecture
+at PR #18 (`d44655c`). The detailed engineering handoff is
+[`POKEMON_GAME_CONTEXT.md`](../POKEMON_GAME_CONTEXT.md); public request/response
+contracts are in [`API.md`](API.md); proposed work belongs only in
+[`ROADMAP.md`](ROADMAP.md). Committed source, configuration, migrations, and
+tests are the ultimate implementation truth.
 
-## System Diagram
+## Runtime Topology
 
 ```text
-Browser
-  |
-  v
-React + Vite + Leaflet
-  |
-  | JSON over HTTP + STOMP over WebSocket
-  v
-Spring Boot API
-  |                    |
-  | route / nearest    | JPA transactions
-  v                    v
-OSRM                  PostgreSQL
+Browser / React / Vite
+          |
+          | REST + WebSocket/STOMP
+          v
+     Spring Boot
+       /   |    \
+      /    |     \
+     v     v      v
+   OSRM  Valhalla PostgreSQL
 ```
 
-Local ports:
+Default local addresses:
 
 ```text
-Vite frontend     http://localhost:5173
-Spring Boot API   http://localhost:8080
-OSRM              http://localhost:5000
-PostgreSQL        localhost:5432
+Vite           http://localhost:5173
+Spring Boot    http://localhost:8080
+OSRM           http://localhost:5000
+Valhalla       http://localhost:8002
+PostgreSQL     localhost:5432
 ```
 
-For reproducible local setup, `docker-compose.yml` runs only PostgreSQL in the
-`route-catch-postgres` container. Frontend, backend, and OSRM remain native
-local processes.
+The browser calls Spring Boot rather than directly treating OSRM or Valhalla as
+application authority. PostgreSQL schema changes are Flyway-owned; Hibernate
+uses `ddl-auto=validate`.
 
-## Frontend
+Provider responsibilities are intentionally asymmetric:
 
-The frontend is a React application under `frontend/`.
+| Provider | Current responsibility |
+|---|---|
+| OSRM | SOLO `CAR` route and nearest; multiplayer movement routing; multiplayer creature road snapping |
+| Valhalla | SOLO `MOTORCYCLE` and `WALKING` route and nearest |
+| PostgreSQL | Users, SOLO sessions/catches/history, creature catalog, completed multiplayer rounds/participants/catch snapshots/history |
 
-- `components/` renders the Leaflet map, player, creature, and online-player
-  markers, routes, compact HUD, target and catch panels, round summary, auth
-  UI, multiplayer controls, and Stats drawer.
-- `hooks/` owns route animation, player state, target spawning, catch
-  detection, local sessions, backend session synchronization, progression, and
-  multiplayer presence.
-- `api/` calls Spring Boot for routes, nearest-road snapping, backend sessions,
-  catch submission, auth, current-user data, history, and leaderboard data.
-- `config/` centralizes API, game, map, routing, and progression values.
-- `data/` contains frontend creature presentation data and the mock profile.
-- `utils/` contains browser-generated sound and rarity styling helpers.
+## Authority Split
 
-Solo gameplay remains frontend-controlled, while multiplayer movement now
-uses backend-authoritative plans:
+SOLO and multiplayer are different game architectures.
 
-- The local round timer controls spawning.
-- Target spawning asks the backend for nearest-road and route data.
-- Route distance and simulation speed determine target difficulty.
-- The browser animates the player along returned route coordinates.
-- Catch detection updates local score, XP, inventory, and feedback immediately.
-- Catch submission to the backend is non-blocking; a sync failure does not
-  roll back the local catch.
-- Authenticated users can join a room and see other online users on the map.
-  Presence supplies identity and liveness, while Phase A2 sends movement
-  intent to Phase A1 and renders both local and remote plan timelines.
+| Concern | SOLO | Multiplayer |
+|---|---|---|
+| Movement | Frontend epoch-anchored route plan | Backend-created versioned movement plan |
+| Routing | Frontend requests provider-neutral backend API with immutable active mode | Backend uses OSRM through the multiplayer movement boundary |
+| Targets/creatures | Frontend lifecycle after mode-compatible validation | Backend-owned shared instances |
+| Catch | Immediate local transition plus stable-ID backend synchronization | Backend one-winner transition and score; distance currently uses submitted position |
+| Score | Frontend gameplay truth plus backend session synchronization | Backend authoritative |
+| Round timer | Frontend absolute timeline | Backend room round |
+| Active recovery | Transient IndexedDB checkpoint | Not implemented across backend restart |
+| Completed history | PostgreSQL session/catch history | PostgreSQL round/player/catch history |
 
-## Backend
+Do not make multiplayer client-authoritative because SOLO already has similar
+presentation code. Do not add SOLO `TravelMode` fields to multiplayer commands,
+events, plans, or persistence without a separate authority/concurrency design.
 
-The Spring Boot application is under `backend/route-catch-api/`.
+## Provider-Neutral SOLO Routing
 
-### Authentication APIs
-
-- `POST /api/auth/register` creates a user with BCrypt password hashing.
-- `POST /api/auth/login` validates credentials and returns a JWT.
-- `GET /api/auth/me` validates `Authorization: Bearer <token>` and returns the
-  current user.
-- JWT validation is handled by Spring Security for protected REST endpoints and
-  by the STOMP channel interceptor for WebSocket connections.
+The public routing boundary is:
 
 ```text
-register/login -> JWT -> /api/auth/me
+RoutingController / NearestController
+                |
+                v
+       TravelRoutingService
+                |
+                v
+       TravelRoutingProvider
+          /             \
+         v               v
+OsrmRoutingService   ValhallaRoutingService
+    CAR only         MOTORCYCLE / WALKING
 ```
 
-### Routing APIs
-
-- `POST /api/routes` validates coordinates and wraps OSRM's driving route API.
-- `POST /api/nearest` validates coordinates and wraps OSRM's nearest API.
-- OSRM `[lon, lat]` coordinates are returned as `{ "lat", "lon" }`.
-- Routing engine failures become consistent `502` JSON responses.
-
-### Game APIs
-
-- `GET /api/game/creatures` reads the backend-owned creature catalog.
-- Session endpoints create, start, retrieve, end, and list sessions.
-- Authenticated session creation stores `game_sessions.user_id` and uses the
-  user's display name. Guest sessions remain valid with `user_id = null`.
-- Catch submission accepts a creature ID and resolves name, rarity, and score
-  from the backend catalog.
-- Catch insertion and session score/count updates run in one transaction.
-- History endpoints return persisted sessions and their catch snapshots.
-- `GET /api/game/me/stats` and `GET /api/game/me/sessions` return
-  authenticated current-user data by `user_id`.
-- The leaderboard returns completed sessions only.
-
-### Multiplayer Presence
-
-- The STOMP endpoint is `/ws`.
-- Clients publish presence to `/app/rooms/{roomId}/presence`.
-- Clients subscribe to `/topic/rooms/{roomId}/presence`.
-- STOMP `CONNECT` requires `Authorization: Bearer <token>`.
-- The server associates each presence update with the authenticated user and
-  broadcasts the full room presence list after updates.
-- Disconnect cleanup removes the user's presence from tracked rooms and
-  broadcasts updated lists.
-
-Presence is intentionally in memory for local/demo use:
+`TravelMode` contains exactly:
 
 ```text
-roomId -> userId -> presence
-websocket sessionId -> userId + joined rooms
+CAR
+MOTORCYCLE
+WALKING
 ```
 
-It is not persisted and remains the temporary remote-marker fallback.
-
-### Authoritative Multiplayer Round Finalization
-
-Each room game start creates a UUID `roundId`, increments its room-local
-generation, records `startedAt`/`endsAt`, and freezes the participant roster
-from current room membership. The lifecycle is:
+There is no `BICYCLE`. Public strings are provider-neutral. The controller
+turns missing or JSON `null` into `CAR`; values are otherwise case-sensitive.
+The façade makes one deterministic selection:
 
 ```text
-WAITING/ENDED
-     |
-     | host start (new UUID + generation)
-     v
-  RUNNING
-     |
-     | host end / deadline / room close
-     v
- FINALIZING
-     |
-     | freeze + immutable snapshot + store
-     v
-   ENDED ----> room OPEN for a later generation
-      \
-       +-----> room CLOSED when reason is ROOM_CLOSED
+CAR          -> OsrmRoutingService
+MOTORCYCLE   -> ValhallaRoutingService (costing: motorcycle)
+WALKING      -> ValhallaRoutingService (costing: pedestrian)
 ```
 
-`RoomRoundCoordinator` supplies one lock per room, rather than one global
-service lock. Catch transition, score/history update, finalization, creature
-expiry/creation, and movement commit/freeze cross the same boundary. OSRM
-routing and road snapping remain outside it; movement captures round UUID and
-generation before routing and rechecks both when committing.
+There is no silent runtime fallback. If Valhalla fails for `WALKING`, the
+request fails; it is not rerouted as OSRM driving. Provider identity does not
+leak into frontend gameplay state or recovery checkpoints.
 
-`RoomRoundFinalizationService` is the single finalization path. Under the room
-boundary it rechecks expected identity, moves `RUNNING -> FINALIZING`, freezes
-active plans at their interpolated position, invalidates active creatures,
-stops the generation's spawn loop, and snapshots every start-time participant.
-Movement completion callbacks carry round identity and cannot complete a
-cancelled plan or a newer generation. Creature creation rechecks running
-generation at commit, so an OSRM call already in progress cannot add a creature
-after the freeze. Whichever coordinated catch/finalization operation enters
-first wins completely; a catch cannot be half reflected in score or history.
+### Valhalla Normalization
 
-Every successful catch creates an immutable `CaughtCreatureRecord` in the same
-critical section as `ACTIVE -> CAUGHT`, score award, and caught-event state.
-The record contains instance/catalog identity, name, rarity, awarded score,
-catch time, catcher, and round identity. Expired, failed, and losing concurrent
-catches create no record.
+`ValhallaRoutingService`:
 
-Final ranking is competition ranking: score descending determines numeric
-rank, ties share rank, and positions after ties are skipped. Catch count
-descending, case-insensitive display name, and player UUID provide stable
-display order without changing rank. The public result exposes only leaderboard
-totals. Per-participant personal results add rarity counts and that
-participant's caught-creature records.
+- sends `POST /route` with two locations, `kilometers`, and no directions;
+- sends `POST /locate` with one location, matching costing, and `verbose=true`;
+- decodes polyline6 geometry through the shared `Polyline6Decoder`;
+- concatenates multiple legs and removes only a duplicate join coordinate;
+- converts route summary length from kilometres to metres;
+- preserves normalized duration in seconds;
+- selects the closest usable locate edge;
+- extracts the first nonblank road name, or returns `null`;
+- validates route status, units, metrics, legs, shapes, coordinates, and locate
+  candidates; and
+- sanitizes provider failures into the public routing error contract.
 
-The immutable result is saved through `RoomRoundResultStore` before one
-sequenced `GAME_ENDED` envelope is published to
-`/topic/rooms/{roomCode}/events`. REST retrieval by round UUID and latest round
-is the recovery path for reconnects or missed WebSocket delivery. Authorization
-uses the frozen participant roster, not mutable current membership.
+Committed defaults are a 2-second connect timeout and 10-second read timeout.
+Historical local validation used Valhalla at `localhost:8002`. The repository
+does not start or prepare Valhalla.
 
-The in-memory store retains 100 completed rounds per room and survives room
-restart but not process restart. It is the explicit future PostgreSQL
-replacement boundary; no multiplayer-result tables or migrations exist.
+## SOLO Travel-Mode Lifecycle
 
-### Automatic Shared-Creature Population
-
-Multiplayer shared-creature spawning is backend-controlled. A room lifecycle
-event starts exactly one fixed-delay `RoomCreatureSpawnCoordinator` loop when a
-round enters `RUNNING`; `FINALIZING`, `ENDED`, and `CLOSED` events cancel it and clear the
-room's creature state. Every round start increments a generation token. Both
-scheduled work and the final authoritative creation check that token, so an
-old OSRM request cannot mutate or clear a restarted round.
+Two values have different meanings:
 
 ```text
-room RUNNING event
+selectedTravelMode   mutable setup choice / next-round preference
+activeTravelMode     immutable authority for active or reconciling round
+```
+
+Round launch and restart capture synchronously:
+
+```text
+selectedTravelMode
+        |
+        | beginRoundOperation / beginRestartOperation
+        v
+activeTravelMode + operation scope
         |
         v
-per-room generation-guarded coordinator
+checkpoint.round.travelMode
+```
+
+Selection is locked while synchronous launch ownership exists and in
+`STARTING` or `RUNNING`. It is editable in `RECONCILING`. The old round retains
+its active mode even when the next-round preference changes:
+
+```text
+checkpoint.round.phase       = RECONCILING
+checkpoint.round.travelMode  = WALKING
+activeTravelMode             = WALKING
+selectedTravelMode           = MOTORCYCLE   # valid next-round choice
+```
+
+Checkpoint builders preserve the previous round's mode when updating the same
+round. Identity, lifecycle, replay, route, spawn, operation, and writer
+generations prevent old callbacks from overwriting a newer round, including ABA
+identity/lifecycle sequences.
+
+All active SOLO work obtains its mode from a captured active-round operation:
+
+- confirmed map routes;
+- chase routes;
+- target nearest requests;
+- target validation routes;
+- later spawn cadence after catches;
+- recovered `ROUTING` continuation; and
+- new/restarted rounds after synchronous capture.
+
+The backend's missing-mode `CAR` default remains for compatibility, but active
+SOLO gameplay explicitly sends its active mode and does not rely on that
+default.
+
+### Simulation Speed Is Separate
+
+```text
+TravelMode                        routing semantics/provider selection
+simulationSpeedMetersPerSecond    game movement-speed authority
+provider duration                 informational route metric
+```
+
+The game intentionally supports accelerated simulation. Provider duration does
+not control frontend route progress, and an avatar or future presentation
+change must not silently switch routing mode.
+
+## Mode-Compatible SOLO Targets
+
+A spawn opportunity publishes a target only after this pipeline succeeds:
+
+```text
+random raw candidate
         |
-        +--> authoritative player positions
-        +--> fair anchor policy
-        +--> bounded geographic candidates
-        +--> backend OSRM /nearest snapping
+        | nearest(activeTravelMode)
+        v
+mode-compatible snapped candidate
+        |
+        | route(player -> candidate, same activeTravelMode)
+        v
+validate route structure, metrics, measured geometry, endpoint
         |
         v
-RoomCreatureService authoritative creation
-        |
-        +--> in-memory active instance
-        +--> existing CREATED event
-        +--> existing expiry/catch lifecycle
+publish target
 ```
 
-The configured target is:
+Current validation requires:
+
+- no raw-coordinate or snapped-only fallback;
+- the same captured mode for nearest and route;
+- at least two finite, valid route coordinates;
+- finite provider distance greater than zero;
+- finite measured geometry greater than `0.01 m`; and
+- the route's final geometry coordinate within `25 m` of the snapped target.
+
+The 25 m routing endpoint tolerance is independent of the gameplay catch
+radius. Each spawn opportunity tries at most three candidates. Exhaustion does
+not publish a degraded target; the ordinary later spawn cadence may try again.
+
+Only the current generation/in-flight operation may publish. Staleness is
+checked before and after both nearest and route calls, so an old result cannot
+publish into a newer round, identity, mode, pause/resume cycle, or spawn
+generation.
+
+## SOLO Recovery Architecture
+
+Current checkpoint schema:
 
 ```text
-clamp(baseActiveCount + activePlayerCount * perPlayerActiveCount,
-      0,
-      maxActiveCount)
+schemaVersion = 2
+round.travelMode = CAR | MOTORCYCLE | WALKING   # required
 ```
 
-Only `ACTIVE`, non-expired instances count, and a cycle creates no more than
-`maxSpawnsPerCycle`. Eligible room members are resolved from an interpolated
-active movement plan, then the stored authoritative stationary position, then
-finite/range-valid presence as a legacy fallback. The fair anchor policy counts
-active creatures within the spawn maximum radius and deterministically chooses
-the player with the fewest.
-
-Candidate bearings and distances stay within the configured minimum and maximum
-radii before snapping. OSRM `/nearest` supplies the authoritative routable
-coordinate. Failed or invalid snaps, candidates too close to the anchor,
-duplicates, and candidates inside the active-creature separation distance are
-retried only up to the configured attempt limit. OSRM calls occur outside room
-and creature mutation locks.
-
-The host-only manual spawn REST command remains available as a clearly labelled
-development/admin override. It uses the same catalog, active-count,
-separation, lifecycle, creation, and event path and never creates a scheduler.
-
-Coordinator state and shared creatures are in memory and safe for the current
-single-JVM deployment. The scheduler, authoritative-position resolver, road
-snapper, lifecycle event, and generation guard form the intended future
-distributed room-ownership boundary. Redis, RabbitMQ, and other broker/storage
-coordination are not implemented.
-
-### Multiplayer Movement Plans
-
-Phase A1 added the single-JVM authoritative movement foundation. Phase A2 now
-uses it for multiplayer rendering without changing solo routing:
+The IndexedDB database version remains 1 because the object-store structure did
+not change. A legacy record migrates only through this strict path:
 
 ```text
-authenticated STOMP movement intent
-          |
-          v
-room membership/game/speed/creature validation
-          |
-          v
-backend OSRM polyline6 route
-          |
-          v
-room/player movement plan + version
-          |
-          +--> scheduled guarded completion
-          +--> sequenced room movement events
-          +--> authenticated reconnect snapshot
+validate as genuine schema v1
+        -> clone/migrate in memory
+        -> schemaVersion = 2
+        -> round.travelMode = CAR
+        -> validate as schema v2
 ```
 
-- Start/cancel commands use `/app/rooms/{roomCode}/movements/...`; authenticated
-  principal identity is the only source of `playerId`.
-- `RoomMovementService` has an in-memory implementation behind replaceable
-  routing, event-publisher, event-sequencer, and completion-scheduler
-  abstractions.
-- The backend requests full polyline6 routes directly from OSRM. The public
-  GeoJSON route endpoint remains unchanged for solo and legacy browser play.
-- Source priority is the interpolated active plan, the stored terminal
-  authoritative position, a finite/range-valid presence position, then the
-  configured initial position.
-- Map intents include a client-selected destination. Creature intents include
-  only the creature instance ID; the backend resolves its room-scoped active
-  coordinate before and after routing.
-- Position is derived from server elapsed time and speed as an OSRM-distance
-  fraction, then applied to cumulative decoded-geometry length.
-- Replacements cancel the prior plan at the calculated route point and increase
-  the per-room/player version. Completion callbacks re-check movement ID,
-  version, current-plan identity, and status before changing state.
-- Movement events use UUID IDs, monotonically increasing per-room sequences,
-  ISO timestamps, and `MOVEMENT_STARTED`, `MOVEMENT_CANCELLED`, or
-  `MOVEMENT_COMPLETED` types on `/topic/rooms/{roomCode}/movements`.
-- `GET /api/multiplayer/rooms/{roomCode}/movements` returns the sequence and
-  latest plan per player for reconnect recovery.
+The store does not rewrite a v1 record merely by reading it. Bootstrap and any
+later replacement remain within identity/lifecycle/writer-generation guards.
 
-Movement state and event sequences are intentionally in memory for the current
-single-process deployment. The contracts isolate storage and publishing so a
-later Redis store or broker relay does not require a frontend event-shape
-change.
+Provider identity is not stored. `activeTravelMode` is restored from
+`round.travelMode`; `selectedTravelMode` is not persisted as separate gameplay
+truth, although hydration initializes the selector to the recovered mode for a
+consistent UI.
 
-The multiplayer frontend shares the existing authenticated STOMP connection
-for presence, creatures, and movements. Each connection generation subscribes
-once to the movement topic before fetching the snapshot. Events with duplicate
-IDs, old room sequences, or stale player versions are ignored; a sequence gap
-marks state stale and triggers snapshot reconciliation. Reconnects resubscribe
-and replace missed history with a snapshot rather than relying on broker replay.
-Concurrent snapshot requests are coalesced. Transient failures retry with an
-exponential delay capped at 10 seconds; visibility restoration and an
-unconfirmed-command timeout can force an immediate generation-guarded refresh.
+### Recovery State and Time
 
-Polyline6 geometry is decoded once per movement ID at 1e-6 degree precision.
-The renderer caches Leaflet `[latitude, longitude]` coordinates, cumulative
-haversine segment lengths, measured geometry length, and the backend route
-distance. Position uses:
+The checkpoint stores semantic round state:
+
+- identity, client round UUID, backend session UUID, phase, duration, absolute
+  start/end time, and expiry;
+- settled player position and simulation speed;
+- active travel mode;
+- `ROUTING`/`MOVING` intent, route geometry, and movement anchor;
+- targets, caught targets, score, XP, spawning state, and next absolute spawn
+  deadline; and
+- pending stable-ID catch synchronization evidence.
+
+It does not store provider identity, rendered frames, Leaflet/MapLibre camera
+pose, `FREE` mode, or animation state.
+
+Authentication resolution is a bootstrap barrier:
 
 ```text
-routeFraction = clamp(elapsedSeconds * speedMps / backendDistance, 0, 1)
-geometryDistance = routeFraction * measuredGeometryDistance
+AUTH_UNRESOLVED -> RECOVERY_LOADING -> RECOVERY_READY
 ```
 
-The first accepted snapshot/event clock sample sets
-`serverOffsetMs = serverTimestampMs - clientReceiveTimeMs`; later samples with
-strictly newer server timestamps use a bounded EWMA adjustment.
-Rendering time is
-`Date.now() + serverOffsetMs`. This removes dependence on frame history: after
-a hidden tab becomes visible, the next render calculates the current timeline
-position immediately. The estimate still includes unknown one-way network
-latency and is not a precision clock-synchronization protocol.
+Fresh movement, spawning, and catches stay blocked until READY. Checkpoints are
+scoped to authenticated user UUID or stable guest installation UUID.
 
-Presence now owns identity, display data, socket liveness, and a sparse legacy
-stationary-coordinate fallback. It publishes on connection and authoritative
-movement transitions, not on every animation frame. Movement plans own local
-and remote route progression. Players with no plan yet necessarily retain the
-presence coordinate fallback until the backend has a latest movement plan for
-them.
-
-Controllers remain thin and delegate to `OsrmRoutingService`,
-`CreatureCatalogService`, and `GameSessionService`. `GlobalExceptionHandler`
-maps validation, malformed JSON, unsupported methods, routing failures,
-missing records, invalid states, and unexpected errors to `ApiErrorResponse`.
-
-## PostgreSQL
-
-Flyway migrations create the database schema:
-
-### `creature_catalog`
-
-- `creature_id` primary key
-- name, rarity, score value
-- creation timestamp
-
-### `game_sessions`
-
-- UUID session ID
-- status: `CREATED`, `RUNNING`, or `ENDED`
-- created, started, and ended timestamps
-- round duration
-- accumulated score and caught count
-- player display name, defaulting to `Guest`
-- nullable `user_id` for authenticated sessions
-
-### `users`
-
-- UUID user ID
-- unique username
-- optional unique email
-- display name
-- BCrypt password hash
-- creation timestamp
-
-### `caught_creatures`
-
-- UUID catch ID
-- foreign keys to session and creature
-- snapshot of creature name, rarity, and score
-- caught timestamp
-
-- `V1__create_game_tables.sql` creates game tables.
-- `V2__seed_creature_catalog.sql` inserts the nine original creatures.
-- `V3__add_player_name_to_game_sessions.sql` adds display-name support.
-- `V4__create_users_and_link_sessions.sql` creates users and nullable session
-  user links.
-
-Hibernate uses schema validation; it does not create or update tables.
-
-## Session Lifecycle
+Movement and round time are reconstructed from wall-clock epochs:
 
 ```text
-POST sessions
-    |
-    v
- CREATED -- start --> RUNNING -- end/expiry --> ENDED
+distance(now) = clamp(
+    anchorDistance + elapsedSeconds * simulationSpeed,
+    0,
+    measuredRouteLength
+)
 ```
 
-- Starting an already running session is idempotent.
-- Starting an ended session returns `409 INVALID_GAME_SESSION_STATE`.
-- Ending an ended session returns the existing ended session.
-- Only running sessions accept catches.
-- Created sessions do not expire because they have no start time.
+Reload time therefore advances both movement and the round. Absolute target
+expiry and spawn cadence remain authoritative. Live and recovered catch
+processing use route-interval geometry, including terminal ordering and exact
+round/expiry cutoffs.
 
-### Stale Session Auto-Expiry
-
-A running session is stale after:
+### Checkpoint Phases and Retention
 
 ```text
-startedAt + durationSeconds
+STARTING       createdAt + 2 minutes
+RUNNING        endsAt + 15 minutes storage grace; resumable only before endsAt
+RECONCILING    endsAt + 15 minutes; never resumes gameplay
 ```
 
-When stale, it becomes `ENDED` and receives that calculated expiry instant as
-`endedAt`, not the later request time. Expiry checks run during session get,
-session listing, catch submission, end handling, and leaderboard queries.
-A catch submitted after expiry is rejected with `409` and is not persisted.
+The normal production launch currently writes its first checkpoint as
+`RUNNING` only after the backend session starts. The crash window after backend
+start but before that first durable checkpoint remains outside the guarantee.
 
-## History and Leaderboard
+Stable catch UUIDs make exact backend retries idempotent. Pending catches replay
+without re-awarding local score/XP. Replacement/deletion writers are serialized
+per identity and protected by tombstones, generations, native barriers, and
+single-flight submission ownership.
 
-The Stats drawer uses:
+## Renderer Separation
+
+Leaflet is the default SOLO renderer and the multiplayer renderer. MapLibre is
+enabled for SOLO with `VITE_SOLO_MAP_RENDERER=maplibre` and is not wired into
+multiplayer.
+
+Both SOLO renderers consume the same player, route, target, score, travel-mode,
+and recovery truth. MapLibre adds presentation-local camera states:
 
 ```text
-GET /api/game/sessions?limit=20
-GET /api/game/sessions/{sessionId}/catches
-GET /api/game/leaderboard?limit=10
-GET /api/game/me/stats
-GET /api/game/me/sessions?limit=20
+OVERVIEW -> FOLLOW -> FREE
+               ^        |
+               +--------+ Resume Follow
 ```
 
-- Session history is ordered by `createdAt` descending.
-- Catch history is ordered by `caughtAt` ascending.
-- Leaderboard entries include only ended sessions and are ordered by score
-  descending, caught count descending, ended time ascending, then creation time
-  descending.
-- History, leaderboard, and current-user stats refreshes are non-blocking and
-  do not interrupt play.
+Fresh MapLibre routes show a short overview prelude before follow. Recovered
+already-moving routes carry an ephemeral `RECOVERED_ACTIVE` start intent and
+enter `FOLLOW` directly. A recovered `ROUTING` intent requests a fresh route
+using `checkpoint.round.travelMode`.
 
-## Local Startup
+MapLibre camera pose and mode are not checkpointed. Source/test parity exists
+for travel modes, but PR #18 did not establish full browser live validation for
+all MapLibre mode flows. A known Leaflet presentation observation is that
+semantically correct recovered movement can reopen with broader framing than
+desired; that is camera polish, not state corruption.
 
-`scripts/run-all.sh` starts OSRM, waits for it, starts Spring Boot, waits for
-health, prepares `frontend/.env` and dependencies when needed, then starts
-Vite. PostgreSQL is intentionally not started by this script and must already
-be available. The recommended database command is:
+## Multiplayer Routing Isolation
 
-```bash
-docker compose up -d postgres
-```
+Multiplayer does not use `TravelRoutingService`, Valhalla, or SOLO
+`TravelMode`.
 
-Individual scripts are retained for separate logs:
+Authoritative multiplayer movement remains:
 
 ```text
-scripts/run-osrm.sh
-scripts/run-backend.sh
-scripts/run-frontend.sh
+authenticated STOMP intent
+        -> RoomMovementService / InMemoryRoomMovementService
+        -> MovementRouteClient
+        -> OsrmMovementRouteClient
+        -> OSRM driving polyline6
 ```
 
-## Security and Trust Boundaries
+`Polyline6Codec` delegates decoding to the shared `Polyline6Decoder`, then
+retains multiplayer interpolation/geometry responsibilities. This shared codec
+utility does not merge provider authority.
 
-- JWT authentication exists for current-user REST endpoints and WebSocket
-  room commands. Gameplay remains playable as a guest in solo mode.
-- Existing global history and leaderboard endpoints remain public.
-- CORS currently allows the local Vite origin.
-- The backend owns catalog score values and ignores legacy client score fields.
-- The browser still controls solo spawn timing, solo movement, and current
-  catch detection.
-- Multiplayer local and remote markers render backend movement plans. Presence
-  coordinates are only the fallback for an online player with no plan.
-- The current shared-creature catch endpoint still requires client coordinates;
-  Phase A2 supplies a position calculated on demand from the authoritative
-  movement timeline, but moving that derivation entirely into the backend is a
-  future hardening step.
-- Movement STOMP commands are fire-and-forget. The frontend confirms starts by
-  observing a higher authoritative movement version and falls back to a
-  snapshot after 15 seconds; Phase A1 does not provide command-correlated error
-  responses.
-- Broader anti-cheat and fully server-authoritative rounds are future work.
+Multiplayer creature road snapping remains explicit OSRM through
+`OsrmRoomCreatureRoadSnapper` and `OsrmRoutingService`. Boundary tests prohibit
+`TravelRoutingService`, Valhalla, and `TravelMode` dependencies in these paths.
+
+Movement plans carry movement UUID, per-player version, route geometry,
+distance, simulation speed, server timestamps, destination type, and status.
+Room event sequences, command IDs, expected movement versions, round UUIDs,
+room generation, state revisions, scheduled-completion guards, and client
+connection/subscription generations prevent stale work from replacing current
+state.
+
+## Multiplayer Realtime and Finalization
+
+STOMP uses `/ws`, authenticated `CONNECT`, `/app/rooms/{roomCode}/...` commands,
+and `/topic/rooms/{roomCode}/...` subscriptions. Presence supplies identity,
+liveness, and a fallback position; it is not continuous authoritative movement
+truth.
+
+The room lifecycle separates room status from game status:
+
+```text
+game: WAITING -> RUNNING -> FINALIZING -> ENDED
+room: OPEN / IN_PROGRESS / CLOSED
+```
+
+At finalization the single room coordinator freezes movement and creatures,
+stops the spawn generation, snapshots the frozen start-time participant roster,
+calculates deterministic competition ranking, constructs one immutable result,
+persists it, and only then exposes `ENDED` and attempts `GAME_ENDED`.
+
+Persistence and WebSocket publication are separate:
+
+```text
+PostgreSQL commit  -> durable result truth
+GAME_ENDED         -> timely notification with bounded in-memory retry
+REST               -> reconnect/restart recovery
+```
+
+## Active State vs Completed History
+
+This distinction is fundamental:
+
+| State | Current storage/authority |
+|---|---|
+| Rooms, presence, active movement, sequences, active creatures, spawn loops, running/finalizing coordination | In-memory, single Spring Boot JVM |
+| Completed round metadata | PostgreSQL `game_rounds` |
+| Participant rank/score/rarity totals | PostgreSQL `game_round_players` |
+| Immutable participant catch snapshots | PostgreSQL `game_round_player_catches` |
+
+V5 added the three completed-result tables. Exact and latest result reads plus
+`GET /api/multiplayer/me/rounds` survive process restart and authorize against
+persisted participation. Completed-history durability does not reconstruct an
+active or `FINALIZING` round.
+
+## Critical Invariants
+
+- Provider choice is deterministic and has no silent fallback.
+- An active SOLO round has one immutable travel mode.
+- Reconciliation-time next-round selection cannot rewrite old checkpoint truth.
+- Travel mode and simulation speed remain independent.
+- Target nearest and validation route use the same captured active mode.
+- SOLO recovery remains identity-, lifecycle-, generation-, replay-, and
+  writer-scoped.
+- Wall-clock movement/time and stable catch IDs remain authoritative across
+  refresh.
+- Renderer presentation never becomes gameplay or routing authority.
+- Multiplayer identity, routes, shared catches, scoring, and round lifecycle
+  remain backend-owned.
+- Multiplayer movement versions, room sequences, round UUID/generation, and
+  scheduled-callback guards must not be weakened.
+- Persistence precedes durable round completion; publication retry is
+  notification-only.
+- Historical result authorization uses persisted round participation, not
+  mutable room membership or display name.
+
+## Current Limitations
+
+- Valhalla startup, data preparation, readiness checking, and deployment are
+  not repository-managed.
+- OSRM scripts contain machine-specific paths.
+- `/api/health` does not probe routing providers.
+- Active multiplayer state and `FINALIZING` recovery remain single-JVM and
+  non-durable.
+- Multiplayer catch distance trusts client-submitted coordinates.
+- Presence updates are authenticated but the handler does not independently
+  enforce room membership.
+- `GAME_ENDED` retry/dedup state is in memory; no durable outbox exists.
+- SOLO checkpoints are transient/TTL-bound, not historical storage.
+- MapLibre is SOLO-only, opt-in, and has no full browser E2E suite.
+- The repository has no full browser E2E suite or complete hosted deployment.
+
+Future work is intentionally isolated in [`ROADMAP.md`](ROADMAP.md).
